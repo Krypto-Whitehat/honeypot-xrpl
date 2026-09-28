@@ -267,7 +267,9 @@ app.get("/api/check/:address", async (req, res) => {
     res.json(result);
   } catch (err) {
     const msg = String(err?.data?.error ?? err?.message ?? err);
-    if (/act_no_account|not found/i.test(msg)) {
+    // actMalformed/actInvalid: ungültige Checksumme; act_no_account: Konto
+    // existiert nicht. Beides ist ehrlich "unknown", kein Serverfehler.
+    if (/act_no_account|actnotfound|not found|actmalformed|actinvalid/i.test(msg)) {
       return res.json({
         address: addr,
         network: config.network,
@@ -276,7 +278,7 @@ app.get("/api/check/:address", async (req, res) => {
         selfListed: false,
         verdict: "unknown",
         contacts: [],
-        hint: "Konto existiert nicht auf dem konfigurierten Netzwerk.",
+        hint: "Adresse ist ungültig oder das Konto existiert nicht auf dem konfigurierten Netzwerk.",
       });
     }
     res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${msg}` });

@@ -1,0 +1,13 @@
+# Sicherheitsgrenze für Vercel-Uploads — niemals Köder-Material auf den Server.
+bait.json
+bait-history.json
+seeds/
+*.seed
+data/
+logs/
+monitor.log
+.env
+.env.local
+.env.*
+server/
+monitor/
