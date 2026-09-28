@@ -1,0 +1,21 @@
+# Secrets — dürfen NIEMALS in den Repo (Köder-Seeds!)
+bait.json
+bait-history.json
+seeds/
+*.seed
+
+# Laufzeit-Zustand
+data/
+logs/
+monitor.log
+
+# Umgebungsvariablen (Vercel-Keys etc.)
+.env
+.env.local
+.env.*
+
+# Tooling
+node_modules/
+.vercel/
+.DS_Store
+Thumbs.db

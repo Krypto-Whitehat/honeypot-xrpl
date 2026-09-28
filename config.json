@@ -1,0 +1,7 @@
+{
+  "network": "mainnet",
+  "wss": "wss://xrplcluster.com",
+  "port": 3000,
+  "faucet_addresses": [],
+  "operator_addresses": []
+}

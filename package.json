@@ -1,0 +1,19 @@
+{
+  "name": "honeypot-xrpl",
+  "version": "1.0.0",
+  "description": "Honeypot XRPL — öffentliches Echtzeit-Bedrohungs-Dashboard für die XRPL-Community",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "monitor": "node monitor/monitor.mjs",
+    "provision": "node monitor/provision-bait.mjs",
+    "simulate": "node monitor/simulate-attack.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "xrpl": "^4.0.0"
+  }
+}

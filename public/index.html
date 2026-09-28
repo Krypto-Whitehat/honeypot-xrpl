@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Honeypot XRPL – Echtzeit-Bedrohungs-Dashboard</title>
+  <meta name="description" content="Echtzeit-Bedrohungs-Dashboard der XRPL-Honeypot-Infrastruktur: maliziöse Adressen, Aktivitäts-Graph und Transaktions-Evidenz.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-a6>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Honeypot&nbsp;XRPL</h1>
+      <p class="sub">Echtzeit-Bedrohungs-Dashboard für die XRPL-Community</p>
+    </div>
+
+    <div class="stats" id="stats" aria-label="Live-Statistiken">
+      <div class="stat stat-malicious">
+        <span class="stat-value" id="stat-malicious">–</span>
+        <span class="stat-label">Maliziöse Adressen</span>
+      </div>
+      <div class="stat stat-suspect">
+        <span class="stat-value" id="stat-suspect">–</span>
+        <span class="stat-label">Verdächtig</span>
+      </div>
+      <div class="stat stat-events">
+        <span class="stat-value" id="stat-events">–</span>
+        <span class="stat-label">Events</span>
+      </div>
+      <div class="stat stat-network">
+        <span class="stat-value" id="stat-network">–</span>
+        <span class="stat-label">Netzwerk</span>
+      </div>
+      <div class="stat stat-last">
+        <span class="stat-value stat-value-small" id="stat-last">–</span>
+        <span class="stat-label">Letztes Event</span>
+      </div>
+    </div>
+
+    <div class="conn" id="conn" role="status">
+      <span class="conn-dot" id="conn-dot"></span>
+      <span id="conn-text">Verbindung wird aufgebaut …</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel" aria-labelledby="graph-title">
+      <div class="panel-head">
+        <h2 id="graph-title">Aktivitäts-Graph</h2>
+        <div class="legend" aria-label="Legende">
+          <span class="legend-item"><span class="swatch swatch-attacker"></span>Angreifer</span>
+          <span class="legend-item"><span class="swatch swatch-honeypot"></span>Köder</span>
+          <span class="legend-item"><span class="swatch swatch-payment"></span>Payment</span>
+          <span class="legend-item"><span class="swatch swatch-trustset"></span>TrustSet</span>
+          <span class="legend-item"><span class="swatch swatch-offer"></span>Offer</span>
+          <span class="legend-item"><span class="swatch swatch-other"></span>Sonstige</span>
+        </div>
+      </div>
+      <div id="graph" aria-label="Netzwerkgraph der erkannten Aktivitäten"></div>
+      <p class="graph-note">Köder-Konten werden ausschließlich als Label angezeigt – ihre Adressen erscheinen nie im Dashboard.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="threats-title">
+      <div class="panel-head">
+        <h2 id="threats-title">Maliziöse Adressen</h2>
+        <input type="search" id="threat-search" class="search-input" placeholder="Adresse oder Grund durchsuchen …" aria-label="Maliziöse Adressen durchsuchen">
+        <span class="hint">Zeile anklicken für Transaktions-Evidenz</span>
+      </div>
+      <div class="table-wrap">
+        <table id="threat-table">
+          <thead>
+            <tr>
+              <th scope="col">Adresse</th>
+              <th scope="col">Grund</th>
+              <th scope="col">Zuerst gesehen</th>
+              <th scope="col">Events</th>
+              <th scope="col" class="col-toggle"></th>
+            </tr>
+          </thead>
+          <tbody id="threat-body"></tbody>
+        </table>
+        <p class="empty" id="threats-empty" hidden>Derzeit keine maliziösen Adressen erfasst.</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="check-title">
+      <div class="panel-head">
+        <h2 id="check-title">Selbst-Check für Community-Mitglieder</h2>
+        <span class="hint">Die eingegebene Adresse wird nicht gespeichert</span>
+      </div>
+      <form id="check-form" class="check-form">
+        <input type="text" id="check-address" class="check-input" placeholder="Eigene XRPL-Adresse (r…)" aria-label="Eigene XRPL-Adresse" autocomplete="off" spellcheck="false">
+        <button type="submit" id="check-btn" class="check-btn">Prüfen</button>
+      </form>
+      <div id="check-result" class="check-result" role="status" hidden></div>
+      <p class="graph-note">Der Check vergleicht die Transaktionshistorie der Adresse (Zahlungen, Trustlines, DEX-Orders, Escrow/Check/Payment-Kanäle) mit der Bedrohungsliste dieses Dashboards. Er findet Kontakte zu bereits erkannten Adressen — die Aussagekraft wächst mit der Bedrohungs-Datenbank.</p>
+    </section>
+  </main>
+
+  <footer class="footbar">
+    <span id="last-update">Stand: –</span>
+    <span class="foot-note">Anonymität der Köder: Seeds und Köder-Adressen werden vom Server nie ausgeliefert und vom Client nie gerendert.</span>
+  </footer>
+
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
