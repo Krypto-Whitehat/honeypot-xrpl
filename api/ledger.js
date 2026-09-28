@@ -61,7 +61,7 @@ async function rpc(method, params, tries = 3) {
     });
     if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
     const data = await res.json();
-    if (data?.result?.error === "slowDown") {
+    if (data?.result?.error === "slowDown" || data?.result?.error === "tooBusy") {
       await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
       continue;
     }
