@@ -1,17 +1,55 @@
 'use strict';
 
-/* Honeypot XRPL – Frontend
- * Pollt die Server-API alle 5 Sekunden und rendert:
- *   - Kopfzeilen-Stats   (GET /api/stats)
- *   - Echtzeit-Graph     (GET /api/graph, vis-network via CDN)
- *   - Threat-Tabelle     (GET /api/threats, aufklappbare Evidenz)
+/* Honeypot XRPL – Frontend (ESM-Modul)
+ *
+ * Hauptansicht: LIVE-BLOCK-FEED.
+ *   - WebSocket auf wss://xrplcluster.com, Abo "ledger" mit transactions:true.
+ *     Real gemessen (chrome-devtools, 2026-09-28): xrplcluster antwortet auf
+ *     dieses Abo mit "ledgerClosed"-Events (ledger_index, ledger_time,
+ *     txn_count, ledger_hash) OHNE transactions-Feld — die Spec-Annahme
+ *     "Hash-Strings im Event" gilt für diesen Endpunkt nicht.
+ *   - Deshalb: pro ledgerClosed wird derselbe WebSocket für EIN "ledger"-
+ *     Kommando mit expand:true genutzt (verifiziert: liefert volle
+ *     Tx-Objekte in result.ledger.transactions; Meta-Feld heißt dort
+ *     "metaData" und wird zu {tx_json, meta} normalisiert, damit
+ *     analyzeLedger es sieht). Falls ein Server trotzdem Hash-Strings
+ *     liefert, greift die "tx"-Einzelauflösung (MAX_RESOLVE/PARALLEL).
+ *     Unvollständig aufgelöste Ledger werden auf der Karte als "teilweise"
+ *     gekennzeichnet, nie als stiller Totalausfall.
+ *   - Analyse jedes Blocks mit analyzeLedger aus lib/detector.mjs —
+ *     dieselbe Engine wie serverseitig (single source of truth).
+ *   - Fallback: bleibt der WSS ohne Ledger-Events (in der Vercel-Sandbox
+ *     nie beobachtbar), pollt der Client alle WATCHDOG_MS den verifizierten
+ *     Serverpfad GET /api/ledger (JSON-RPC-Snapshot, serverseitig analysiert
+ *     und sanitisiert).
+ *   - Analyse-Log aller Regel-Treffer: filterbar nach Schweregrad und Regel
+ *     (Regelkatalog aus ruleCatalog()), downloadbar als JSON per Blob.
+ *
+ * Daneben bleibt die Honeypot-Präzisionsschicht: Stats/Graph/Threats-Polling
+ * (GET /api/stats, /api/graph, /api/threats) und der Selbst-Check
+ * (GET /api/check/[address]).
  *
  * Anonymitätsregel: Köder (Honeypots) werden NUR als Label dargestellt.
- * Sieht ein Knoten-Label trotzdem wie eine XRPL-Adresse aus, wird es
- * defensiv durch "Köder" ersetzt – Adressen von Ködern landen nie im DOM.
+ * Sieht ein Label trotzdem wie eine XRPL-Adresse aus, wird es defensiv durch
+ * "Köder" ersetzt – Adressen von Ködern landen nie im DOM. Fund-Adressen im
+ * Live-Log sind ausschließlich öffentlich im Ledger sichtbare Akteure.
  */
 
-const POLL_MS = 5000;
+import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
+
+const POLL_MS = 5000;              // Honeypot-API-Polling (stats/graph/threats)
+const WSS_URL = 'wss://xrplcluster.com';
+const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
+const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
+const QUOTA_CALLS_PER_MIN = 14;    // sliding window: max. ledger-Kommandos/60 s
+const PARALLEL = 6;                // max. parallele "tx"-Calls über den WSS
+const TX_TIMEOUT_MS = 8000;        // Einzel-Timeout pro tx-Call
+const FEED_CARDS = 12;             // Block-Karten im Feed
+const LOG_MAX = 400;               // Log-Einträge im Speicher
+const LOG_RENDER_MAX = 200;        // gerenderte Log-Zeilen
+const STALL_MS = 12000;            // ohne frischen Ledger -> Snapshot-Fallback
+const WATCHDOG_MS = 5000;          // Fallback-Prüfintervall
+const FIRST_SEEN_MAX = 20000;      // Frische-Fenster: Konten-Obergrenze
 
 /* ------------------------------------------------------------------ */
 /* Hilfsfunktionen                                                     */
@@ -54,8 +92,28 @@ function fmtClock(value) {
   return d.toLocaleTimeString('de-DE');
 }
 
+// XRPL close_time (Sekunden seit 2000-01-01) -> ISO.
+function xrplIso(closeTime, closeTimeIso) {
+  if (closeTimeIso) return closeTimeIso;
+  if (typeof closeTime === 'number') {
+    return new Date((closeTime + 946684800) * 1000).toISOString();
+  }
+  return null;
+}
+
+function shortAddr(a) {
+  const s = String(a ?? '');
+  return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s;
+}
+
+async function fetchJson(path) {
+  const res = await fetch(path, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 /* ------------------------------------------------------------------ */
-/* Kopfzeilen-Stats                                                    */
+/* Kopfzeilen-Stats (Honeypot-Schicht)                                 */
 /* ------------------------------------------------------------------ */
 
 function renderStats(stats) {
@@ -68,14 +126,6 @@ function renderStats(stats) {
   document.getElementById('stat-network').textContent =
     String(stats.network ?? '–');
   document.getElementById('stat-last').textContent = fmtClock(stats.lastEventTime);
-}
-
-function setConnection(ok, detail) {
-  const dot = document.getElementById('conn-dot');
-  const text = document.getElementById('conn-text');
-  dot.classList.toggle('ok', ok);
-  dot.classList.toggle('err', !ok);
-  text.textContent = ok ? 'Live – verbunden' : ('API nicht erreichbar' + (detail ? ` (${detail})` : ''));
 }
 
 /* ------------------------------------------------------------------ */
@@ -157,9 +207,8 @@ function renderGraph(graph) {
     return {
       id: String(n.id),
       label,
-      // Titel-Tooltip NUR mit Labels: Honeypot-Knoten zeigen ihr Label,
-      // Angreifer-Knoten ihre (öffentliche) Adresse als Label. Niemals rohe
-      // Node-Ids mit Köder-Anteilen (MEDIUM-5-Fix).
+      // Titel-Tooltip NUR mit Labels (MEDIUM-5-Fix): Honeypot-Knoten zeigen
+      // ihr Label, Angreifer-Knoten ihre (öffentliche) Adresse.
       title: label,
       shape: isHoneypot ? 'hexagon' : 'dot',
       size: isHoneypot ? 14 : 18,
@@ -177,8 +226,7 @@ function renderGraph(graph) {
       from: String(e.from),
       to: String(e.to),
       label: type,
-      // Kanten-Tooltip nur mit Labels (MEDIUM-5-Fix): Honeypot-Enden zeigen
-      // "Köder #n", Angreifer-Enden die öffentliche Adresse.
+      // Kanten-Tooltip nur mit Labels (MEDIUM-5-Fix).
       title: `${defang(labelById.get(String(e.from)) ?? e.from)} → ${defang(labelById.get(String(e.to)) ?? e.to)} (${type})`,
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
       font: { color: '#484850', size: 11, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
@@ -204,6 +252,10 @@ function renderGraph(graph) {
 
 const expandedAddresses = new Set(); // überlebt Neu-Renderings
 let lastThreats = []; // letzte API-Liste für die clientseitige Suche
+
+// knownBad für die Live-Engine: ausschließlich aus der API-Schiene
+// (Honeypot-Evidenz + Kuratierung) — niemals als Literal im Code.
+const knownBad = new Set();
 
 function evidenceRows(evidence) {
   // Öffentliche Evidenz enthält keinen txHash mehr, nur ref/type/time/honeypot.
@@ -232,6 +284,11 @@ function fundingRows(funding) {
 
 function renderThreats(threats) {
   lastThreats = Array.isArray(threats) ? threats : [];
+  knownBad.clear();
+  for (const t of lastThreats) {
+    const a = String(t.address ?? '');
+    if (XRPL_ADDR_RE.test(a)) knownBad.add(a);
+  }
   applyThreatFilter();
 }
 
@@ -401,14 +458,450 @@ function bindSelfCheck() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Polling                                                             */
+/* LIVE-BLOCK-FEED: WebSocket-Engine + Snapshot-Fallback              */
 /* ------------------------------------------------------------------ */
 
-async function fetchJson(path) {
-  const res = await fetch(path, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+const RULE_CATALOG = ruleCatalog();
+const RULE_NAME = new Map(RULE_CATALOG.map((r) => [r.id, r.name]));
+
+const liveStats = { ledgers: 0, txs: 0, malicious: 0, suspect: 0, info: 0 };
+const logEntries = [];              // {t, ledgerIndex, ruleId, severity, address, note}
+const firstSeenAt = new Map();      // Konto -> Zeitstempel der ersten Sichtung (Stream-Fenster)
+const seenLedgers = new Set();      // Deduplizierung WSS/Fallback
+const liveFindings = { malicious: 0, suspect: 0, info: 0 };
+
+let lastLedgerAt = 0;
+let liveMode = 'init';              // 'init' | 'wss' | 'poll'
+// xrplcluster drosselt JSON-Kommandos per IP-Quota (live beobachtet:
+// "rate limit: units quota (10000 per 60s)"). Bei tooBusy pausiert die
+// Block-Analyse sichtbar statt Karten still leer zu lassen.
+let quotaCooldownUntil = 0;
+const quotaWindow = [];            // Zeitstempel der ledger-Kommandos (60-s-Fenster)
+
+function quotaBudgetOk() {
+  const cutoff = Date.now() - 60000;
+  while (quotaWindow.length && quotaWindow[0] < cutoff) quotaWindow.shift();
+  return quotaWindow.length < QUOTA_CALLS_PER_MIN;
 }
+
+let ws = null;
+let wsBackoff = 2000;
+let wsAttemptTimer = null;
+let reqId = 1000;
+const pendingTx = new Map();        // id -> resolve-Funktion
+
+function setConn(ok, text) {
+  const dot = document.getElementById('conn-dot');
+  const el = document.getElementById('conn-text');
+  dot.classList.toggle('ok', ok);
+  dot.classList.toggle('err', !ok);
+  el.textContent = text;
+}
+
+function connLabel() {
+  if (liveMode === 'wss') return 'Live – WSS verbunden';
+  if (liveMode === 'poll') return 'Live – Snapshot-Fallback (WSS ohne Events)';
+  return 'Live-Verbindung wird aufgebaut …';
+}
+
+function buildCtx() {
+  return {
+    knownBad,
+    firstSeenAt,
+    threats: new Map(),
+    // benignIssuers/benignAccounts: die Engine bringt ihre dokumentierten
+    // Gateway-Defaults mit; hier wird nichts ergänzt (keine Literale im Frontend).
+  };
+}
+
+/* ---------- Frische-Fenster (ctx.firstSeenAt) ---------- */
+function recordFirstSeen(entries) {
+  const now = Date.now();
+  for (const entry of entries) {
+    const t = entry.tx_json || entry.tx || entry;
+    if (!t || typeof t !== 'object') continue;
+    const actors = [t.Account, t.Destination, t.LimitAmount?.issuer, t.Issuer, t.Owner];
+    for (const a of actors) {
+      if (typeof a === 'string' && !firstSeenAt.has(a)) {
+        if (firstSeenAt.size >= FIRST_SEEN_MAX) continue; // Speicher-Obergrenze
+        firstSeenAt.set(a, now);
+      }
+    }
+  }
+}
+
+/* ---------- Block-Karten ---------- */
+function addBlockCard(ledgerIndex, closeIso, txCount, state) {
+  const li = document.createElement('li');
+  li.className = 'block-card';
+  li.innerHTML = `
+    <div class="block-head">
+      <span class="block-height">#${esc(ledgerIndex)}</span>
+      <span class="block-time">${esc(fmtClock(closeIso))}</span>
+      <span class="block-txs">${Number(txCount).toLocaleString('de-DE')} Txs</span>
+    </div>
+    <div class="block-badges"><span class="badge badge-analyzing">Analysiere …</span></div>`;
+  const feed = document.getElementById('block-feed');
+  feed.prepend(li);
+  while (feed.children.length > FEED_CARDS) feed.lastElementChild.remove();
+  document.getElementById('feed-empty').hidden = true;
+  return li;
+}
+
+function severityBadgeHtml(counts) {
+  const parts = [];
+  if (counts.malicious) parts.push(`<span class="badge badge-malicious">${counts.malicious} × Maliziös</span>`);
+  if (counts.suspect) parts.push(`<span class="badge badge-suspect">${counts.suspect} × Verdächtig</span>`);
+  if (counts.info) parts.push(`<span class="badge badge-info">${counts.info} × Info</span>`);
+  return parts.join('');
+}
+
+function finishBlockCard(card, findings, ledgerTxCount, resolvedCount) {
+  const counts = { malicious: 0, suspect: 0, info: 0 };
+  for (const f of findings) {
+    if (counts[f.severity] != null) counts[f.severity] += 1;
+  }
+  const badges = [];
+  const sevHtml = severityBadgeHtml(counts);
+  if (sevHtml) badges.push(sevHtml);
+  else badges.push('<span class="badge badge-clean">keine Funde</span>');
+  if (counts.malicious) card.classList.add('has-malicious');
+  else if (counts.suspect) card.classList.add('has-suspect');
+  if (resolvedCount < ledgerTxCount) {
+    badges.push(`<span class="badge badge-partial">${resolvedCount}/${ledgerTxCount} Txs aufgelöst</span>`);
+  }
+  card.querySelector('.block-badges').innerHTML = badges.join('');
+}
+
+/* ---------- Adresse im Live-Log ----------
+ * Voller Akteur wird nur gezeigt, wenn die Adresse bereits öffentlich ist
+ * (knownBad-Schiene /api/threats). Sonst Kurzform — identische Anonymitäts-
+ * Logik wie die Kurzformen in den Engine-Notizen (lib/detector.mjs shortAddr):
+ * volle Köder-Adressen landen nie im DOM, Angreifer-Kanten bleiben lesbar. */
+function displayFindingAddr(address) {
+  const a = String(address ?? '');
+  if (!a) return '–';
+  if (knownBad.has(a)) return a;
+  return shortAddr(a);
+}
+
+/* ---------- Analyse-Log ---------- */
+function registerFindings(findings, ledgerIndex) {
+  const list = Array.isArray(findings) ? findings : [];
+  for (const f of list) {
+    logEntries.push({
+      t: Date.now(),
+      ledgerIndex,
+      ruleId: String(f.ruleId ?? '–'),
+      severity: String(f.severity ?? 'info'),
+      address: String(f.address ?? ''),
+      note: String(f.note ?? ''),
+    });
+    if (liveFindings[f.severity] != null) liveFindings[f.severity] += 1;
+  }
+  while (logEntries.length > LOG_MAX) logEntries.shift();
+  renderLog();
+}
+
+function renderLog() {
+  const box = document.getElementById('analysis-log');
+  const empty = document.getElementById('log-empty');
+  const sev = document.getElementById('log-severity').value;
+  const rule = document.getElementById('log-rule').value;
+  const list = logEntries
+    .filter((e) => sev === 'all' || e.severity === sev)
+    .filter((e) => rule === 'all' || e.ruleId === rule);
+
+  if (!list.length) {
+    box.innerHTML = '';
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  const rows = list.slice(-LOG_RENDER_MAX).reverse().map((e) => `
+    <div class="log-row sev-${esc(e.severity)}">
+      <span class="log-time">${esc(fmtClock(e.t))}</span>
+      <span class="log-sev sev-text-${esc(e.severity)}">${esc(e.severity === 'malicious' ? 'maliziös' : e.severity === 'suspect' ? 'verdächtig' : 'info')}</span>
+      <span class="log-rule">${esc(RULE_NAME.get(e.ruleId) ?? e.ruleId)}</span>
+      <span class="log-addr">${esc(displayFindingAddr(e.address))}</span>
+      <span class="log-note">${esc(e.note)}</span>
+      <span class="log-ledger">#${esc(e.ledgerIndex)}</span>
+    </div>`).join('');
+  box.innerHTML = rows;
+}
+
+function buildRuleFilter() {
+  const sel = document.getElementById('log-rule');
+  sel.innerHTML = '<option value="all">Alle Regeln</option>' + RULE_CATALOG
+    .map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`)
+    .join('');
+}
+
+function downloadLog() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    source: 'Honeypot XRPL – Live-Ledger-Analyse-Log',
+    network: document.getElementById('stat-network').textContent,
+    note: 'Adressen in Kurzform, außer sie stehen bereits auf der öffentlichen Bedrohungsliste (knownBad). Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
+    count: logEntries.length,
+    entries: logEntries.map((e) => ({
+      time: new Date(e.t).toISOString(),
+      ledgerIndex: e.ledgerIndex,
+      ruleId: e.ruleId,
+      severity: e.severity,
+      address: displayFindingAddr(e.address),
+      note: e.note,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `honeypot-xrpl-analyse-log-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function updateLiveStats() {
+  document.getElementById('live-ledgers').textContent = liveStats.ledgers.toLocaleString('de-DE');
+  document.getElementById('live-txs').textContent = liveStats.txs.toLocaleString('de-DE');
+  document.getElementById('live-f-malicious').textContent = liveFindings.malicious.toLocaleString('de-DE');
+  document.getElementById('live-f-suspect').textContent = liveFindings.suspect.toLocaleString('de-DE');
+  document.getElementById('live-f-info').textContent = liveFindings.info.toLocaleString('de-DE');
+  document.getElementById('last-update').textContent =
+    'Stand: ' + new Date().toLocaleTimeString('de-DE');
+}
+
+/* ---------- Volles Ledger pro Block über denselben WebSocket ---------- */
+// expand:true ist live verifiziert: result.ledger.transactions enthält volle
+// Tx-Objekte (flache Felder + "metaData"). Normalisierung zu {tx_json, meta}
+// (lib/detector.mjs liest meta; lib/ wird nicht angetastet).
+function normalizeLedgerTxEntry(e) {
+  if (!e || typeof e !== 'object') return null;
+  if (e.tx_json || e.tx) return e;
+  if (e.TransactionType) {
+    const { metaData, meta, ...txFields } = e;
+    return { tx_json: txFields, meta: meta ?? metaData ?? null };
+  }
+  return null;
+}
+
+function wsLedgerCommand(ledgerIndex) {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== 1) { resolve(null); return; }
+    const id = ++reqId;
+    const settle = (result) => resolve(result);
+    pendingTx.set(id, settle);
+    const timer = setTimeout(() => {
+      if (pendingTx.get(id) === settle) { pendingTx.delete(id); resolve(null); }
+    }, LEDGER_TIMEOUT_MS);
+    try {
+      ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true, expand: true }));
+    } catch {
+      pendingTx.delete(id);
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
+/* ---------- Hash-Auflösung über denselben WebSocket (Fallback) ---------- */
+function wsTxCommand(hash) {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== 1) { resolve(null); return; }
+    const id = ++reqId;
+    pendingTx.set(id, resolve);
+    const timer = setTimeout(() => {
+      if (pendingTx.has(id)) { pendingTx.delete(id); resolve(null); }
+    }, TX_TIMEOUT_MS);
+    pendingTx.set(id, (result) => { clearTimeout(timer); resolve(result); });
+    try {
+      ws.send(JSON.stringify({ command: 'tx', id, transaction: hash }));
+    } catch {
+      pendingTx.delete(id);
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
+async function resolveHashes(hashes) {
+  const entries = [];
+  const list = hashes.slice(0, MAX_RESOLVE);
+  for (let i = 0; i < list.length; i += PARALLEL) {
+    if (!ws || ws.readyState !== 1) break; // Verbindung verloren -> Rest bleibt ungelöst
+    const chunk = list.slice(i, i + PARALLEL);
+    const results = await Promise.all(chunk.map(wsTxCommand));
+    for (const r of results) {
+      // tx liefert die vollen Tx-Felder plus meta (flach oder als result.tx/result.meta).
+      const norm = normalizeLedgerTxEntry(r);
+      if (norm) entries.push(norm);
+    }
+  }
+  return entries;
+}
+
+/* ---------- Ledger-Event ("ledgerClosed" bzw. "ledger" vom Abo) ---------- */
+async function onLedgerEvent(msg) {
+  const idx = msg.ledger_index;
+  if (idx == null || seenLedgers.has(idx)) return;
+  seenLedgers.add(idx);
+  if (seenLedgers.size > 400) {
+    const first = seenLedgers.values().next().value;
+    seenLedgers.delete(first);
+  }
+  lastLedgerAt = Date.now();
+  liveMode = 'wss';
+
+  const eventHashes = Array.isArray(msg.transactions) ? msg.transactions : [];
+  const declaredCount = Number(msg.txn_count ?? eventHashes.length ?? 0);
+  const closeIso = xrplIso(msg.ledger_time ?? msg.close_time, msg.close_time_iso);
+  const card = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
+
+  // Volles Ledger per expand:true holen (ein Kommando pro Block).
+  let entries = [];
+  let ledgerTxCount = declaredCount;
+  const inCooldown = Date.now() < quotaCooldownUntil;
+  const overBudget = !eventHashes.length && !inCooldown && !quotaBudgetOk();
+  if (overBudget) {
+    card.querySelector('.block-badges').innerHTML =
+      '<span class="badge badge-partial">Quota-Budget erschöpft – Analyse übersprungen</span>';
+    return;
+  }
+  const led = (eventHashes.length || inCooldown) ? null : await wsLedgerCommand(idx);
+  if (led && !eventHashes.length) quotaWindow.push(Date.now());
+  if (led?.error === 'tooBusy') {
+    quotaCooldownUntil = Date.now() + 65000;
+    card.querySelector('.block-badges').innerHTML =
+      '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse pausiert</span>';
+    return;
+  }
+  if (inCooldown) {
+    card.querySelector('.block-badges').innerHTML =
+      '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse übersprungen</span>';
+    return;
+  }
+  const rawTxs = led?.ledger?.transactions;
+  if (Array.isArray(rawTxs) && rawTxs.length) {
+    ledgerTxCount = rawTxs.length;
+    if (rawTxs.every((t) => typeof t === 'string')) {
+      entries = await resolveHashes(rawTxs); // Hash-Strings -> tx-Einzelauflösung
+    } else {
+      entries = rawTxs.slice(0, MAX_RESOLVE).map(normalizeLedgerTxEntry).filter(Boolean);
+    }
+  } else if (eventHashes.length) {
+    ledgerTxCount = eventHashes.length;
+    entries = await resolveHashes(eventHashes);
+  }
+
+  recordFirstSeen(entries);
+  const result = analyzeLedger({ transactions: entries }, buildCtx());
+
+  finishBlockCard(card, result.findings, ledgerTxCount, entries.length);
+  registerFindings(result.findings, idx);
+  liveStats.ledgers += 1;
+  liveStats.txs += ledgerTxCount;
+  updateLiveStats();
+  setConn(true, connLabel());
+}
+
+/* ---------- WebSocket mit Auto-Reconnect ---------- */
+function connectLive() {
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+  try {
+    ws = new WebSocket(WSS_URL);
+  } catch {
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsBackoff = 2000;
+    try {
+      ws.send(JSON.stringify({ command: 'subscribe', id: 1, streams: ['ledger'], transactions: true }));
+    } catch { /* onclose behandelt es */ }
+    if (liveMode !== 'poll') setConn(true, 'WSS verbunden – warte auf Ledger …');
+  };
+
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    // xrplcluster sendet "ledgerClosed" (verifiziert); "ledger" bleibt abgedeckt.
+    if ((msg.type === 'ledgerClosed' || (msg.type === 'ledger' && msg.validated)) && msg.ledger_index != null) {
+      onLedgerEvent(msg);
+      return;
+    }
+    if (msg.type === 'response' && pendingTx.has(msg.id)) {
+      const settle = pendingTx.get(msg.id);
+      pendingTx.delete(msg.id);
+      settle(msg.result ?? null);
+    }
+  };
+
+  ws.onclose = () => {
+    if (liveMode !== 'poll') setConn(false, `Verbindung getrennt – erneuter Versuch in ${Math.round(wsBackoff / 1000)} s`);
+    scheduleReconnect();
+  };
+
+  ws.onerror = () => { /* onclose folgt unmittelbar */ };
+}
+
+function scheduleReconnect() {
+  if (wsAttemptTimer) return;
+  const delay = wsBackoff;
+  wsBackoff = Math.min(wsBackoff * 2, 30000);
+  wsAttemptTimer = setTimeout(() => {
+    wsAttemptTimer = null;
+    connectLive();
+  }, delay);
+}
+
+/* ---------- Snapshot-Fallback (verifizierter Serverpfad /api/ledger) ---------- */
+async function pollSnapshotFallback() {
+  try {
+    const body = await fetchJson('/api/ledger');
+    const idx = body?.ledgerIndex;
+    if (idx == null) return;
+    if (!seenLedgers.has(idx)) {
+      seenLedgers.add(idx);
+      lastLedgerAt = Date.now();
+      liveMode = 'poll';
+      const txCount = Number(body.stats?.txs ?? 0);
+      const resolved = Number(body.resolvedTxCount ?? 0);
+      const findings = Array.isArray(body.findings) ? body.findings : [];
+      const card = addBlockCard(idx, body.closeTime ?? null, txCount, 'done');
+      finishBlockCard(card, findings, txCount, resolved);
+      registerFindings(findings, idx);
+      liveStats.ledgers += 1;
+      liveStats.txs += txCount;
+      updateLiveStats();
+    }
+    setConn(true, connLabel());
+  } catch (err) {
+    if (liveMode !== 'wss') setConn(false, `Keine Ledger-Daten erreichbar (${err && err.message})`);
+  }
+}
+
+async function watchdog() {
+  if (Date.now() - lastLedgerAt < STALL_MS) {
+    if (liveMode === 'wss' || liveMode === 'poll') setConn(true, connLabel());
+    return;
+  }
+  await pollSnapshotFallback();
+}
+
+function bindLive() {
+  buildRuleFilter();
+  document.getElementById('log-severity').addEventListener('change', renderLog);
+  document.getElementById('log-rule').addEventListener('change', renderLog);
+  document.getElementById('log-download').addEventListener('click', downloadLog);
+}
+
+/* ------------------------------------------------------------------ */
+/* Polling (Honeypot-Präzisionsschicht)                                */
+/* ------------------------------------------------------------------ */
 
 async function poll() {
   try {
@@ -420,19 +913,21 @@ async function poll() {
     renderStats(stats);
     renderGraph(graph);
     renderThreats(threats);
-    setConnection(true);
-    document.getElementById('last-update').textContent =
-      'Stand: ' + new Date().toLocaleTimeString('de-DE');
-  } catch (err) {
-    setConnection(false, err && err.message);
+  } catch {
+    /* Honeypot-Schicht optional; Live-Feed arbeitet unabhängig weiter */
   }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  initGraph();
-  bindTable();
-  bindSelfCheck();
-  document.getElementById('threat-search').addEventListener('input', applyThreatFilter);
-  poll();
-  setInterval(poll, POLL_MS);
-});
+/* ------------------------------------------------------------------ */
+/* Start (Modulskript: DOM ist beim Ausführen bereits geparst)         */
+/* ------------------------------------------------------------------ */
+
+initGraph();
+bindTable();
+bindSelfCheck();
+bindLive();
+document.getElementById('threat-search').addEventListener('input', applyThreatFilter);
+poll();
+setInterval(poll, POLL_MS);
+connectLive();
+setInterval(watchdog, WATCHDOG_MS);

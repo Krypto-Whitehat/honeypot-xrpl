@@ -4,18 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
-  <title>Honeypot XRPL – Echtzeit-Bedrohungs-Dashboard</title>
-  <meta name="description" content="Echtzeit-Bedrohungs-Dashboard der XRPL-Honeypot-Infrastruktur: maliziöse Adressen, Aktivitäts-Graph und Transaktions-Evidenz.">
+  <title>Honeypot XRPL – Live-Ledger-Analyse</title>
+  <meta name="description" content="Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft. Dazu Honeypot-Präzisionsschicht mit Bedrohungsliste, Aktivitäts-Graph und Selbst-Check.">
   <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23f5a623' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23f5a623'/%3E%3C/svg%3E">
 </head>
 <body data-a6>
   <header class="topbar">
     <div class="brand">
       <h1>Honeypot&nbsp;XRPL</h1>
-      <p class="sub">Echtzeit-Bedrohungs-Dashboard für die XRPL-Community</p>
+      <p class="sub">Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community</p>
     </div>
 
-    <div class="stats" id="stats" aria-label="Live-Statistiken">
+    <div class="stats" id="stats" aria-label="Honeypot-Statistiken">
       <div class="stat stat-malicious">
         <span class="stat-value" id="stat-malicious">–</span>
         <span class="stat-label">Maliziöse Adressen</span>
@@ -40,11 +41,47 @@
 
     <div class="conn" id="conn" role="status">
       <span class="conn-dot" id="conn-dot"></span>
-      <span id="conn-text">Verbindung wird aufgebaut …</span>
+      <span id="conn-text">Live-Verbindung wird aufgebaut …</span>
     </div>
   </header>
 
   <main>
+    <section class="panel" aria-labelledby="live-title">
+      <div class="panel-head">
+        <h2 id="live-title">Live-Block-Feed</h2>
+        <span class="hint">Validierte Ledger-Blöcke in Echtzeit – Analyse im Browser mit derselben Engine wie serverseitig</span>
+        <div class="live-stats" aria-label="Live-Analyse-Statistiken">
+          <span class="livestat"><span class="livestat-value" id="live-ledgers">0</span> Ledger</span>
+          <span class="livestat"><span class="livestat-value" id="live-txs">0</span> geprüfte Txs</span>
+          <span class="livestat livestat-malicious"><span class="livestat-value" id="live-f-malicious">0</span> malicious</span>
+          <span class="livestat livestat-suspect"><span class="livestat-value" id="live-f-suspect">0</span> verdächtig</span>
+          <span class="livestat livestat-info"><span class="livestat-value" id="live-f-info">0</span> Info</span>
+        </div>
+      </div>
+
+      <ol class="block-feed" id="block-feed" aria-label="Folge der analysierten Ledger-Blöcke"></ol>
+      <p class="empty" id="feed-empty">Warte auf den ersten validierten Ledger …</p>
+
+      <div class="log-head">
+        <h3 id="log-title">Analyse-Log</h3>
+        <div class="live-controls">
+          <label class="filter-label" for="log-severity">Schweregrad</label>
+          <select id="log-severity" class="filter-select">
+            <option value="all">Alle</option>
+            <option value="malicious">Maliziös</option>
+            <option value="suspect">Verdächtig</option>
+            <option value="info">Info</option>
+          </select>
+          <label class="filter-label" for="log-rule">Regel</label>
+          <select id="log-rule" class="filter-select"></select>
+          <button type="button" id="log-download" class="download-btn">Log als JSON</button>
+        </div>
+      </div>
+      <div class="log-list" id="analysis-log" role="log" aria-labelledby="log-title"></div>
+      <p class="empty" id="log-empty">Noch keine Regel-Treffer im Beobachtungsfenster.</p>
+      <p class="graph-note">Fund-Adressen sind ausschließlich öffentlich im Ledger sichtbare Akteur-Adressen. Köder-Konten erscheinen nie im Log – sie werden vom Server zu Labels sanitisiert.</p>
+    </section>
+
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
         <h2 id="graph-title">Aktivitäts-Graph</h2>
@@ -104,6 +141,6 @@
   </footer>
 
   <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

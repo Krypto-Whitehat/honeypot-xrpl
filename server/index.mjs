@@ -25,9 +25,11 @@ import { fileURLToPath } from "node:url";
 import { Client } from "xrpl";
 import {
   sanitizeThreat,
+  sanitizeText,
   buildGraph,
   computeStats,
 } from "../lib/sanitize.mjs";
+import { analyzeLedger } from "../lib/detector.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -284,6 +286,121 @@ app.get("/api/check/:address", async (req, res) => {
     res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${msg}` });
   }
 });
+
+// ---------- Live-Ledger-Snapshot (identische Engine wie Browser/Vercel) ----------
+// GET /api/ledger — JSON-RPC per fetch (dieselbe Logik wie api/ledger.js; KEIN
+// xrpl.js für diesen Pfad), analyzeLedger aus lib/detector.mjs, Ausgabe durch
+// die Anonymitätsschicht. knownBad/firstSeenAt stammen lokal aus dem Threat-Store.
+const RPC_URL = (config.wss || "wss://xrplcluster.com").replace(/^wss:/, "https:");
+const LEDGER_MAX_RESOLVE = 40;
+const LEDGER_PARALLEL = 8;
+const LEDGER_CACHE_MS = 60000;
+let ledgerCache = null; // { time, body } — nur im Prozess-Speicher
+
+// slowDown-Backoff: xrplcluster (Clio) drosselt bei Häufung — live beobachtet
+// 2026-09-28. Ein Retry-Fenster pro Call macht den Snapshot robust.
+async function rpcFetch(method, params, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(RPC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ method, params: [{ ...params }] }),
+    });
+    if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+    const data = await res.json();
+    if (data?.result?.error === "slowDown") {
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      continue;
+    }
+    if (data?.result?.error) throw new Error(`RPC error: ${data.result.error}`);
+    return data.result;
+  }
+  throw new Error("RPC error: slowDown");
+}
+
+async function resolveHashes(hashes) {
+  const entries = [];
+  const list = hashes.slice(0, LEDGER_MAX_RESOLVE);
+  for (let i = 0; i < list.length; i += LEDGER_PARALLEL) {
+    const chunk = list.slice(i, i + LEDGER_PARALLEL);
+    const results = await Promise.all(
+      chunk.map((h) => rpcFetch("tx", { transaction: h }).catch(() => null))
+    );
+    for (const r of results) if (r && (r.TransactionType || r.tx_json || r.tx)) entries.push(r);
+  }
+  return { entries, unresolved: hashes.length - entries.length };
+}
+
+function localLedgerCtx() {
+  const knownBad = new Set();
+  const firstSeenAt = new Map();
+  for (const t of threatsCache) {
+    if (!t?.address || baitLabels.has(t.address)) continue;
+    knownBad.add(t.address);
+    const fs0 = Date.parse(t.firstSeen ?? "");
+    if (Number.isFinite(fs0)) firstSeenAt.set(t.address, fs0);
+  }
+  return {
+    knownBad,
+    benignIssuers: new Set(config.benign_issuers || []),
+    benignAccounts: new Set(config.benign_accounts || []),
+    threats: new Map(),
+    firstSeenAt,
+  };
+}
+
+app.get("/api/ledger", async (req, res) => {
+  try {
+    if (ledgerCache && Date.now() - ledgerCache.time < LEDGER_CACHE_MS) {
+      return res.json(ledgerCache.body);
+    }
+    const led = await rpcFetch("ledger", { ledger_index: "validated", transactions: true });
+    const rawTxs = led?.ledger?.transactions ?? [];
+    const closeTime =
+      led?.ledger?.close_time_iso ??
+      (typeof led?.ledger?.close_time === "number"
+        ? new Date((led.ledger.close_time + 946684800) * 1000).toISOString()
+        : null);
+
+    let findings;
+    let resolvedTxCount = 0;
+    let unresolvedTxCount = 0;
+    if (rawTxs.length > 0 && rawTxs.every((t) => typeof t === "string")) {
+      const { entries, unresolved } = await resolveHashes(rawTxs);
+      resolvedTxCount = entries.length;
+      unresolvedTxCount = unresolved;
+      findings = analyzeLedger({ transactions: entries }, localLedgerCtx()).findings;
+    } else {
+      findings = analyzeLedger(led, localLedgerCtx()).findings;
+      resolvedTxCount = rawTxs.length;
+    }
+
+    const body = {
+      ledgerIndex: led?.ledger_index ?? null,
+      ledgerHash: led?.ledger_hash ?? null,
+      closeTime,
+      network: config.network,
+      stats: { txs: rawTxs.length, findings: findings.length },
+      resolvedTxCount,
+      unresolvedTxCount,
+      findings: findings
+        .filter((f) => !baitLabels.has(f.address)) // kein Oracle für Köder-Adressen
+        .map((f) => ({
+          ruleId: f.ruleId,
+          severity: f.severity,
+          address: sanitizeText(f.address, baitLabels), // Defense-in-Depth: auch das Adressfeld läuft durch die Anonymitätsschicht
+          note: sanitizeText(f.note, baitLabels),
+        })),
+    };
+    ledgerCache = { time: Date.now(), body };
+    res.json(body);
+  } catch (err) {
+    res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${err?.message ?? err}` });
+  }
+});
+
+// Engine für den Browser-Import: /lib/detector.mjs (single source of truth).
+app.use("/lib", express.static(path.join(ROOT, "lib")));
 
 // Statische Files aus public/ (wird parallel von einem anderen Agenten gebaut;
 // fehlt das Verzeichnis, geben die statischen Routen einfach 404 zurück).
