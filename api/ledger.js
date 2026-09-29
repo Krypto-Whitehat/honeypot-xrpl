@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeLedger } from "../lib/detector.mjs";
+import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
 import { sanitizeText } from "../lib/sanitize.mjs";
 
@@ -128,18 +129,27 @@ export default async function handler(req, res) {
     let ledgerTxCount = rawTxs.length;
     let resolvedTxCount = 0;
     let unresolvedTxCount = 0;
+    let txSource = [];
 
     if (rawTxs.length > 0 && rawTxs.every((t) => typeof t === "string")) {
       const { entries, unresolved } = await resolveHashes(rawTxs);
       resolvedTxCount = entries.length;
       unresolvedTxCount = unresolved;
+      txSource = entries;
       const result = analyzeLedger({ transactions: entries }, await buildCtx());
       findings = result.findings;
     } else {
+      txSource = rawTxs;
       const result = analyzeLedger(led, await buildCtx());
       findings = result.findings;
       resolvedTxCount = ledgerTxCount;
     }
+
+    // txRecords für den Snapshot-Fallback des Client-Graphen (poll-Modus):
+    // Köder-Endpunkte werden vor der Auslieferung gefiltert.
+    const txRecords = txSource
+      .map((e) => txRecordFromEntry(e, closeTime))
+      .filter((r) => r && !baitLabels.has(r.account) && !(r.destination && baitLabels.has(r.destination)));
 
     const body = {
       ledgerIndex: led?.ledger_index ?? null,
@@ -149,6 +159,7 @@ export default async function handler(req, res) {
       stats: { txs: ledgerTxCount, findings: findings.length },
       resolvedTxCount,
       unresolvedTxCount,
+      txRecords,
       findings: findings
         .filter((f) => !baitLabels.has(f.address)) // kein Oracle für Köder-Adressen
         .map((f) => ({

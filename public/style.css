@@ -32,6 +32,46 @@
   --a6-ui: 280ms;
   --a6-e1: 0 1px 0 #fff inset, 0 14px 32px -26px rgba(20, 20, 22, 0.28);
   --a6-e2: 0 1px 0 #fff inset, 0 28px 60px -42px rgba(20, 20, 22, 0.34);
+
+  /* Graph-Bühne: weiß, Tintenlinie, dezente Grautöne (Palantir) */
+  --a6-graph-canvas: #ffffff;
+  --a6-graph-grid: rgba(20, 20, 22, 0.07);
+  --a6-graph-line: #17171b;
+  --a6-graph-line-soft: rgba(20, 20, 22, 0.12);
+
+  /* Cluster-Bubbles: weiß, 1px Tintenrand, Radius */
+  --a6-cluster-fill: #ffffff;
+  --a6-cluster-border: #17171b;
+  --a6-cluster-hover: #f6f6f7;
+  --a6-cluster-radius: 12px;
+
+  /* Kanten: 1px, Typ-Codierung — exakt die EDGE_COLORS aus app.js */
+  --a6-edge-payment: #b3261e;
+  --a6-edge-trustset: #b45309;
+  --a6-edge-offer: #a16207;
+  --a6-edge-escrow: #6d28d9;
+  --a6-edge-accountset: #1d4ed8;
+  --a6-edge-check: #0f766e;
+  --a6-edge-nft: #a21caf;
+  --a6-edge-neutral: #62626b;
+  --a6-edge-ink: #141416;
+
+  /* Rollen-Farbcodierung source/drainer/collector/relay */
+  --a6-role-source: #1d4ed8;
+  --a6-role-source-border: #1e3a8a;
+  --a6-role-drainer: #b3261e;
+  --a6-role-drainer-border: #7f1d1d;
+  --a6-role-collector: #9a5b00;
+  --a6-role-collector-border: #713f12;
+  --a6-role-relay: #62626b;
+  --a6-role-relay-border: #3f3f46;
+
+  /* Eine Akzentfarbe je Schweregrad — bestehende Semantik 1:1 weiterverwendet */
+  --a6-sev-malicious: #b3261e;
+  --a6-sev-suspect: #9a5b00;
+  --a6-sev-info: #1d4ed8;
+  --a6-sev-neutral: #62626b;
+
   color: var(--a6-ink);
   background: var(--a6-bg);
   font-family: var(--a6-font);
@@ -458,7 +498,9 @@ main {
 #graph {
   width: 100%;
   height: 520px;
-  background: var(--a6-surface-alt);
+  background:
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--a6-graph-canvas);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-md);
 }
@@ -472,6 +514,44 @@ main {
 .graph-error {
   color: var(--a6-error);
   padding: 20px;
+}
+
+/* Tabs: Segment-Pill-Navigation, Stil konsistent zu .download-btn */
+.graph-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.graph-tab {
+  min-height: 40px;
+  padding: 8px 18px;
+  background: var(--a6-surface);
+  color: var(--a6-body);
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-pill);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: var(--a6-e1);
+  transition: background-color var(--a6-fast), color var(--a6-fast), transform var(--a6-ui) var(--a6-ease);
+}
+
+.graph-tab[aria-selected="true"] {
+  background: #141416;
+  border-color: #141416;
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .graph-tab:not([aria-selected="true"]):hover { background: var(--a6-surface-alt); }
+}
+
+.graph-disclaimer {
+  margin: 0 0 12px;
+  color: var(--a6-muted);
+  font-size: 12px;
 }
 
 .legend {
@@ -493,254 +573,183 @@ main {
   border: 1px solid rgba(20, 20, 22, 0.25);
 }
 
-.swatch-attacker { background: #b3261e; border-radius: 50%; }
-.swatch-honeypot { background: #141416; }
+/* Rollen-Swatches (Legende + Chips) */
+.swatch-source { background: #1d4ed8; border-radius: 50%; }
+.swatch-drainer { background: #b3261e; border-radius: 50%; }
+.swatch-collector { background: #9a5b00; border-radius: 50%; }
+.swatch-relay { background: #62626b; border-radius: 50%; }
+.swatch-unknown { background: #f0f0f2; border-color: #62626b; border-radius: 50%; }
+.swatch-cluster { background: #ffffff; border: 1px solid #17171b; }
+
+/* Kantentyp-Swatches */
 .swatch-payment { background: #b3261e; }
 .swatch-trustset { background: #b45309; }
 .swatch-offer { background: #a16207; }
+.swatch-escrow { background: #6d28d9; }
 .swatch-other { background: #62626b; }
 
-/* ---------------- Threat-Tabelle ---------------- */
+/* Schweregrad-Swatches */
+.swatch-sev-malicious { background: #b3261e; }
+.swatch-sev-suspect { background: #9a5b00; }
+.swatch-sev-info { background: #1d4ed8; }
 
-.table-wrap { overflow-x: auto; }
+/* ---------------- Cluster-Zusammenfassung ---------------- */
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
+.cluster-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
 }
 
-thead th {
-  text-align: left;
-  padding: 10px 12px;
-  color: var(--a6-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  border-bottom: 1px solid var(--a6-line-strong);
-  background: var(--a6-surface);
-}
-
-.threat-row {
-  cursor: pointer;
-  border-bottom: 1px solid var(--a6-line);
-  transition: background var(--a6-fast) var(--a6-ease);
-}
-
-.threat-row:hover { background: var(--a6-surface-alt); }
-.threat-row.open { background: var(--a6-surface-alt); }
-
-.threat-row td {
-  padding: 11px 12px;
-  vertical-align: top;
-}
-
-.addr {
-  font-family: var(--a6-mono);
-  font-size: 13px;
-  color: var(--a6-error);
-  word-break: break-all;
-}
-
-.col-toggle { width: 34px; text-align: center; }
-.chevron { color: var(--a6-muted); font-size: 14px; }
-
-.detail-row > td {
-  padding: 0 12px 14px;
-  background: var(--a6-surface-alt);
-  border-bottom: 1px solid var(--a6-line-strong);
-}
-
-.evidence-table {
-  margin-top: 10px;
+.cluster-card {
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
-  border-radius: var(--a6-r-sm);
-  overflow: hidden;
+  border-left: 3px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-md);
+  padding: 12px 14px;
+  box-shadow: var(--a6-e1);
+  cursor: pointer;
+  transition: transform var(--a6-ui) var(--a6-ease), box-shadow var(--a6-ui) var(--a6-ease);
 }
 
-.evidence-table th {
-  background: var(--a6-surface-alt);
-  border-bottom: 1px solid var(--a6-line);
+@media (hover: hover) and (pointer: fine) {
+  .cluster-card:hover { transform: translateY(-2px); box-shadow: var(--a6-e2); }
 }
 
-.evidence-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--a6-line);
-  font-size: 13px;
+.cluster-card:active { transform: translateY(0); }
+
+/* Linkes Band = dominante Rolle des Clusters */
+.cluster-card.role-source { border-left-color: #1d4ed8; }
+.cluster-card.role-drainer { border-left-color: #b3261e; }
+.cluster-card.role-collector { border-left-color: #9a5b00; }
+.cluster-card.role-relay { border-left-color: #62626b; }
+.cluster-card.role-unknown { border-left-color: var(--a6-control-line); }
+
+.cluster-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
 }
 
-.evidence-table tr:last-child td { border-bottom: none; }
-
-.tx-type {
+.cluster-label {
   font-family: var(--a6-mono);
-  color: var(--a6-warn);
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
-.ev-ref {
-  font-family: var(--a6-mono);
-  font-size: 12px;
-  color: var(--a6-muted);
-  word-break: break-all;
-  max-width: 340px;
+.cluster-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
 }
 
-.bait-label {
-  font-family: var(--a6-mono);
-  color: var(--a6-ink);
-  font-weight: 600;
-}
-
-.funding { margin-top: 12px; }
-
-.funding h4 {
-  margin: 0 0 6px;
-  font-size: 12px;
-  color: var(--a6-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.funding ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.funding li {
-  font-size: 13px;
-  padding: 3px 0;
-}
-
-.funding-addr {
-  font-family: var(--a6-mono);
-  color: var(--a6-ink);
-  word-break: break-all;
-}
-
-.funding-label {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 9px;
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
-  background: var(--a6-success-soft);
-  border: 1px solid rgba(6, 99, 72, 0.35);
-  color: var(--a6-success);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
   font-size: 12px;
 }
+
+.cluster-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.cluster-xrp {
+  font-family: var(--a6-mono);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-ink);
+}
+
+.cluster-card.sev-malicious .cluster-xrp { color: var(--a6-error); }
+.cluster-card.sev-suspect .cluster-xrp { color: var(--a6-warn); }
+
+.cluster-txs,
+.cluster-accounts {
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Drainer→Kollektor-Kette: Start-bis-Ende-Nachverfolgung des Geldflusses */
+.cluster-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+}
+
+.chain-node {
+  padding: 3px 9px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
+  word-break: break-all;
+}
+
+.chain-node.chain-source {
+  border-color: rgba(29, 78, 216, 0.35);
+  color: #1d4ed8;
+}
+
+.chain-node.chain-drainer {
+  border-color: rgba(179, 38, 30, 0.5);
+  color: #b3261e;
+  background: var(--a6-error-soft);
+}
+
+.chain-node.chain-collector {
+  border-color: rgba(154, 91, 0, 0.4);
+  color: #9a5b00;
+  background: var(--a6-warn-soft);
+}
+
+.chain-node.chain-relay {
+  border-color: var(--a6-control-line);
+  color: var(--a6-muted);
+}
+
+.chain-arrow { color: var(--a6-muted); }
+
+.cluster-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#cluster-empty { margin-top: 14px; }
 
 .empty {
   color: var(--a6-muted);
   font-size: 14px;
   padding: 14px 4px 4px;
 }
-
-/* ---------------- Suche & Selbst-Check ---------------- */
-
-.search-input {
-  flex: 1 1 240px;
-  max-width: 360px;
-  min-height: 40px;
-  padding: 9px 13px;
-  background: var(--a6-surface-alt);
-  border: 1px solid var(--a6-control-line);
-  border-radius: var(--a6-r-sm);
-  color: var(--a6-ink);
-  font-family: var(--a6-mono);
-  font-size: 13px;
-  transition: border-color var(--a6-fast), background-color var(--a6-fast);
-}
-
-.search-input:focus {
-  border-color: var(--a6-focus);
-  background: var(--a6-surface);
-  outline: none;
-}
-
-.check-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.check-input {
-  flex: 1 1 320px;
-  min-height: 44px;
-  padding: 11px 13px;
-  background: var(--a6-surface-alt);
-  border: 1px solid var(--a6-control-line);
-  border-radius: var(--a6-r-sm);
-  color: var(--a6-ink);
-  font-family: var(--a6-mono);
-  font-size: 14px;
-  transition: border-color var(--a6-fast), background-color var(--a6-fast);
-}
-
-.check-input:focus {
-  border-color: var(--a6-focus);
-  background: var(--a6-surface);
-  outline: none;
-}
-
-.check-btn {
-  min-height: 44px;
-  padding: 11px 24px;
-  background: linear-gradient(180deg, #33333a, #18181b 65%, #101012);
-  color: #fff;
-  border: 1px solid transparent;
-  border-radius: var(--a6-r-pill);
-  font-weight: 650;
-  font-size: 14px;
-  cursor: pointer;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.16) inset, 0 18px 34px -22px rgba(20, 20, 22, 0.65);
-  transition: transform var(--a6-ui) var(--a6-ease), box-shadow var(--a6-ui) var(--a6-ease);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .check-btn:not(:disabled):hover { transform: translateY(-2px); }
-}
-
-.check-btn:not(:disabled):active { transform: translateY(0); }
-
-.check-btn:disabled { opacity: 0.55; cursor: wait; box-shadow: none; }
-
-.check-result {
-  padding: 13px 15px;
-  border-radius: var(--a6-r-md);
-  border: 1px solid var(--a6-line);
-  font-size: 14px;
-  background: var(--a6-surface);
-}
-
-.check-result.pending { color: var(--a6-muted); }
-
-.check-result.clean {
-  background: var(--a6-success-soft);
-  border-color: rgba(6, 99, 72, 0.45);
-  color: var(--a6-success);
-}
-
-.check-result.contact {
-  background: var(--a6-error-soft);
-  border-color: rgba(179, 38, 30, 0.5);
-  color: var(--a6-ink);
-}
-
-.check-result.unknown { background: var(--a6-surface-alt); color: var(--a6-muted); }
-
-.check-result.error {
-  background: var(--a6-error-soft);
-  border-color: rgba(179, 38, 30, 0.5);
-  color: var(--a6-error);
-}
-
-.check-head { margin: 0 0 8px; font-weight: 650; }
-
-.check-self { margin: 0 0 8px; color: var(--a6-warn); font-size: 13px; }
-
-.check-hint { margin: 8px 0 0; color: var(--a6-muted); font-size: 12px; }
 
 .risk-badge {
   display: inline-block;
@@ -803,13 +812,15 @@ thead th {
   .log-addr { grid-area: addr; }
 }
 
+@media (max-width: 760px) {
+  .cluster-list { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 560px) {
   main { padding: 12px; }
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
   #graph { height: 320px; }
-  .ev-ref { max-width: 180px; }
-  .check-btn { flex: 1 1 100%; }
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
   .log-list { max-height: 340px; }
@@ -824,29 +835,32 @@ thead th {
     animation: none !important;
     transition: none !important;
   }
-  .check-btn { transform: none !important; }
+  .graph-tab,
+  .cluster-card { transform: none !important; }
 }
 
 @media (forced-colors: active) {
   .panel,
   .stat,
   .conn,
-  .check-btn,
-  .search-input,
-  .check-input,
   .block-card,
   .badge,
   .livestat,
   .log-row,
   .filter-select,
   .download-btn,
+  .graph-tab,
+  .cluster-card,
+  .role-chip,
+  .chain-node,
   #graph {
     border: 1px solid CanvasText;
     box-shadow: none;
   }
 
   .block-card,
-  .log-row {
+  .log-row,
+  .cluster-card {
     border-left-width: 3px;
     border-left-color: CanvasText;
   }

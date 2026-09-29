@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <title>Honeypot XRPL – Live-Ledger-Analyse</title>
-  <meta name="description" content="Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft. Dazu Honeypot-Präzisionsschicht mit Bedrohungsliste, Aktivitäts-Graph und Selbst-Check.">
+  <meta name="description" content="Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft und die erkannten Akteure zu Clustern gruppiert (Source, Drainer, Kollektor, Relay).">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23f5a623' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23f5a623'/%3E%3C/svg%3E">
 </head>
@@ -16,18 +16,18 @@
       <p class="sub">Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community</p>
     </div>
 
-    <div class="stats" id="stats" aria-label="Honeypot-Statistiken">
+    <div class="stats" id="stats" aria-label="Live-Statistiken">
       <div class="stat stat-malicious">
         <span class="stat-value" id="stat-malicious">–</span>
-        <span class="stat-label">Maliziöse Adressen</span>
+        <span class="stat-label">Findings malicious (live)</span>
       </div>
       <div class="stat stat-suspect">
         <span class="stat-value" id="stat-suspect">–</span>
-        <span class="stat-label">Verdächtig</span>
+        <span class="stat-label">Findings suspect (live)</span>
       </div>
       <div class="stat stat-events">
         <span class="stat-value" id="stat-events">–</span>
-        <span class="stat-label">Events</span>
+        <span class="stat-label">Transaktionen (live)</span>
       </div>
       <div class="stat stat-network">
         <span class="stat-value" id="stat-network">–</span>
@@ -35,7 +35,7 @@
       </div>
       <div class="stat stat-last">
         <span class="stat-value stat-value-small" id="stat-last">–</span>
-        <span class="stat-label">Letztes Event</span>
+        <span class="stat-label">Stand</span>
       </div>
     </div>
 
@@ -86,52 +86,35 @@
       <div class="panel-head">
         <h2 id="graph-title">Aktivitäts-Graph</h2>
         <div class="legend" aria-label="Legende">
-          <span class="legend-item"><span class="swatch swatch-attacker"></span>Angreifer</span>
-          <span class="legend-item"><span class="swatch swatch-honeypot"></span>Köder</span>
+          <span class="legend-item"><span class="swatch swatch-source"></span>Source</span>
+          <span class="legend-item"><span class="swatch swatch-drainer"></span>Drainer</span>
+          <span class="legend-item"><span class="swatch swatch-collector"></span>Kollektor</span>
+          <span class="legend-item"><span class="swatch swatch-relay"></span>Relay</span>
+          <span class="legend-item"><span class="swatch swatch-unknown"></span>Unknown</span>
+          <span class="legend-item"><span class="swatch swatch-cluster"></span>Cluster</span>
           <span class="legend-item"><span class="swatch swatch-payment"></span>Payment</span>
           <span class="legend-item"><span class="swatch swatch-trustset"></span>TrustSet</span>
           <span class="legend-item"><span class="swatch swatch-offer"></span>Offer</span>
+          <span class="legend-item"><span class="swatch swatch-escrow"></span>Escrow</span>
           <span class="legend-item"><span class="swatch swatch-other"></span>Sonstige</span>
+          <span class="legend-item"><span class="swatch swatch-sev-malicious"></span>Maliziös</span>
+          <span class="legend-item"><span class="swatch swatch-sev-suspect"></span>Verdächtig</span>
+          <span class="legend-item"><span class="swatch swatch-sev-info"></span>Info</span>
         </div>
       </div>
+
+      <div class="graph-tabs" role="tablist" aria-label="Graph-Ansicht">
+        <button type="button" class="graph-tab" role="tab" id="tab-live" aria-selected="true" aria-controls="graph">Live-Netz</button>
+        <button type="button" class="graph-tab" role="tab" id="tab-cluster" aria-selected="false" aria-controls="graph">Cluster</button>
+      </div>
+      <p class="graph-disclaimer">Rollen (Source, Drainer, Kollektor, Relay) sind Heuristiken aus Ein-/Ausgrad und Geldfluss – kein Schuldnachweis.</p>
+
       <div id="graph" aria-label="Netzwerkgraph der erkannten Aktivitäten"></div>
-      <p class="graph-note">Köder-Konten werden ausschließlich als Label angezeigt – ihre Adressen erscheinen nie im Dashboard.</p>
-    </section>
 
-    <section class="panel" aria-labelledby="threats-title">
-      <div class="panel-head">
-        <h2 id="threats-title">Maliziöse Adressen</h2>
-        <input type="search" id="threat-search" class="search-input" placeholder="Adresse oder Grund durchsuchen …" aria-label="Maliziöse Adressen durchsuchen">
-        <span class="hint">Zeile anklicken für Transaktions-Evidenz</span>
-      </div>
-      <div class="table-wrap">
-        <table id="threat-table">
-          <thead>
-            <tr>
-              <th scope="col">Adresse</th>
-              <th scope="col">Grund</th>
-              <th scope="col">Zuerst gesehen</th>
-              <th scope="col">Events</th>
-              <th scope="col" class="col-toggle"></th>
-            </tr>
-          </thead>
-          <tbody id="threat-body"></tbody>
-        </table>
-        <p class="empty" id="threats-empty" hidden>Derzeit keine maliziösen Adressen erfasst.</p>
-      </div>
-    </section>
+      <ul class="cluster-list" id="cluster-list" aria-label="Cluster-Zusammenfassung" hidden></ul>
+      <p class="empty" id="cluster-empty" hidden>Noch keine Cluster – warte auf Ledger.</p>
 
-    <section class="panel" aria-labelledby="check-title">
-      <div class="panel-head">
-        <h2 id="check-title">Selbst-Check für Community-Mitglieder</h2>
-        <span class="hint">Die eingegebene Adresse wird nicht gespeichert</span>
-      </div>
-      <form id="check-form" class="check-form">
-        <input type="text" id="check-address" class="check-input" placeholder="Eigene XRPL-Adresse (r…)" aria-label="Eigene XRPL-Adresse" autocomplete="off" spellcheck="false">
-        <button type="submit" id="check-btn" class="check-btn">Prüfen</button>
-      </form>
-      <div id="check-result" class="check-result" role="status" hidden></div>
-      <p class="graph-note">Der Check vergleicht die Transaktionshistorie der Adresse (Zahlungen, Trustlines, DEX-Orders, Escrow/Check/Payment-Kanäle) mit der Bedrohungsliste dieses Dashboards. Er findet Kontakte zu bereits erkannten Adressen — die Aussagekraft wächst mit der Bedrohungs-Datenbank.</p>
+      <p class="graph-note">Knoten sind öffentlich im Ledger sichtbare Akteure aus der Live-Analyse – Adressen in Kurzform, außer sie stehen auf der öffentlichen Bedrohungsliste. Köder-Konten erscheinen nie im Graph.</p>
     </section>
   </main>
 
@@ -140,7 +123,7 @@
     <span class="foot-note">Anonymität der Köder: Seeds und Köder-Adressen werden vom Server nie ausgeliefert und vom Client nie gerendert.</span>
   </footer>
 
-  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  <script src="https://unpkg.com/vis-network@10.1.2/standalone/umd/vis-network.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

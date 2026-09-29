@@ -4,7 +4,11 @@
     { "source": "/index.html", "destination": "/public/index.html" },
     { "source": "/app.js", "destination": "/public/app.js" },
     { "source": "/style.css", "destination": "/public/style.css" },
-    { "source": "/lib/detector.mjs", "destination": "/api/lib-detector" }
+    { "source": "/lib/detector.mjs", "destination": "/api/lib-detector" },
+    { "source": "/lib/:name", "destination": "/api/lib-detector?name=:name" }
   ],
+  "functions": {
+    "api/lib-detector.js": { "includeFiles": "lib/**" }
+  },
   "cleanUrls": true
 }

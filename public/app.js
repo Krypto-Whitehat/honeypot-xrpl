@@ -2,7 +2,7 @@
 
 /* Honeypot XRPL – Frontend (ESM-Modul)
  *
- * Hauptansicht: LIVE-BLOCK-FEED.
+ * Hauptansicht: LIVE-BLOCK-FEED + AKTEUR-CLUSTERING.
  *   - WebSocket auf wss://xrplcluster.com, Abo "ledger" mit transactions:true.
  *     Real gemessen (chrome-devtools, 2026-09-28): xrplcluster antwortet auf
  *     dieses Abo mit "ledgerClosed"-Events (ledger_index, ledger_time,
@@ -18,6 +18,13 @@
  *     gekennzeichnet, nie als stiller Totalausfall.
  *   - Analyse jedes Blocks mit analyzeLedger aus lib/detector.mjs —
  *     dieselbe Engine wie serverseitig (single source of truth).
+ *   - Cluster-Schicht: rollendes Fenster der analysierten Tx-Records und
+ *     Findings wird pro Ledger an buildClusterGraph()/txRecordFromEntry()
+ *     aus lib/cluster.mjs übergeben (dynamischer Import mit Null-Guard;
+ *     bei Import-Fehlschlag läuft der Live-Feed unverändert weiter).
+ *     Graph-Panel mit Tabs "Live-Netz" (inkrementell, Echtzeit) und
+ *     "Cluster" (vis-network-Clustering mit aufklappbaren Bubbles) plus
+ *     Cluster-Zusammenfassungs-Karten (Rollen, Drainer→Kollektor-Kette).
  *   - Fallback: bleibt der WSS ohne Ledger-Events (in der Vercel-Sandbox
  *     nie beobachtbar), pollt der Client alle WATCHDOG_MS den verifizierten
  *     Serverpfad GET /api/ledger (JSON-RPC-Snapshot, serverseitig analysiert
@@ -25,19 +32,28 @@
  *   - Analyse-Log aller Regel-Treffer: filterbar nach Schweregrad und Regel
  *     (Regelkatalog aus ruleCatalog()), downloadbar als JSON per Blob.
  *
- * Daneben bleibt die Honeypot-Präzisionsschicht: Stats/Graph/Threats-Polling
- * (GET /api/stats, /api/graph, /api/threats) und der Selbst-Check
- * (GET /api/check/[address]).
- *
  * Anonymitätsregel: Köder (Honeypots) werden NUR als Label dargestellt.
  * Sieht ein Label trotzdem wie eine XRPL-Adresse aus, wird es defensiv durch
  * "Köder" ersetzt – Adressen von Ködern landen nie im DOM. Fund-Adressen im
- * Live-Log sind ausschließlich öffentlich im Ledger sichtbare Akteure.
+ * Live-Log und im Graph sind ausschließlich öffentlich im Ledger sichtbare
+ * Akteure (Kurzform, außer sie stehen auf der öffentlichen knownBad-Liste).
  */
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
 
-const POLL_MS = 5000;              // Honeypot-API-Polling (stats/graph/threats)
+/* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
+ * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
+ * (Guard in onLedgerEvent). Ein Top-Level-Await würde initGraph()/connectLive()
+ * um die Import-Latenz verzögern und ist bewusst nicht verwendet. */
+let buildClusterGraph = null;
+let txRecordFromEntry = null;
+import('/lib/cluster.mjs')
+  .then((m) => {
+    buildClusterGraph = typeof m.buildClusterGraph === 'function' ? m.buildClusterGraph : null;
+    txRecordFromEntry = typeof m.txRecordFromEntry === 'function' ? m.txRecordFromEntry : null;
+  })
+  .catch(() => { /* Cluster-Funktion offline (z. B. 404); Live-Feed läuft weiter */ });
+
 const WSS_URL = 'wss://xrplcluster.com';
 const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
 const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
@@ -50,6 +66,9 @@ const LOG_RENDER_MAX = 200;        // gerenderte Log-Zeilen
 const STALL_MS = 12000;            // ohne frischen Ledger -> Snapshot-Fallback
 const WATCHDOG_MS = 5000;          // Fallback-Prüfintervall
 const FIRST_SEEN_MAX = 20000;      // Frische-Fenster: Konten-Obergrenze
+const TX_WINDOW_CAP = 4000;        // rollendes Tx-Fenster für das Clustering
+const FINDINGS_WINDOW_CAP = 1000;  // rollendes Finding-Fenster für das Clustering
+const CLUSTER_MAX_EDGES = 1200;    // Kantendeckel pro Clustering-Durchlauf
 
 /* ------------------------------------------------------------------ */
 /* Hilfsfunktionen                                                     */
@@ -73,18 +92,6 @@ function defang(value) {
   return s;
 }
 
-// Honeypot-Knoten dürfen nie eine echte Adresse als Label/Id tragen.
-function honeypotLabel(node) {
-  return defang(node.label || node.id || '');
-}
-
-function fmtTime(value) {
-  if (value === null || value === undefined || value === '') return '–';
-  const d = new Date(typeof value === 'number' ? value : value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'medium' });
-}
-
 function fmtClock(value) {
   if (value === null || value === undefined || value === '') return '–';
   const d = new Date(typeof value === 'number' ? value : value);
@@ -106,30 +113,25 @@ function shortAddr(a) {
   return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s;
 }
 
+// Drops -> XRP (de-DE, max. 2 Nachkommastellen).
+function fmtXrp(drops) {
+  const n = Number(drops ?? 0) / 1e6;
+  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
+}
+
 async function fetchJson(path) {
   const res = await fetch(path, { cache: 'no-store' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-/* ------------------------------------------------------------------ */
-/* Kopfzeilen-Stats (Honeypot-Schicht)                                 */
-/* ------------------------------------------------------------------ */
-
-function renderStats(stats) {
-  document.getElementById('stat-malicious').textContent =
-    Number(stats.maliciousCount ?? 0).toLocaleString('de-DE');
-  document.getElementById('stat-suspect').textContent =
-    Number(stats.suspectCount ?? 0).toLocaleString('de-DE');
-  document.getElementById('stat-events').textContent =
-    Number(stats.eventCount ?? 0).toLocaleString('de-DE');
-  document.getElementById('stat-network').textContent =
-    String(stats.network ?? '–');
-  document.getElementById('stat-last').textContent = fmtClock(stats.lastEventTime);
-}
+// knownBad für die Live-Engine: ausschließlich aus Live-Funden mit
+// severity 'malicious' (Guard in onLedgerEvent) — niemals als Literal im Code.
+// Kein clear(): monoton wachsend pro Session.
+const knownBad = new Set();
 
 /* ------------------------------------------------------------------ */
-/* Graph (vis-network)                                                 */
+/* Graph (vis-network 10.1.2)                                          */
 /* ------------------------------------------------------------------ */
 
 const EDGE_COLORS = {
@@ -147,9 +149,90 @@ const EDGE_COLORS = {
 };
 const EDGE_DEFAULT = '#62626b';
 
+// Rollen-Farbcodierung (Design-Vorgabe Astra 6): weiße/tonale Fläche,
+// 1px abgedunkelter Tintenrand je Rolle.
+const ROLE_COLORS = {
+  source: {
+    background: '#1d4ed8', border: '#1e3a8a',
+    highlight: { background: '#3b63d9', border: '#1e3a8a' },
+    hover: { background: '#3b63d9', border: '#1e3a8a' },
+  },
+  drainer: {
+    background: '#b3261e', border: '#7f1d1d',
+    highlight: { background: '#d03b33', border: '#7f1d1d' },
+    hover: { background: '#d03b33', border: '#7f1d1d' },
+  },
+  collector: {
+    background: '#9a5b00', border: '#713f12',
+    highlight: { background: '#b8760f', border: '#713f12' },
+    hover: { background: '#b8760f', border: '#713f12' },
+  },
+  relay: {
+    background: '#62626b', border: '#3f3f46',
+    highlight: { background: '#7d7d86', border: '#3f3f46' },
+    hover: { background: '#7d7d86', border: '#3f3f46' },
+  },
+  unknown: {
+    background: '#f0f0f2', border: '#62626b',
+    highlight: { background: '#e2e2e6', border: '#3f3f46' },
+    hover: { background: '#e2e2e6', border: '#3f3f46' },
+  },
+};
+
+// Cluster-Bubble: weiße Füllung, 1px Tintenrand, Radius 12 (Astra 6).
+const CLUSTER_NODE_PROPERTIES = {
+  shape: 'box',
+  size: 25,
+  margin: 12,
+  borderWidth: 1,
+  borderWidthSelected: 2,
+  color: {
+    background: '#ffffff',
+    border: '#17171b',
+    highlight: { background: '#f6f6f7', border: '#141416' },
+    hover: { background: '#f6f6f7', border: '#141416' },
+  },
+  font: { color: '#141416', size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', multi: false },
+  shapeProperties: { borderRadius: 12, borderDashes: false },
+};
+
+const PHYSICS_LIVE = {
+  enabled: true,
+  barnesHut: {
+    gravitationalConstant: -4200,
+    centralGravity: 0.25,
+    springLength: 130,
+    springConstant: 0.045,
+    damping: 0.55,
+  },
+  stabilization: { iterations: 200 },
+};
+const PHYSICS_CLUSTER = {
+  enabled: true,
+  barnesHut: {
+    gravitationalConstant: -6500,
+    centralGravity: 0.2,
+    springLength: 170,
+    springConstant: 0.04,
+    damping: 0.6,
+  },
+  stabilization: { iterations: 300 },
+};
+
 let nodesDS = null;
 let edgesDS = null;
 let network = null;
+let activeGraphTab = 'live';       // 'live' | 'cluster'
+let lastClusterGraph = null;       // Cache für Tab-Wechsel ohne Neuberechnung
+const clusterByVisId = new Map();  // vis-Clusterknoten-Id -> Cluster-Objekt
+
+// Guard um clustering.isCluster: nach openCluster kann ein Clusterknoten im
+// DataSet stehen bleiben, während er aus body.nodes gelöscht wurde –
+// isCluster würde dann nur eine Console-Fehlermeldung ausgeben.
+function isClusterNode(id) {
+  if (!network || void 0 === network.body.nodes[id]) return false;
+  return network.clustering.isCluster(id);
+}
 
 function initGraph() {
   if (typeof vis === 'undefined') {
@@ -164,57 +247,57 @@ function initGraph() {
     { nodes: nodesDS, edges: edgesDS },
     {
       autoResize: true,
-      physics: {
-        enabled: true,
-        barnesHut: {
-          gravitationalConstant: -4200,
-          centralGravity: 0.25,
-          springLength: 130,
-          springConstant: 0.045,
-          damping: 0.55,
-        },
-        stabilization: { iterations: 200 },
-      },
-      interaction: { hover: true, tooltipDelay: 120, zoomView: true, dragView: true },
+      physics: PHYSICS_LIVE,
+      interaction: { hover: true, tooltipDelay: 120, zoomView: true, dragView: true, hoverConnectedEdges: true, selectConnectedEdges: false },
       nodes: {
-        borderWidth: 2,
-        font: { color: '#141416', size: 14, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
+        shape: 'dot',
+        borderWidth: 1,
+        borderWidthSelected: 2,
+        font: { color: '#141416', size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
+        color: {
+          background: '#ffffff',
+          border: '#17171b',
+          highlight: { background: '#f6f6f7', border: '#141416' },
+          hover: { background: '#f6f6f7', border: '#141416' },
+        },
       },
       edges: {
-        width: 2,
+        width: 1,
         smooth: { type: 'curvedCW', roundness: 0.14 },
-        arrows: { to: { enabled: true, scaleFactor: 0.55 } },
+        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+        color: { color: '#62626b', highlight: '#141416', hover: '#141416' },
       },
     }
   );
+  // Klick auf eine Cluster-Bubble öffnet sie (nur verifizierte 10.1.2-API).
+  network.on('click', ({ nodes }) => {
+    if (!nodes || !nodes.length) return;
+    openClusterNode(nodes[0]);
+  });
   return true;
 }
 
-function renderGraph(graph) {
+/* Rohkanten/-knoten inkrementell aktualisieren (Muster aus dem bisherigen
+ * renderGraph): updaten, hinzufügen, verschwundene entfernen – kein Flackern
+ * bei den ~4-Sekunden-Ledger-Ereignissen. Läuft immer im Rohzustand
+ * (vor dem Clustering bzw. im Live-Tab). */
+function updateRawGraph(cg) {
   if (!network) return;
-
-  const rawNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  const rawEdges = Array.isArray(graph.edges) ? graph.edges : [];
-
-  // id -> Label für Kanten-Tooltips (NUR Labels, MEDIUM-5-Fix).
-  const labelById = new Map(
-    rawNodes.map((n) => [String(n.id), String(n.type === 'honeypot' ? honeypotLabel(n) : (n.label || n.id))])
-  );
+  const rawNodes = Array.isArray(cg.nodes) ? cg.nodes : [];
+  const rawEdges = Array.isArray(cg.edges) ? cg.edges : [];
 
   const nextNodes = rawNodes.map((n) => {
-    const isHoneypot = n.type === 'honeypot';
-    const label = isHoneypot ? honeypotLabel(n) : String(n.label || n.id);
+    const role = ROLE_COLORS[n.role] ? n.role : 'unknown';
+    const label = displayFindingAddr(n.id);
     return {
       id: String(n.id),
       label,
-      // Titel-Tooltip NUR mit Labels (MEDIUM-5-Fix): Honeypot-Knoten zeigen
-      // ihr Label, Angreifer-Knoten ihre (öffentliche) Adresse.
-      title: label,
-      shape: isHoneypot ? 'hexagon' : 'dot',
-      size: isHoneypot ? 14 : 18,
-      color: isHoneypot
-        ? { background: '#141416', border: '#141416', highlight: { background: '#33333a', border: '#141416' } }
-        : { background: '#b3261e', border: '#7f1d1d', highlight: { background: '#d03b33', border: '#7f1d1d' } },
+      title: `${label} (${ROLE_LABEL[role]})`,
+      shape: 'dot',
+      size: 16,
+      color: ROLE_COLORS[role],
+      clusterId: n.clusterId ?? null, // Grundlage der Clustering-joinCondition
+      severity: String(n.severity ?? 'info'),
       margin: 8,
     };
   });
@@ -222,22 +305,20 @@ function renderGraph(graph) {
   const nextEdges = rawEdges.map((e) => {
     const type = String(e.type || 'Sonstige');
     return {
-      id: `${e.from}->${e.to}::${type}`,
+      id: String(e.txHash || `${e.from}->${e.to}::${type}`),
       from: String(e.from),
       to: String(e.to),
       label: type,
-      // Kanten-Tooltip nur mit Labels (MEDIUM-5-Fix).
-      title: `${defang(labelById.get(String(e.from)) ?? e.from)} → ${defang(labelById.get(String(e.to)) ?? e.to)} (${type})`,
+      // Kanten-Tooltip nur mit Kurzformen; defang als Defense-in-Depth.
+      title: `${defang(shortAddr(e.from))} → ${defang(shortAddr(e.to))} (${type})`,
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
-      font: { color: '#484850', size: 11, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
+      font: { color: '#484850', size: 10, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
   });
 
-  // Inkrementell aktualisieren: bestehende Knoten/Kanten updaten, neue hinzufügen,
-  // verschwundene entfernen – verhindert Flackern beim 5-Sekunden-Polling.
   nodesDS.update(nextNodes);
   const keepNodeIds = new Set(nextNodes.map((n) => n.id));
-  const staleNodes = nodesDS.getIds().filter((id) => !keepNodeIds.has(id));
+  const staleNodes = nodesDS.getIds().filter((id) => !keepNodeIds.has(id) && !isClusterNode(id));
   if (staleNodes.length) nodesDS.remove(staleNodes);
 
   edgesDS.update(nextEdges);
@@ -246,214 +327,226 @@ function renderGraph(graph) {
   if (staleEdges.length) edgesDS.remove(staleEdges);
 }
 
-/* ------------------------------------------------------------------ */
-/* Threat-Tabelle mit aufklappbarer Evidenz                            */
-/* ------------------------------------------------------------------ */
-
-const expandedAddresses = new Set(); // überlebt Neu-Renderings
-let lastThreats = []; // letzte API-Liste für die clientseitige Suche
-
-// knownBad für die Live-Engine: ausschließlich aus der API-Schiene
-// (Honeypot-Evidenz + Kuratierung) — niemals als Literal im Code.
-const knownBad = new Set();
-
-function evidenceRows(evidence) {
-  // Öffentliche Evidenz enthält keinen txHash mehr, nur ref/type/time/honeypot.
-  const rows = (Array.isArray(evidence) ? evidence : []).map((ev) => `
-      <tr>
-        <td class="tx-type">${esc(ev.type ?? '–')}</td>
-        <td>${esc(fmtTime(ev.time))}</td>
-        <td class="ev-ref">${esc(ev.ref ?? '–')}</td>
-        <td class="bait-label">${esc(defang(ev.honeypot ?? '–'))}</td>
-      </tr>`).join('');
-  return rows || '<tr><td colspan="4">Keine Evidenz vorhanden.</td></tr>';
+function clusterBubbleLabel(c) {
+  const members = Array.isArray(c.memberAddresses) ? c.memberAddresses.length : 0;
+  return `${c.label ?? 'Cluster'}\n${members} Mitglieder · ${fmtXrp(c.totalDrops)} XRP`;
 }
 
-function fundingRows(funding) {
-  // Funding wird nur als Label dargestellt (der Server liefert keine Adressen);
-  // defensiv wird jede adresseähnliche Angabe verschleiert (MEDIUM-4-Fix).
-  const list = Array.isArray(funding) ? funding : [];
-  if (!list.length) return '';
-  const items = list.map((f) => {
-    const labelText = defang(f.label ?? 'Funding-Quelle');
-    const hiddenAddr = f.address ? ' <span class="funding-label">(Adresse nicht öffentlich)</span>' : '';
-    return `<li><span class="funding-addr">${esc(labelText)}</span>${hiddenAddr}</li>`;
-  });
-  return `<div class="funding"><h4>Finanzierungskette</h4><ul>${items.join('')}</ul></div>`;
+function clusterBubbleTitle(c) {
+  const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : [])
+    .slice(0, 8)
+    .map(displayFindingAddr)
+    .join(', ');
+  return `${c.label ?? 'Cluster'}: ${members}`;
 }
 
-function renderThreats(threats) {
-  lastThreats = Array.isArray(threats) ? threats : [];
-  knownBad.clear();
-  for (const t of lastThreats) {
-    const a = String(t.address ?? '');
-    if (XRPL_ADDR_RE.test(a)) knownBad.add(a);
+/* Cluster-Tab: alle Bubbles schließen (Rohzustand), Rohdaten aktualisieren,
+ * dann je Cluster ein Clustering-Durchlauf mit joinCondition auf der vom
+ * Cluster-Graph gesetzten nodeOptions.clusterId. Verwendete API (am gepinnten
+ * vis-network@10.1.2-Bundle verifiziert): clustering.cluster({joinCondition,
+ * clusterNodeProperties}), clustering.updateClusteredNode, clustering.openCluster,
+ * clustering.isCluster. Nicht verwendet (Bundle-Grep 0 Treffer):
+ * clusterByConnectionStrength, addCluster, updateCluster. */
+function applyClustering(cg) {
+  if (!network) return;
+  openAllClusters();
+  updateRawGraph(cg);
+  clusterByVisId.clear();
+
+  for (const c of cg.clusters ?? []) {
+    network.clustering.cluster({
+      joinCondition: (nodeOptions) => nodeOptions.clusterId === c.id,
+      clusterNodeProperties: {
+        ...CLUSTER_NODE_PROPERTIES,
+        id: c.id, // Bundle verifiziert: clusterNodeProperties.id wird übernommen
+        label: clusterBubbleLabel(c),
+        title: clusterBubbleTitle(c),
+      },
+    });
+    if (isClusterNode(c.id)) {
+      clusterByVisId.set(c.id, c);
+      network.clustering.updateClusteredNode(c.id, { label: clusterBubbleLabel(c) });
+    }
   }
-  applyThreatFilter();
+
+  // Cluster-zu-Cluster-Kanten dezent: 1px, gestrichelt, neutrale Töne.
+  for (const e of edgesDS.get()) {
+    if (isClusterNode(e.from) && isClusterNode(e.to)) {
+      edgesDS.update({
+        id: e.id,
+        width: 1,
+        dashes: [6, 4],
+        color: { color: '#62626b', highlight: '#141416', hover: '#141416' },
+      });
+    }
+  }
+
+  network.setOptions({ physics: PHYSICS_CLUSTER });
 }
 
-function applyThreatFilter() {
-  const body = document.getElementById('threat-body');
-  const empty = document.getElementById('threats-empty');
-  const q = (document.getElementById('threat-search').value ?? '').trim().toLowerCase();
-  const list = lastThreats
-    .filter((t) => t.risk === 'malicious')
-    .filter((t) => !q || String(t.address ?? '').toLowerCase().includes(q) || String(t.reason ?? '').toLowerCase().includes(q));
+function openClusterNode(visId) {
+  if (!isClusterNode(visId)) return;
+  const c = clusterByVisId.get(visId);
+  network.clustering.openCluster(visId, {});
+  clusterByVisId.delete(visId);
+  const members = c && Array.isArray(c.memberAddresses) ? c.memberAddresses : [];
+  if (members.length) {
+    network.focus(String(members[0]), { scale: 1.15, animation: { duration: 250, easingFunction: 'easeInOutQuad' } });
+  }
+}
 
-  if (!list.length) {
-    body.innerHTML = '';
-    empty.hidden = false;
+function openAllClusters() {
+  if (!network) return;
+  for (const visId of [...clusterByVisId.keys()]) {
+    if (isClusterNode(visId)) network.clustering.openCluster(visId, {});
+  }
+  clusterByVisId.clear();
+  // Sicherheitsnetz für Clusterknoten, die nicht mehr in der Map stehen.
+  for (const id of nodesDS.getIds()) {
+    if (String(id).startsWith('cluster:') && isClusterNode(id)) {
+      network.clustering.openCluster(id, {});
+    }
+  }
+}
+
+function renderLiveGraph(cg) {
+  if (!network || !cg) return;
+  if (activeGraphTab === 'cluster') {
+    applyClustering(cg);
     return;
   }
-  empty.hidden = true;
-
-  body.innerHTML = list.map((t) => {
-    const addr = String(t.address ?? '');
-    const isOpen = expandedAddresses.has(addr);
-    const evidenceCount = Array.isArray(t.evidence) ? t.evidence.length : 0;
-    const detail = `
-      <table class="evidence-table">
-        <thead>
-          <tr><th scope="col">Tx-Typ</th><th scope="col">Zeit</th><th scope="col">Ref</th><th scope="col">Köder</th></tr>
-        </thead>
-        <tbody>${evidenceRows(t.evidence)}</tbody>
-      </table>
-      ${fundingRows(t.funding)}`;
-    return `
-      <tr class="threat-row${isOpen ? ' open' : ''}" data-addr="${esc(addr)}" tabindex="0" aria-expanded="${isOpen}">
-        <td class="addr">${esc(addr)}</td>
-        <td>${esc(defang(t.reason ?? '–'))}</td>
-        <td>${esc(fmtTime(t.firstSeen))}</td>
-        <td>${evidenceCount}</td>
-        <td class="col-toggle"><span class="chevron">${isOpen ? '▾' : '▸'}</span></td>
-      </tr>
-      <tr class="detail-row"${isOpen ? '' : ' hidden'} data-for="${esc(addr)}">
-        <td colspan="5">${detail}</td>
-      </tr>`;
-  }).join('');
+  updateRawGraph(cg);
 }
 
-function toggleRow(row) {
-  const addr = row.dataset.addr;
-  const detail = document.querySelector(`.detail-row[data-for="${CSS.escape(addr)}"]`);
-  if (!detail) return;
-  const open = expandedAddresses.has(addr);
-  if (open) {
-    expandedAddresses.delete(addr);
-    detail.hidden = true;
-    row.classList.remove('open');
-    row.setAttribute('aria-expanded', 'false');
-    row.querySelector('.chevron').textContent = '▸';
+function setGraphTab(tab) {
+  if (!network || tab === activeGraphTab) return;
+  activeGraphTab = tab;
+  document.getElementById('tab-live').setAttribute('aria-selected', String(tab === 'live'));
+  document.getElementById('tab-cluster').setAttribute('aria-selected', String(tab === 'cluster'));
+  const listEl = document.getElementById('cluster-list');
+  const emptyEl = document.getElementById('cluster-empty');
+  const hasClusters = Boolean(lastClusterGraph && Array.isArray(lastClusterGraph.clusters) && lastClusterGraph.clusters.length);
+  if (tab === 'cluster') {
+    listEl.hidden = !hasClusters;
+    emptyEl.hidden = hasClusters;
+    if (lastClusterGraph) applyClustering(lastClusterGraph);
   } else {
-    expandedAddresses.add(addr);
-    detail.hidden = false;
-    row.classList.add('open');
-    row.setAttribute('aria-expanded', 'true');
-    row.querySelector('.chevron').textContent = '▾';
+    listEl.hidden = true;
+    emptyEl.hidden = true;
+    openAllClusters();
+    network.setOptions({ physics: PHYSICS_LIVE });
+    if (lastClusterGraph) updateRawGraph(lastClusterGraph);
   }
 }
 
-function bindTable() {
-  const body = document.getElementById('threat-body');
-  body.addEventListener('click', (e) => {
-    const row = e.target.closest('.threat-row');
-    if (row) toggleRow(row);
+/* ---------------- Cluster-Zusammenfassungs-Karten ---------------- */
+
+const SEV_RANK = { info: 0, suspect: 1, malicious: 2 };
+const ROLE_ORDER = ['drainer', 'collector', 'relay', 'source', 'unknown']; // Dominanz wie Rollenkonflikt
+const ROLE_LABEL = { source: 'Source', drainer: 'Drainer', collector: 'Kollektor', relay: 'Relay', unknown: 'Unknown' };
+
+function chainAddress(x) {
+  if (typeof x === 'string') return displayFindingAddr(x);
+  if (x && typeof x === 'object') return displayFindingAddr(x.address ?? x.id ?? '');
+  return '';
+}
+
+function clusterCardHtml(c) {
+  // Cluster-Schweregrad = max der Mitglieder-Schweregrade aus dem Knoten-Cache.
+  const sevByAddr = new Map();
+  if (lastClusterGraph && Array.isArray(lastClusterGraph.nodes)) {
+    for (const n of lastClusterGraph.nodes) sevByAddr.set(String(n.id), String(n.severity ?? 'info'));
+  }
+  let sev = 'info';
+  for (const a of c.memberAddresses ?? []) {
+    const s = sevByAddr.get(String(a)) ?? 'info';
+    if ((SEV_RANK[s] ?? 0) > (SEV_RANK[sev] ?? 0)) sev = s;
+  }
+
+  const roleCounts = new Map();
+  for (const role of Object.values(c.roles ?? {})) {
+    roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
+  }
+  let dominant = 'unknown';
+  for (const r of ROLE_ORDER) {
+    if (roleCounts.get(r)) { dominant = r; break; }
+  }
+
+  const chips = ['source', 'drainer', 'collector', 'relay', 'unknown']
+    .filter((r) => roleCounts.get(r))
+    .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${roleCounts.get(r)} × ${ROLE_LABEL[r]}</span>`)
+    .join('');
+
+  // Severity-Chip nur bei malicious/suspect; 'info' wird unterdrückt.
+  const badge = sev === 'malicious' || sev === 'suspect'
+    ? `<span class="risk-badge risk-${esc(sev)}">${sev === 'malicious' ? 'maliziös' : 'verdächtig'}</span>`
+    : '';
+
+  // Drainer→Kollektor-Kette: Start-bis-Ende-Nachverfolgung des Geldflusses.
+  const drainers = Array.isArray(c.mainDrainers) ? c.mainDrainers : [];
+  const collectors = Array.isArray(c.collectors) ? c.collectors : [];
+  const chainRoles = [...drainers.map(() => 'drainer'), ...collectors.map(() => 'collector')];
+  const chainAddrs = [...drainers, ...collectors].map(chainAddress).filter(Boolean);
+  const chainHtml = chainAddrs.length
+    ? `<div class="cluster-chain" aria-label="Geldfluss: Drainer → Kollektor">${
+        chainAddrs.map((a, i) => `<span class="chain-node chain-${chainRoles[i]}">${esc(a)}</span>`)
+          .join('<span class="chain-arrow" aria-hidden="true">→</span>')
+      }</div>`
+    : '';
+
+  return `
+    <li class="cluster-card role-${dominant} sev-${sev}" data-cluster="${esc(c.id)}" tabindex="0">
+      <div class="cluster-head">
+        <span class="cluster-label">${esc(c.label ?? c.id)}</span>
+        ${badge}
+      </div>
+      <div class="cluster-roles">${chips}</div>
+      <div class="cluster-metrics">
+        <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
+        <span class="cluster-txs">${Number(c.txCount ?? 0).toLocaleString('de-DE')} Tx</span>
+        <span class="cluster-accounts">${Number(c.distinctAccounts ?? 0).toLocaleString('de-DE')} Konten</span>
+      </div>
+      ${chainHtml}
+      <div class="cluster-times">
+        <span>Erste Sichtung: ${esc(fmtClock(c.firstSeen))}</span>
+        <span>Letzte Sichtung: ${esc(fmtClock(c.lastSeen))}</span>
+      </div>
+    </li>`;
+}
+
+function renderClusterList(clusters) {
+  const listEl = document.getElementById('cluster-list');
+  const emptyEl = document.getElementById('cluster-empty');
+  const arr = Array.isArray(clusters) ? clusters : [];
+  const inClusterTab = activeGraphTab === 'cluster';
+  if (!arr.length) {
+    listEl.innerHTML = '';
+    listEl.hidden = true;
+    emptyEl.hidden = !inClusterTab;
+    return;
+  }
+  emptyEl.hidden = true;
+  listEl.innerHTML = arr.map(clusterCardHtml).join('');
+  listEl.hidden = !inClusterTab;
+}
+
+function bindGraph() {
+  document.getElementById('tab-live').addEventListener('click', () => setGraphTab('live'));
+  document.getElementById('tab-cluster').addEventListener('click', () => setGraphTab('cluster'));
+  const listEl = document.getElementById('cluster-list');
+  const openFromCard = (card) => {
+    const cid = card.dataset.cluster;
+    if (cid) openClusterNode(cid);
+  };
+  listEl.addEventListener('click', (e) => {
+    const card = e.target.closest('.cluster-card');
+    if (card) openFromCard(card);
   });
-  body.addEventListener('keydown', (e) => {
+  listEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
-      const row = e.target.closest('.threat-row');
-      if (row) { e.preventDefault(); toggleRow(row); }
+      const card = e.target.closest('.cluster-card');
+      if (card) { e.preventDefault(); openFromCard(card); }
     }
-  });
-}
-
-/* ------------------------------------------------------------------ */
-/* Selbst-Check: eigene Adresse gegen die Bedrohungsliste              */
-/* ------------------------------------------------------------------ */
-
-async function runSelfCheck(address) {
-  const resultBox = document.getElementById('check-result');
-  const btn = document.getElementById('check-btn');
-  btn.disabled = true;
-  btn.textContent = 'Prüfe …';
-  resultBox.hidden = false;
-  resultBox.className = 'check-result pending';
-  resultBox.textContent = 'Transaktionshistorie wird auf dem Ledger geprüft …';
-  try {
-    const res = await fetch(`/api/check/${encodeURIComponent(address)}`, { cache: 'no-store' });
-    const data = await res.json();
-    if (!res.ok) {
-      resultBox.className = 'check-result error';
-      resultBox.textContent = (data && data.error) ? data.error : `Fehler (HTTP ${res.status}).`;
-      return;
-    }
-    renderCheckResult(data);
-  } catch (err) {
-    resultBox.className = 'check-result error';
-    resultBox.textContent = `Check fehlgeschlagen: ${err && err.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Prüfen';
-  }
-}
-
-function renderCheckResult(data) {
-  const box = document.getElementById('check-result');
-  const contacts = Array.isArray(data.contacts) ? data.contacts : [];
-  let cls = 'clean';
-  let head = '';
-  if (data.verdict === 'contact') {
-    cls = 'contact';
-    head = contacts.length === 1
-      ? '1 Kontakt zu einer bekannten Bedrohungs-Adresse gefunden:'
-      : `${contacts.length} Kontakte zu bekannten Bedrohungs-Adressen gefunden:`;
-  } else if (data.verdict === 'unknown') {
-    cls = 'unknown';
-    head = data.hint ?? 'Konto nicht gefunden.';
-  } else {
-    head = `Keine Kontakte zu bekannten maliziösen Adressen (geprüft: ${Number(data.checkedTxCount ?? 0).toLocaleString('de-DE')} Transaktionen${data.truncated ? ', Historie abgeschnitten' : ''}).`;
-  }
-  const selfNote = data.selfListed
-    ? '<p class="check-self">Hinweis: Diese Adresse steht selbst auf der Bedrohungsliste.</p>'
-    : '';
-  const hint = data.hint && data.verdict !== 'unknown'
-    ? `<p class="check-hint">${esc(data.hint)}</p>`
-    : '';
-  let table = '';
-  if (contacts.length) {
-    const rows = contacts.map((c) => `
-      <tr>
-        <td class="tx-type">${esc(c.txType ?? '–')}</td>
-        <td>${esc(fmtTime(c.time))}</td>
-        <td>${esc(c.direction ?? '–')}</td>
-        <td>${esc(c.note ?? '')}</td>
-        <td class="addr">${esc(c.counterparty ?? '–')}</td>
-        <td><span class="risk-badge ${c.risk === 'malicious' ? 'risk-malicious' : 'risk-suspect'}">${esc(c.risk ?? '–')}</span></td>
-      </tr>`).join('');
-    table = `
-      <table class="evidence-table">
-        <thead>
-          <tr><th scope="col">Tx-Typ</th><th scope="col">Zeit</th><th scope="col">Richtung</th><th scope="col">Vorgang</th><th scope="col">Gegenpartei</th><th scope="col">Risiko</th></tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-  }
-  box.className = `check-result ${cls}`;
-  box.innerHTML = `<p class="check-head">${esc(head)}</p>${selfNote}${table}${hint}`;
-}
-
-function bindSelfCheck() {
-  document.getElementById('check-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const addr = document.getElementById('check-address').value.trim();
-    const box = document.getElementById('check-result');
-    if (!XRPL_ADDR_RE.test(addr)) {
-      box.hidden = false;
-      box.className = 'check-result error';
-      box.textContent = 'Bitte eine gültige XRPL-Adresse eingeben (beginnt mit „r", 25–35 Zeichen).';
-      return;
-    }
-    runSelfCheck(addr);
   });
 }
 
@@ -469,6 +562,12 @@ const logEntries = [];              // {t, ledgerIndex, ruleId, severity, addres
 const firstSeenAt = new Map();      // Konto -> Zeitstempel der ersten Sichtung (Stream-Fenster)
 const seenLedgers = new Set();      // Deduplizierung WSS/Fallback
 const liveFindings = { malicious: 0, suspect: 0, info: 0 };
+
+// Rollende Fenster für die Cluster-Schicht (Befüllung ausschließlich im
+// onLedgerEvent-Guard): letzte TX_WINDOW_CAP Tx-Records / FINDINGS_WINDOW_CAP
+// Findings aus dem WSS-Loop.
+const txWindow = [];
+const findingsWindow = [];
 
 let lastLedgerAt = 0;
 let liveMode = 'init';              // 'init' | 'wss' | 'poll'
@@ -575,9 +674,10 @@ function finishBlockCard(card, findings, ledgerTxCount, resolvedCount) {
 
 /* ---------- Adresse im Live-Log ----------
  * Voller Akteur wird nur gezeigt, wenn die Adresse bereits öffentlich ist
- * (knownBad-Schiene /api/threats). Sonst Kurzform — identische Anonymitäts-
- * Logik wie die Kurzformen in den Engine-Notizen (lib/detector.mjs shortAddr):
- * volle Köder-Adressen landen nie im DOM, Angreifer-Kanten bleiben lesbar. */
+ * (knownBad-Schiene aus malicious-Live-Funden). Sonst Kurzform — identische
+ * Anonymitäts-Logik wie die Kurzformen in den Engine-Notizen
+ * (lib/detector.mjs shortAddr): volle Köder-Adressen landen nie im DOM,
+ * Angreifer-Kanten bleiben lesbar. */
 function displayFindingAddr(address) {
   const a = String(address ?? '');
   if (!a) return '–';
@@ -670,8 +770,13 @@ function updateLiveStats() {
   document.getElementById('live-f-malicious').textContent = liveFindings.malicious.toLocaleString('de-DE');
   document.getElementById('live-f-suspect').textContent = liveFindings.suspect.toLocaleString('de-DE');
   document.getElementById('live-f-info').textContent = liveFindings.info.toLocaleString('de-DE');
-  document.getElementById('last-update').textContent =
-    'Stand: ' + new Date().toLocaleTimeString('de-DE');
+  const nowText = new Date().toLocaleTimeString('de-DE');
+  document.getElementById('last-update').textContent = 'Stand: ' + nowText;
+  // Kopfzeilen-Stats (IDs unverändert) aus denselben Live-Werten.
+  document.getElementById('stat-malicious').textContent = liveFindings.malicious.toLocaleString('de-DE');
+  document.getElementById('stat-suspect').textContent = liveFindings.suspect.toLocaleString('de-DE');
+  document.getElementById('stat-events').textContent = liveStats.txs.toLocaleString('de-DE');
+  document.getElementById('stat-last').textContent = nowText;
 }
 
 /* ---------- Volles Ledger pro Block über denselben WebSocket ---------- */
@@ -799,6 +904,30 @@ async function onLedgerEvent(msg) {
   recordFirstSeen(entries);
   const result = analyzeLedger({ transactions: entries }, buildCtx());
 
+  // Cluster-Schicht: rollendes Fenster + Neuberechnung pro validiertem Ledger.
+  if (txRecordFromEntry && buildClusterGraph) {
+    for (const e of entries) {
+      // closeIso (Ledger-Ebene) als Fallback: expand:true-Entries tragen
+      // selbst kein close_time (live verifiziert, siehe Header-Kommentar).
+      const rec = txRecordFromEntry(e, closeIso);
+      if (rec) {
+        txWindow.push(rec);
+        if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
+      }
+    }
+    for (const f of result.findings) {
+      findingsWindow.push(f);
+      if (findingsWindow.length > FINDINGS_WINDOW_CAP) findingsWindow.splice(0, findingsWindow.length - FINDINGS_WINDOW_CAP);
+      // knownBad-Füller: nur öffentlich dokumentierte Maliziös-Funde —
+      // hält known-bad-hit (Engine) und displayFindingAddr wirksam.
+      if (f.severity === 'malicious' && XRPL_ADDR_RE.test(f.address)) knownBad.add(f.address);
+    }
+    const cg = buildClusterGraph(txWindow, findingsWindow, { maxEdges: CLUSTER_MAX_EDGES });
+    lastClusterGraph = cg;
+    renderLiveGraph(cg);
+    renderClusterList(cg.clusters);
+  }
+
   finishBlockCard(card, result.findings, ledgerTxCount, entries.length);
   registerFindings(result.findings, idx);
   liveStats.ledgers += 1;
@@ -830,7 +959,7 @@ function connectLive() {
     try { msg = JSON.parse(ev.data); } catch { return; }
     // xrplcluster sendet "ledgerClosed" (verifiziert); "ledger" bleibt abgedeckt.
     if ((msg.type === 'ledgerClosed' || (msg.type === 'ledger' && msg.validated)) && msg.ledger_index != null) {
-      onLedgerEvent(msg);
+      onLedgerEvent(msg).catch((err) => { console.error('ledger event', err); });
       return;
     }
     if (msg.type === 'response' && pendingTx.has(msg.id)) {
@@ -877,6 +1006,22 @@ async function pollSnapshotFallback() {
       liveStats.ledgers += 1;
       liveStats.txs += txCount;
       updateLiveStats();
+      // Cluster-Schicht auch im poll-Modus: Server liefert txRecords mit.
+      if (txRecordFromEntry && buildClusterGraph) {
+        for (const r of Array.isArray(body.txRecords) ? body.txRecords : []) {
+          if (!r || typeof r !== 'object') continue;
+          txWindow.push(r);
+          if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
+        }
+        for (const f of findings) {
+          findingsWindow.push(f);
+          if (findingsWindow.length > FINDINGS_WINDOW_CAP) findingsWindow.splice(0, findingsWindow.length - FINDINGS_WINDOW_CAP);
+        }
+        const cg = buildClusterGraph(txWindow, findingsWindow, { maxEdges: CLUSTER_MAX_EDGES });
+        lastClusterGraph = cg;
+        renderLiveGraph(cg);
+        renderClusterList(cg.clusters);
+      }
     }
     setConn(true, connLabel());
   } catch (err) {
@@ -900,34 +1045,12 @@ function bindLive() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Polling (Honeypot-Präzisionsschicht)                                */
-/* ------------------------------------------------------------------ */
-
-async function poll() {
-  try {
-    const [stats, graph, threats] = await Promise.all([
-      fetchJson('/api/stats'),
-      fetchJson('/api/graph'),
-      fetchJson('/api/threats'),
-    ]);
-    renderStats(stats);
-    renderGraph(graph);
-    renderThreats(threats);
-  } catch {
-    /* Honeypot-Schicht optional; Live-Feed arbeitet unabhängig weiter */
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /* Start (Modulskript: DOM ist beim Ausführen bereits geparst)         */
 /* ------------------------------------------------------------------ */
 
 initGraph();
-bindTable();
-bindSelfCheck();
+bindGraph();
 bindLive();
-document.getElementById('threat-search').addEventListener('input', applyThreatFilter);
-poll();
-setInterval(poll, POLL_MS);
+document.getElementById('stat-network').textContent = 'XRPL Mainnet (xrplcluster.com)';
 connectLive();
 setInterval(watchdog, WATCHDOG_MS);
