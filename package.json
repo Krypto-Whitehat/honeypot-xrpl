@@ -14,6 +14,8 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.100",
+    "ai": "^7.0.122",
     "express": "^4.21.2",
     "xrpl": "^4.0.0"
   }
