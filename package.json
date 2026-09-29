@@ -10,7 +10,8 @@
     "start": "node server/index.mjs",
     "monitor": "node monitor/monitor.mjs",
     "provision": "node monitor/provision-bait.mjs",
-    "simulate": "node monitor/simulate-attack.mjs"
+    "simulate": "node monitor/simulate-attack.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.2",

@@ -732,6 +732,10 @@ main {
 
 .chain-arrow { color: var(--a6-muted); }
 
+/* Trenner zwischen mehreren Flusspfaden (echte Kantenpfade, lib/cluster.mjs
+   flowPaths) — bewusst KEIN Pfeil: '·' impliziert keine Transaktion. */
+.chain-path-sep { color: var(--a6-muted); padding: 0 2px; }
+
 .cluster-times {
   display: flex;
   flex-wrap: wrap;

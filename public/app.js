@@ -36,7 +36,11 @@
  * Sieht ein Label trotzdem wie eine XRPL-Adresse aus, wird es defensiv durch
  * "Köder" ersetzt – Adressen von Ködern landen nie im DOM. Fund-Adressen im
  * Live-Log und im Graph sind ausschließlich öffentlich im Ledger sichtbare
- * Akteure (Kurzform, außer sie stehen auf der öffentlichen knownBad-Liste).
+ * Akteure und werden vollständig angezeigt, sobald die Bait-Hash-Allowlist
+ * (GET /api/bait-hashes, nur SHA-256-Hashes) geladen ist und die Adresse
+ * nicht auf der Deny-Liste steht; bis dahin und bei dauerhaftem Ausfall der
+ * Allowlist gilt die Kurzform (fail-closed). knownBad steuert nur noch die
+ * Engine-Logik (known-bad-hit), nicht mehr die Anzeige.
  */
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
@@ -47,12 +51,43 @@ import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
  * um die Import-Latenz verzögern und ist bewusst nicht verwendet. */
 let buildClusterGraph = null;
 let txRecordFromEntry = null;
+let flowPathsFn = null;
 import('/lib/cluster.mjs')
   .then((m) => {
     buildClusterGraph = typeof m.buildClusterGraph === 'function' ? m.buildClusterGraph : null;
     txRecordFromEntry = typeof m.txRecordFromEntry === 'function' ? m.txRecordFromEntry : null;
+    flowPathsFn = typeof m.flowPaths === 'function' ? m.flowPaths : null;
   })
   .catch(() => { /* Cluster-Funktion offline (z. B. 404); Live-Feed läuft weiter */ });
+
+/* Drilldown-Modul (Cluster-Detailmodal): ebenfalls nicht-blockierender
+ * dynamischer Import. app.js gibt dem Modul den aktuellen Cluster-Graphen
+ * über ein Kontext-Objekt frei; ohne Modul bleiben Karten-/Bubble-Klicks
+ * wirkungslos, der Live-Feed läuft unverändert. */
+let drilldown = null;
+import('./drilldown.js')
+  .then((m) => {
+    if (m && typeof m.initClusterDrilldown === 'function') {
+      drilldown = m.initClusterDrilldown({
+        getClusterGraph: () => lastClusterGraph,
+        isFullShownAddr,
+        displayAddr: displayFindingAddr,
+        isDeniedAddr,
+        shortAddr,
+        esc,
+        fmtXrp,
+        fmtClock,
+        roleColors: ROLE_COLORS,
+        edgeColors: EDGE_COLORS,
+        edgeDefault: EDGE_DEFAULT,
+        roleLabels: ROLE_LABEL,
+        physicsCluster: PHYSICS_CLUSTER,
+        addrActionsHtml,
+        flowPaths: () => flowPathsFn,
+      });
+    }
+  })
+  .catch(() => { /* Drilldown offline (z. B. 404); Karten-Klick bleibt ohne Wirkung */ });
 
 const WSS_URL = 'wss://xrplcluster.com';
 const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
@@ -129,6 +164,216 @@ async function fetchJson(path) {
 // severity 'malicious' (Guard in onLedgerEvent) — niemals als Literal im Code.
 // Kein clear(): monoton wachsend pro Session.
 const knownBad = new Set();
+
+/* ------------------------------------------------------------------ */
+/* Bait-Hash-Allowlist: GET /api/bait-hashes (Deny-Liste, nur Hashes)  */
+/* ------------------------------------------------------------------ */
+/* Der Client erfährt die Klartext-Adressen der Köder nie — er erhält nur
+ * deren SHA-256-Hashes (hex, Kleinbuchstaben). Eine Adresse wird nur dann
+ * vollständig angezeigt, wenn die Allowlist geladen ist und ihr Hash nicht
+ * auf der Deny-Liste steht; sonst Kurzform (fail-closed). Nach drei
+ * Fehlschlägen bleibt die Vollanzeige dauerhaft aus.
+ * Hash-Normalisierung identisch zur Serverseite: UTF-8 der rohen, nur
+ * getrimmten Adresse, hex klein. */
+const BAIT_HASH_ENDPOINT = '/api/bait-hashes';
+const BAIT_HASH_REFETCH_MS = 60000;      // Server rotiert lokal alle 5 s; 60 s genügen
+const BAIT_HASH_MIN_SPACING_MS = 15000;  // Mindestabstand zwischen Refetches
+const BAIT_HASH_MAX_FAILS = 3;           // danach: Vollanzeige dauerhaft aus
+const BAIT_PENDING_MAX = 2000;           // Obergrenze gepufferter knownBad-Kandidaten
+
+const baitHashDeny = new Set();   // sha256-hex (klein) der Bait-Union
+const addrHashCache = new Map();  // Adresse -> sha256-hex (synchrone Deny-Prüfung)
+const pendingCandidates = [];     // knownBad-Kandidaten vor dem Deny-Load
+let denyLoaded = false;
+let denyFailCount = 0;
+let denyPermanentlyFailed = false;
+let fullDisplay = false;          // denyLoaded && !denyPermanentlyFailed
+let lastDenyFetchAt = 0;
+
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
+  let hex = '';
+  for (const b of new Uint8Array(digest)) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
+
+async function hashOf(addr) {
+  const a = String(addr ?? '').trim();
+  if (!a) return '';
+  const cached = addrHashCache.get(a);
+  if (cached) return cached;
+  const hex = await sha256Hex(a);
+  addrHashCache.set(a, hex);
+  return hex;
+}
+
+// Synchrone Deny-Prüfung: nur gehashte Adressen können getroffen werden.
+function isDeniedAddr(addr) {
+  const h = addrHashCache.get(String(addr ?? '').trim());
+  return h !== undefined && baitHashDeny.has(h);
+}
+
+// Asynchrone Deny-Prüfung für frische Adressen (füllt den Hash-Cache):
+// clientseitiges Pendant zur baitLabels-Filterung der Serverpfade
+// (server/index.mjs /api/ledger, api/ledger.js) — der Client kennt nur
+// Hashes, nie Klartext-Köder-Adressen.
+async function isDeniedAddrAsync(addr) {
+  const a = String(addr ?? '').trim();
+  if (!a) return false;
+  return baitHashDeny.has(await hashOf(a));
+}
+
+// Tx-Record mit Köder-Endpunkt? (account ODER destination — dieselbe Regel
+// wie server/index.mjs /api/ledger und api/ledger.js, nur hash-gestützt.)
+async function recordTouchesBait(rec) {
+  if (!rec || typeof rec !== 'object') return false;
+  if (rec.account && (await isDeniedAddrAsync(rec.account))) return true;
+  if (rec.destination && (await isDeniedAddrAsync(rec.destination))) return true;
+  return false;
+}
+
+// Volle Anzeige nur bei geladener Allowlist, gehashter Adresse und
+// Nicht-Treffer auf der Deny-Liste — sonst Kurzform (fail-closed).
+function isFullShownAddr(addr) {
+  const a = String(addr ?? '').trim();
+  if (!a || !fullDisplay) return false;
+  const h = addrHashCache.get(a);
+  return h !== undefined && !baitHashDeny.has(h);
+}
+
+async function rebuildDisplayAndKnownBad() {
+  fullDisplay = denyLoaded && !denyPermanentlyFailed;
+  // knownBad nach jedem Deny-Load neu bewerten: Hash-Treffer entfernen, damit
+  // known-bad-hit (Engine) nie eine Köder-Adresse trifft.
+  for (const a of [...knownBad]) {
+    if (baitHashDeny.has(await hashOf(a))) knownBad.delete(a);
+  }
+  // Vor dem Load gepufferte Kandidaten nachbewerten.
+  const buffered = pendingCandidates.splice(0, pendingCandidates.length);
+  for (const a of buffered) {
+    if (!baitHashDeny.has(await hashOf(a))) knownBad.add(a);
+  }
+}
+
+async function refetchBaitHashes(force) {
+  if (denyPermanentlyFailed) return;
+  const now = Date.now();
+  if (!force && lastDenyFetchAt && now - lastDenyFetchAt < BAIT_HASH_MIN_SPACING_MS) return;
+  lastDenyFetchAt = now;
+  try {
+    const body = await fetchJson(BAIT_HASH_ENDPOINT);
+    const raw = Array.isArray(body?.hashes) ? body.hashes : null;
+    if (!raw) throw new Error('Antwort ohne hashes-Feld');
+    const next = new Set();
+    for (const h of raw) {
+      const s = String(h ?? '').trim().toLowerCase();
+      if (s) next.add(s);
+    }
+    baitHashDeny.clear();
+    for (const h of next) baitHashDeny.add(h);
+    denyLoaded = true;
+    denyFailCount = 0;
+    await rebuildDisplayAndKnownBad();
+  } catch (err) {
+    denyFailCount += 1;
+    if (denyFailCount >= BAIT_HASH_MAX_FAILS) {
+      denyPermanentlyFailed = true;
+      denyLoaded = false;
+      fullDisplay = false;
+      console.warn('Bait-Hash-Allowlist nicht erreichbar – Vollanzeige dauerhaft deaktiviert (fail-closed).', err);
+      // Gepufferte Kandidaten dürfen in knownBad (known-bad-hit der Engine
+      // bleibt im WSS-Pfad funktionsfähig); die Anzeige bleibt Kurzform.
+      for (const a of pendingCandidates) knownBad.add(a);
+      pendingCandidates.length = 0;
+    } else {
+      console.warn(`Bait-Hash-Allowlist: Versuch ${denyFailCount} fehlgeschlagen (${err && err.message})`);
+    }
+  }
+}
+
+// knownBad-Füller nur über dieses Gate: vor dem Deny-Load puffern (RACE-GATE),
+// danach erst nach Hash-Prüfung hinzufügen — Köder-Adressen nie in knownBad.
+async function offerKnownBadCandidate(address) {
+  const a = String(address ?? '');
+  if (!XRPL_ADDR_RE.test(a)) return;
+  if (!denyLoaded) {
+    if (pendingCandidates.length < BAIT_PENDING_MAX && !pendingCandidates.includes(a)) pendingCandidates.push(a);
+    return;
+  }
+  if (baitHashDeny.has(await hashOf(a))) return;
+  knownBad.add(a);
+}
+
+// Hashes aller Anzeigeadressen vor dem Rendern vorhalten, damit
+// displayFindingAddr synchron und fail-closed entscheiden kann.
+async function primeAddrHashes(cg, findings) {
+  const targets = new Set();
+  for (const n of cg?.nodes ?? []) {
+    const a = String(n.id ?? '').trim();
+    if (a && !addrHashCache.has(a)) targets.add(a);
+  }
+  for (const e of cg?.edges ?? []) {
+    for (const a of [String(e.from ?? '').trim(), String(e.to ?? '').trim()]) {
+      if (a && !addrHashCache.has(a)) targets.add(a);
+    }
+  }
+  for (const f of findings ?? []) {
+    const a = String(f.address ?? '').trim();
+    if (a && !addrHashCache.has(a)) targets.add(a);
+  }
+  const list = [...targets].slice(0, 4000);
+  if (list.length) await Promise.all(list.map((a) => hashOf(a)));
+}
+
+/* ------------------------------------------------------------------ */
+/* Adresse: Kopieren + xrplcharts-Link (nur bei voller Anzeige)        */
+/* ------------------------------------------------------------------ */
+function addrActionsHtml(address) {
+  const a = String(address ?? '');
+  const href = `https://xrplcharts.com/accounts/${encodeURIComponent(a)}`;
+  return (
+    `<span class="addr-actions">` +
+    `<button type="button" class="addr-copy" data-addr="${esc(a)}" aria-label="Adresse kopieren">Kopieren</button>` +
+    `<a class="addr-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" aria-label="Auf xrplcharts.com öffnen" title="Auf xrplcharts.com öffnen">↗</a>` +
+    `</span>`
+  );
+}
+
+async function copyAddress(addr) {
+  const a = String(addr ?? '');
+  if (!a) return false;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(a);
+      return true;
+    }
+  } catch { /* Fallback unten */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = a;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+function bindAddrActions() {
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.addr-copy');
+    if (!btn) return;
+    const ok = await copyAddress(btn.dataset.addr);
+    btn.textContent = ok ? 'Kopiert' : 'Fehler';
+    btn.setAttribute('aria-live', 'polite');
+    setTimeout(() => { btn.textContent = 'Kopieren'; }, 2000);
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Graph (vis-network 10.1.2)                                          */
@@ -269,10 +514,16 @@ function initGraph() {
       },
     }
   );
-  // Klick auf eine Cluster-Bubble öffnet sie (nur verifizierte 10.1.2-API).
+  // Klick auf eine Cluster-Bubble öffnet das Drilldown-Modal für genau diesen
+  // Cluster. BUBBLE-GUARD: network.on('click') feuert auf JEDEM Knoten —
+  // Roh-Adressknoten im Live-Tab bleiben No-op (sonst bricht der Live-Tab).
   network.on('click', ({ nodes }) => {
     if (!nodes || !nodes.length) return;
-    openClusterNode(nodes[0]);
+    const visId = nodes[0];
+    if (!isClusterNode(visId)) return;
+    const c = clusterByVisId.get(visId);
+    if (!c) return;
+    openClusterModal(c.id);
   });
   return true;
 }
@@ -309,8 +560,9 @@ function updateRawGraph(cg) {
       from: String(e.from),
       to: String(e.to),
       label: type,
-      // Kanten-Tooltip nur mit Kurzformen; defang als Defense-in-Depth.
-      title: `${defang(shortAddr(e.from))} → ${defang(shortAddr(e.to))} (${type})`,
+      // Kanten-Tooltip: volle Adressen bei geladener Allowlist und Nicht-Treffer
+      // auf der Deny-Liste, sonst Kurzform (displayFindingAddr, fail-closed).
+      title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${type})`,
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
       font: { color: '#484850', size: 10, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
@@ -384,14 +636,13 @@ function applyClustering(cg) {
   network.setOptions({ physics: PHYSICS_CLUSTER });
 }
 
-function openClusterNode(visId) {
-  if (!isClusterNode(visId)) return;
-  const c = clusterByVisId.get(visId);
-  network.clustering.openCluster(visId, {});
-  clusterByVisId.delete(visId);
-  const members = c && Array.isArray(c.memberAddresses) ? c.memberAddresses : [];
-  if (members.length) {
-    network.focus(String(members[0]), { scale: 1.15, animation: { duration: 250, easingFunction: 'easeInOutQuad' } });
+// Klick-Routing: Karten und Bubbles öffnen das Drilldown-Modal (cluster.id-
+// zentriert — das Modal re-looked selbst bei jedem Daten-Update). Die bisherige
+// vis-Bubble-Öffnung (openClusterNode) wird dadurch ersetzt; openAllClusters
+// bleibt für den Tab-Wechsel unangetastet.
+function openClusterModal(clusterId) {
+  if (drilldown && typeof drilldown.openCluster === 'function') {
+    drilldown.openCluster(String(clusterId));
   }
 }
 
@@ -445,13 +696,30 @@ const SEV_RANK = { info: 0, suspect: 1, malicious: 2 };
 const ROLE_ORDER = ['drainer', 'collector', 'relay', 'source', 'unknown']; // Dominanz wie Rollenkonflikt
 const ROLE_LABEL = { source: 'Source', drainer: 'Drainer', collector: 'Kollektor', relay: 'Relay', unknown: 'Unknown' };
 
-function chainAddress(x) {
-  if (typeof x === 'string') return displayFindingAddr(x);
-  if (x && typeof x === 'object') return displayFindingAddr(x.address ?? x.id ?? '');
-  return '';
+// Flusskette als Markup: Pfade aus flowPaths (lib/cluster.mjs) werden entlang
+// EBENER KANTEN mit '→' verbunden; mehrere Pfade trennt ein '·'. Volle
+// Adresse + Kopier-Button + xrplcharts-Link nur bei erlaubter Vollanzeige
+// (Allowlist geladen, kein Deny-Treffer); sonst Kurzform ohne beides.
+function flowChainHtml(paths, opts = {}) {
+  const maxChips = Number.isFinite(opts.maxChips) ? Math.max(2, Math.floor(opts.maxChips)) : 10;
+  const chip = (x) => {
+    const address = String(x?.id ?? '');
+    const shown = displayFindingAddr(address);
+    const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
+    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}</span>`;
+  };
+  const parts = [];
+  let used = 0;
+  for (const p of Array.isArray(paths) ? paths : []) {
+    if (!Array.isArray(p) || p.length < 2 || used + p.length > maxChips) continue;
+    parts.push(p.map(chip).join('<span class="chain-arrow" aria-hidden="true">→</span>'));
+    used += p.length;
+  }
+  if (!parts.length) return '';
+  return parts.join('<span class="chain-path-sep" aria-hidden="true">·</span>');
 }
 
-function clusterCardHtml(c) {
+function clusterCardHtml(c, index) {
   // Cluster-Schweregrad = max der Mitglieder-Schweregrade aus dem Knoten-Cache.
   const sevByAddr = new Map();
   if (lastClusterGraph && Array.isArray(lastClusterGraph.nodes)) {
@@ -482,22 +750,36 @@ function clusterCardHtml(c) {
     ? `<span class="risk-badge risk-${esc(sev)}">${sev === 'malicious' ? 'maliziös' : 'verdächtig'}</span>`
     : '';
 
-  // Drainer→Kollektor-Kette: Start-bis-Ende-Nachverfolgung des Geldflusses.
-  const drainers = Array.isArray(c.mainDrainers) ? c.mainDrainers : [];
-  const collectors = Array.isArray(c.collectors) ? c.collectors : [];
-  const chainRoles = [...drainers.map(() => 'drainer'), ...collectors.map(() => 'collector')];
-  const chainAddrs = [...drainers, ...collectors].map(chainAddress).filter(Boolean);
-  const chainHtml = chainAddrs.length
-    ? `<div class="cluster-chain" aria-label="Geldfluss: Drainer → Kollektor">${
-        chainAddrs.map((a, i) => `<span class="chain-node chain-${chainRoles[i]}">${esc(a)}</span>`)
-          .join('<span class="chain-arrow" aria-hidden="true">→</span>')
-      }</div>`
+  // Flusskette: echte Start-bis-Ende-Pfade aus den Cluster-Kanten (flowPaths,
+  // lib/cluster.mjs) — '→' verbindet nur Adressen entlang belegter
+  // Transaktionen, nie rollenweise aneinandergereihte Chips ohne Kantenbezug
+  // (Befund 2026-09-29).
+  let chainInner = '';
+  if (flowPathsFn && lastClusterGraph) {
+    const memberSet = new Set((c.memberAddresses ?? []).map(String));
+    const memberNodes = (Array.isArray(lastClusterGraph.nodes) ? lastClusterGraph.nodes : [])
+      .filter((n) => memberSet.has(String(n.id)))
+      .map((n) => ({ id: String(n.id), role: n.role }));
+    const memberEdges = (Array.isArray(lastClusterGraph.edges) ? lastClusterGraph.edges : [])
+      .filter((e) => memberSet.has(String(e.from)) && memberSet.has(String(e.to)))
+      .map((e) => ({ from: String(e.from), to: String(e.to) }));
+    chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges, { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
+  }
+  const chainHtml = chainInner
+    ? `<div class="cluster-chain" aria-label="Geldfluss: Start bis Kollektor entlang echter Kanten">${chainInner}</div>`
     : '';
 
+  // Schaltflächen-Semantik für Screenreader: die Karte öffnet das Drilldown-
+  // Modal (Klick + Enter/Leertaste) — deshalb role="button" plus sprechendes
+  // aria-label (Befund 2026-09-29).
+  const ariaLabel = `Details zu ${c.label ?? 'Cluster'} öffnen – ${fmtXrp(c.totalDrops)} XRP, ${Number(c.txCount ?? 0).toLocaleString('de-DE')} Tx, ${Number(c.distinctAccounts ?? 0).toLocaleString('de-DE')} Konten`;
+
+  // data-cluster trägt NUR den Listen-Index — c.id ('cluster:<Adresse>')
+  // wird nie im DOM gerendert (c.id ist ausschließlich interner Lookup-Schlüssel).
   return `
-    <li class="cluster-card role-${dominant} sev-${sev}" data-cluster="${esc(c.id)}" tabindex="0">
+    <li class="cluster-card role-${dominant} sev-${sev}" data-cluster-index="${Number(index) || 0}" tabindex="0" role="button" aria-label="${esc(ariaLabel)}">
       <div class="cluster-head">
-        <span class="cluster-label">${esc(c.label ?? c.id)}</span>
+        <span class="cluster-label">${esc(c.label ?? 'Cluster')}</span>
         ${badge}
       </div>
       <div class="cluster-roles">${chips}</div>
@@ -526,7 +808,7 @@ function renderClusterList(clusters) {
     return;
   }
   emptyEl.hidden = true;
-  listEl.innerHTML = arr.map(clusterCardHtml).join('');
+  listEl.innerHTML = arr.map((c, i) => clusterCardHtml(c, i)).join('');
   listEl.hidden = !inClusterTab;
 }
 
@@ -534,9 +816,16 @@ function bindGraph() {
   document.getElementById('tab-live').addEventListener('click', () => setGraphTab('live'));
   document.getElementById('tab-cluster').addEventListener('click', () => setGraphTab('cluster'));
   const listEl = document.getElementById('cluster-list');
+  // Index-Lookup gegen den AKTUELLEN lastClusterGraph: die Karte trägt nur
+  // ihren Listen-Index; aus ihm wird die cluster.id aufgelöst, die das Modal
+  // anschließend gegen spätere Graph-Updates re-looked (kein stale Index).
   const openFromCard = (card) => {
-    const cid = card.dataset.cluster;
-    if (cid) openClusterNode(cid);
+    const idx = Number(card.dataset.clusterIndex);
+    if (!Number.isInteger(idx) || idx < 0) return;
+    const clusters = lastClusterGraph && Array.isArray(lastClusterGraph.clusters) ? lastClusterGraph.clusters : [];
+    const c = clusters[idx];
+    if (!c) return;
+    openClusterModal(c.id);
   };
   listEl.addEventListener('click', (e) => {
     const card = e.target.closest('.cluster-card');
@@ -568,6 +857,32 @@ const liveFindings = { malicious: 0, suspect: 0, info: 0 };
 // Findings aus dem WSS-Loop.
 const txWindow = [];
 const findingsWindow = [];
+
+// Cluster-Neubau aus den rollenden Fenstern — mit clientseitigem Köder-Filter
+// (Hash-Deny) als Pendant zur serverseitigen baitLabels-Filterung der
+// Snapshot-Pfade: Ein Tx-Record/Finding mit Köder-Endpunkt erreicht NIE
+// buildClusterGraph, damit Köder-Adressen weder Knoten-Id, Edge-Ende noch
+// cluster.id-Träger (und damit nie Graph-Label, Kantentitel, Bubble-Titel,
+// Karten-Kette oder Konten-Tabelle) werden können (Befund 2026-09-29). Der
+// Filter läuft bei JEDEM Neubau erneut — auch über Einträge, die vor dem
+// Allowlist-Load ins Fenster gelangt sind (fail-closed nachgelagert).
+async function rebuildClusterGraph() {
+  if (!txRecordFromEntry || !buildClusterGraph) return;
+  const graphTx = [];
+  for (const r of txWindow) {
+    if (!(await recordTouchesBait(r))) graphTx.push(r);
+  }
+  const graphFindings = [];
+  for (const f of findingsWindow) {
+    if (!(await isDeniedAddrAsync(f?.address))) graphFindings.push(f);
+  }
+  const cg = buildClusterGraph(graphTx, graphFindings, { maxEdges: CLUSTER_MAX_EDGES });
+  lastClusterGraph = cg;
+  await primeAddrHashes(cg, graphFindings);
+  renderLiveGraph(cg);
+  renderClusterList(cg.clusters);
+  if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
+}
 
 let lastLedgerAt = 0;
 let liveMode = 'init';              // 'init' | 'wss' | 'poll'
@@ -673,16 +988,16 @@ function finishBlockCard(card, findings, ledgerTxCount, resolvedCount) {
 }
 
 /* ---------- Adresse im Live-Log ----------
- * Voller Akteur wird nur gezeigt, wenn die Adresse bereits öffentlich ist
- * (knownBad-Schiene aus malicious-Live-Funden). Sonst Kurzform — identische
- * Anonymitäts-Logik wie die Kurzformen in den Engine-Notizen
- * (lib/detector.mjs shortAddr): volle Köder-Adressen landen nie im DOM,
- * Angreifer-Kanten bleiben lesbar. */
+ * Volle Anzeige nur, wenn die Bait-Hash-Allowlist geladen ist und der Hash
+ * der Adresse nicht auf der Deny-Liste steht; sonst Kurzform (fail-closed,
+ * auch für noch ungehashte Adressen). knownBad steuert nur noch die
+ * Engine-Logik (known-bad-hit), nicht mehr die Anzeige. Volle Adressen sind
+ * ausschließlich öffentlich im Ledger sichtbare Akteur-Adressen — Köder
+ * erreichen diesen Pfad nie (Hash-Deny + serverseitige Filterung). */
 function displayFindingAddr(address) {
   const a = String(address ?? '');
   if (!a) return '–';
-  if (knownBad.has(a)) return a;
-  return shortAddr(a);
+  return isFullShownAddr(a) ? a : shortAddr(a);
 }
 
 /* ---------- Analyse-Log ---------- */
@@ -719,15 +1034,19 @@ function renderLog() {
   }
   empty.hidden = true;
 
-  const rows = list.slice(-LOG_RENDER_MAX).reverse().map((e) => `
+  const rows = list.slice(-LOG_RENDER_MAX).reverse().map((e) => {
+    const shown = displayFindingAddr(e.address);
+    const actions = isFullShownAddr(e.address) ? addrActionsHtml(e.address) : '';
+    return `
     <div class="log-row sev-${esc(e.severity)}">
       <span class="log-time">${esc(fmtClock(e.t))}</span>
       <span class="log-sev sev-text-${esc(e.severity)}">${esc(e.severity === 'malicious' ? 'maliziös' : e.severity === 'suspect' ? 'verdächtig' : 'info')}</span>
       <span class="log-rule">${esc(RULE_NAME.get(e.ruleId) ?? e.ruleId)}</span>
-      <span class="log-addr">${esc(displayFindingAddr(e.address))}</span>
-      <span class="log-note">${esc(e.note)}</span>
+      <span class="log-addr">${esc(shown)}${actions}</span>
+      <span class="log-note">${esc(defang(e.note))}</span>
       <span class="log-ledger">#${esc(e.ledgerIndex)}</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
   box.innerHTML = rows;
 }
 
@@ -743,7 +1062,7 @@ function downloadLog() {
     exportedAt: new Date().toISOString(),
     source: 'Honeypot XRPL – Live-Ledger-Analyse-Log',
     network: document.getElementById('stat-network').textContent,
-    note: 'Adressen in Kurzform, außer sie stehen bereits auf der öffentlichen Bedrohungsliste (knownBad). Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
+    note: 'Adressen vollständig, sofern die Bait-Hash-Allowlist geladen ist und die Adresse nicht auf der Deny-Liste steht; sonst Kurzform. Köder-Adressen werden nie exportiert. Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
     count: logEntries.length,
     entries: logEntries.map((e) => ({
       time: new Date(e.t).toISOString(),
@@ -904,32 +1223,42 @@ async function onLedgerEvent(msg) {
   recordFirstSeen(entries);
   const result = analyzeLedger({ transactions: entries }, buildCtx());
 
+  // Köder-Filter (WSS-Pfad): Funde auf Köder-Adressen werden vor jeder
+  // Weiterverwendung entfernt — dieselbe Regel wie im Serverpfad
+  // (server/index.mjs /api/ledger: findings.filter(!baitLabels.has)), hier
+  // hash-gestützt über die Bait-Hash-Allowlist. Damit erscheinen Köder nie
+  // im Live-Log, im Export (downloadLog) oder im Cluster-Graphen.
+  const visibleFindings = [];
+  for (const f of result.findings) {
+    if (await isDeniedAddrAsync(f.address)) continue;
+    visibleFindings.push(f);
+  }
+
   // Cluster-Schicht: rollendes Fenster + Neuberechnung pro validiertem Ledger.
   if (txRecordFromEntry && buildClusterGraph) {
     for (const e of entries) {
       // closeIso (Ledger-Ebene) als Fallback: expand:true-Entries tragen
       // selbst kein close_time (live verifiziert, siehe Header-Kommentar).
       const rec = txRecordFromEntry(e, closeIso);
-      if (rec) {
-        txWindow.push(rec);
-        if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
-      }
+      if (!rec) continue;
+      // Köder-Endpunkte (account ODER destination) erreichen das Fenster nie —
+      // clientseitiges Pendant zum Serverfilter über baitLabels.
+      if (await recordTouchesBait(rec)) continue;
+      txWindow.push(rec);
+      if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
     }
-    for (const f of result.findings) {
+    for (const f of visibleFindings) {
       findingsWindow.push(f);
       if (findingsWindow.length > FINDINGS_WINDOW_CAP) findingsWindow.splice(0, findingsWindow.length - FINDINGS_WINDOW_CAP);
-      // knownBad-Füller: nur öffentlich dokumentierte Maliziös-Funde —
-      // hält known-bad-hit (Engine) und displayFindingAddr wirksam.
-      if (f.severity === 'malicious' && XRPL_ADDR_RE.test(f.address)) knownBad.add(f.address);
+      // knownBad-Füller: nur öffentlich dokumentierte Maliziös-Funde — über
+      // das Deny-Gate (RACE-GATE: vor dem Allowlist-Load puffern).
+      if (f.severity === 'malicious') await offerKnownBadCandidate(f.address);
     }
-    const cg = buildClusterGraph(txWindow, findingsWindow, { maxEdges: CLUSTER_MAX_EDGES });
-    lastClusterGraph = cg;
-    renderLiveGraph(cg);
-    renderClusterList(cg.clusters);
+    await rebuildClusterGraph();
   }
 
-  finishBlockCard(card, result.findings, ledgerTxCount, entries.length);
-  registerFindings(result.findings, idx);
+  finishBlockCard(card, visibleFindings, ledgerTxCount, entries.length);
+  registerFindings(visibleFindings, idx);
   liveStats.ledgers += 1;
   liveStats.txs += ledgerTxCount;
   updateLiveStats();
@@ -989,6 +1318,8 @@ function scheduleReconnect() {
 
 /* ---------- Snapshot-Fallback (verifizierter Serverpfad /api/ledger) ---------- */
 async function pollSnapshotFallback() {
+  // Snapshot-Zyklus zieht die Bait-Hash-Allowlist mit (Mindestabstand beachten).
+  refetchBaitHashes(false);
   try {
     const body = await fetchJson('/api/ledger');
     const idx = body?.ledgerIndex;
@@ -1006,7 +1337,9 @@ async function pollSnapshotFallback() {
       liveStats.ledgers += 1;
       liveStats.txs += txCount;
       updateLiveStats();
-      // Cluster-Schicht auch im poll-Modus: Server liefert txRecords mit.
+      // Cluster-Schicht auch im poll-Modus: Server liefert txRecords mit
+      // (bereits serverseitig köder-gefiltert); rebuildClusterGraph zieht den
+      // clientseitigen Hash-Filter als Defense-in-Depth nochmals drüber.
       if (txRecordFromEntry && buildClusterGraph) {
         for (const r of Array.isArray(body.txRecords) ? body.txRecords : []) {
           if (!r || typeof r !== 'object') continue;
@@ -1017,10 +1350,7 @@ async function pollSnapshotFallback() {
           findingsWindow.push(f);
           if (findingsWindow.length > FINDINGS_WINDOW_CAP) findingsWindow.splice(0, findingsWindow.length - FINDINGS_WINDOW_CAP);
         }
-        const cg = buildClusterGraph(txWindow, findingsWindow, { maxEdges: CLUSTER_MAX_EDGES });
-        lastClusterGraph = cg;
-        renderLiveGraph(cg);
-        renderClusterList(cg.clusters);
+        await rebuildClusterGraph();
       }
     }
     setConn(true, connLabel());
@@ -1051,6 +1381,10 @@ function bindLive() {
 initGraph();
 bindGraph();
 bindLive();
+bindAddrActions();
 document.getElementById('stat-network').textContent = 'XRPL Mainnet (xrplcluster.com)';
 connectLive();
 setInterval(watchdog, WATCHDOG_MS);
+// Bait-Hash-Allowlist: beim Start, alle 60 s und bei jedem Snapshot-Zyklus.
+refetchBaitHashes(true);
+setInterval(() => { refetchBaitHashes(true); }, BAIT_HASH_REFETCH_MS);

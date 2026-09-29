@@ -21,6 +21,7 @@
 import express from "express";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Client } from "xrpl";
 import {
@@ -137,6 +138,24 @@ app.get("/api/graph", (req, res) => {
   // Node-Ids: "attacker:<öffentliche Adresse>" bzw. "honeypot:N" —
   // Honeypot-Knoten und Kanten-Enden enthalten keine Köder-Adressen.
   res.json(buildGraph(threatsCache, { baitLabels }));
+});
+
+// ---------- Bait-Hash-Allowlist für den Client (GET /api/bait-hashes) ----------
+// Der Client (public/app.js, refetchBaitHashes) gleicht Anzeige- und Graph-
+// Adressen gegen die Köder-Union ab, OHNE jemals eine Klartext-Köder-Adresse
+// zu erfahren: dieser Endpunkt liefert ausschließlich SHA-256-Hashes (hex,
+// Kleinbuchstaben) der getrimmten UTF-8-Adresse — exakt die Normalisierung,
+// die der Client in sha256Hex/hashOf verwendet. Ohne diesen Endpunkt bliebe
+// die Vollanzeige dauerhaft deaktiviert (fail-closed) und der clientseitige
+// Köder-Filter im WSS-Pfad leer. Köder-Rotation (reloadBait alle 5 s) wird
+// pro Request frisch gehasht; Seeds werden nie gelesen.
+app.get("/api/bait-hashes", (req, res) => {
+  const hashes = [...baitLabels.keys()]
+    .map((a) => String(a).trim())
+    .filter(Boolean)
+    .map((a) => createHash("sha256").update(a, "utf8").digest("hex"));
+  res.setHeader("cache-control", "no-store");
+  res.json({ hashes });
 });
 
 // ---------- Selbst-Check: Community-Adresse gegen die Threat-Liste ----------

@@ -1,0 +1,368 @@
+/* Honeypot XRPL – Cluster-Drilldown-Modal
+   Designbasis: Astra 6 (siehe style.css) — weiße Fläche, 1px Tintenrand,
+   feine Linien, klare Radien, Mono für Daten. Bestehende --a6-Tokens und
+   Komponentenklassen (.cluster-label, .risk-badge, .role-chip, .swatch,
+   .chain-node, .graph-note, …) werden mitbenutzt; keine globalen
+   .card/.btn-Regeln. */
+
+/* Körper sperren, solange das Modal offen ist */
+body.cluster-modal-open {
+  overflow: hidden;
+}
+
+/* ---------------- Shell ---------------- */
+
+.cluster-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.cluster-modal[hidden] { display: none; }
+
+.cluster-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 20, 22, 0.45);
+}
+
+.cluster-modal-surface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 100%);
+  max-height: 100%;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-lg);
+  box-shadow: var(--a6-e2);
+  overflow: hidden;
+}
+
+/* ---------------- Kopf ---------------- */
+
+.cluster-modal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--a6-line);
+  background: var(--a6-surface);
+}
+
+.cluster-modal-title-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  min-inline-size: 0;
+}
+
+.cluster-modal-badge { display: inline-flex; align-items: center; }
+
+.cluster-modal-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 14px;
+  margin-left: auto;
+}
+
+/* Close-Button: mindestens 44×44 px, Stil konsistent zu .download-btn */
+.cluster-modal-close {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-pill);
+  color: var(--a6-ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--a6-e1);
+  transition: transform var(--a6-ui) var(--a6-ease), background-color var(--a6-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cluster-modal-close:hover { background: var(--a6-surface-alt); transform: translateY(-2px); }
+}
+
+.cluster-modal-close:active { transform: translateY(0); }
+
+/* ---------------- Körper: 3D-Bühne + Diagramm-Spalte ---------------- */
+
+.cluster-modal-body {
+  display: grid;
+  grid-template-columns: minmax(55%, 1fr) minmax(300px, 45%);
+  gap: 16px;
+  padding: 16px 18px 18px;
+  overflow: auto;
+  min-height: 0;
+}
+
+.cluster-modal-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+/* 3D-Bühne: weiß wie --a6-graph-canvas, Höhe wie #graph (520 px) */
+.cluster-3d {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  background: var(--a6-graph-canvas);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-md);
+  overflow: hidden;
+}
+
+.cluster-3d .graph-note { padding: 16px; margin: 0; }
+
+.cluster-graph-note { margin: 0; }
+
+.cluster-modal-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-inline-size: 0;
+}
+
+.cluster-modal-h {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--a6-ink);
+}
+
+/* ---------------- Rollen-Balken ---------------- */
+
+.role-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.role-bar-row {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.role-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--a6-body);
+  white-space: nowrap;
+}
+
+.role-bar-track {
+  display: block;
+  height: 10px;
+  background: var(--a6-surface-alt);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  overflow: hidden;
+}
+
+.role-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--a6-r-pill);
+}
+
+.role-bar-source { background: var(--a6-role-source); }
+.role-bar-drainer { background: var(--a6-role-drainer); }
+.role-bar-collector { background: var(--a6-role-collector); }
+.role-bar-relay { background: var(--a6-role-relay); }
+/* Unknown-Füllung muss sich vom leeren Track (--a6-surface-alt) UND von der
+   Relay-Rolle (--a6-role-relay #62626b) abheben — bisher war die Füllung
+   farbidentisch mit dem Track und der Balken praktisch unsichtbar
+   (Befund 2026-09-29). Mittleres Grau der Kontrolllinien. */
+.role-bar-unknown { background: var(--a6-control-line); }
+
+.role-bar-count {
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-muted);
+}
+
+/* ---------------- Zeitachse (SVG) ---------------- */
+
+.cluster-timeline {
+  display: block;
+  width: 100%;
+  height: 46px;
+}
+
+.cluster-timeline .timeline-axis {
+  stroke: var(--a6-graph-line);
+  stroke-width: 1;
+}
+
+.cluster-timeline-labels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- Konten-Tabelle ---------------- */
+
+.cluster-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-md);
+  background: var(--a6-surface);
+}
+
+.cluster-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.cluster-table caption {
+  caption-side: top;
+  text-align: left;
+  padding: 10px 12px;
+  color: var(--a6-muted);
+  font-size: 12px;
+}
+
+.cluster-table th,
+.cluster-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--a6-line);
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.cluster-table tbody tr:last-child td { border-bottom: none; }
+
+.cluster-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--a6-muted);
+  background: var(--a6-surface-alt);
+}
+
+.cluster-td-addr {
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  word-break: break-all;
+  white-space: normal;
+  min-width: 220px;
+  max-width: 340px;
+}
+
+.cluster-td-num {
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.cluster-table-dash { color: var(--a6-muted); }
+
+/* ---------------- Adress-Aktionen (Kopieren + xrplcharts-Link) ---------- */
+
+.addr-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+/* Touch-Ziele mindestens 44x44 px (Astra-6-Regel, Befund 2026-09-29) —
+   vorher 28 px hoch bzw. 28x28 px. */
+.addr-copy {
+  min-height: 44px;
+  padding: 3px 14px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-pill);
+  color: var(--a6-ink);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color var(--a6-fast);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .addr-copy:hover { background: var(--a6-surface-alt); }
+}
+
+.addr-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-pill);
+  color: var(--a6-info);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .addr-link:hover { background: var(--a6-surface-alt); }
+}
+
+/* In Chain-Chips und Log-Zeilen kompakt unterbringen */
+.chain-node .addr-actions { margin-left: 6px; }
+.log-addr .addr-actions { margin-left: 6px; }
+
+/* ---------------- Responsiv ---------------- */
+
+@media (max-width: 900px) {
+  .cluster-modal-body {
+    grid-template-columns: 1fr;
+  }
+  .cluster-3d { height: 400px; }
+}
+
+@media (max-width: 560px) {
+  .cluster-modal { padding: 8px; }
+  .cluster-modal-head { padding: 12px 14px; }
+  .cluster-modal-body { padding: 12px 14px 14px; }
+  .cluster-3d { height: 320px; }
+  .cluster-modal-metrics { margin-left: 0; }
+}
+
+/* ---------------- Reduced Motion & Forced Colors ---------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .cluster-modal-close { transform: none !important; }
+}
+
+@media (forced-colors: active) {
+  .cluster-modal-surface,
+  .cluster-3d,
+  .cluster-table-wrap,
+  .role-bar-track,
+  .addr-copy,
+  .addr-link,
+  .cluster-modal-close {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+}
