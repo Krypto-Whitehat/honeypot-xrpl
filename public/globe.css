@@ -1,0 +1,135 @@
+/* Honeypot XRPL – Weltkugel-Tab (public/globe.css)
+   Eigentumstrennung: Diese Datei gehört ausschließlich zum Modul
+   public/globe.js (dritter Graph-Tab „Weltkugel“) und wird vom
+   Verdrahtungs-Agenten im <head> von index.html nach style.css und
+   drilldown.css eingebunden:
+   <link rel="stylesheet" href="globe.css">
+   Sie ändert keine bestehenden Regeln — #globe und .globe-* sind neu,
+   .graph-note wird nur innerhalb #globe positioniert (Basistypografie
+   bleibt bei style.css:508-512).
+   Designbasis: weltbester-astra-6-designer (Astra 6), Profil lab_graphite —
+   Bühne analog #graph (style.css:498-506): weiße Flächen, 1px-Ink-Rand,
+   Radien, feine Linien, WCAG AA, keine Schrift unter 12 px. */
+
+/* GENAU EIN neuer Token — bewusst nur hier und nicht in style.css
+   (Eigentumstrennung zum parallel laufenden CSS-Agenten, der style.css
+   besitzt). Wirksam wird der Block über body[data-a6] (index.html:13),
+   Vorbild style.css:6. Hauchzarte Atmosphäre der Kugel: globe.js liest den
+   Token und blendet den Alpha-Anteil über Weiß, weil die
+   WebGL-Atmosphärenfarbe keinen Alphakanal auswertet (Bundle-nachgeprüft). */
+[data-a6] {
+  --a6-globe-atmosphere: rgba(29, 78, 216, 0.08);
+}
+
+/* Bühne: Erscheinungsbild identisch zu #graph (style.css:498-506) — weißer
+   Radial-Punkt-Hintergrund, 1px Linie, Radius. overflow hidden schneidet
+   Canvas und Hinweis-Overlay auf die Bühne; position relative nimmt die
+   absolute positionierten Overlays auf. Höhe 520 px wie #graph. */
+#globe {
+  position: relative;
+  width: 100%;
+  height: 520px;
+  overflow: hidden;
+  background:
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--a6-graph-canvas);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-md);
+}
+
+#globe canvas {
+  display: block;
+  cursor: grab;
+}
+
+#globe canvas:active {
+  cursor: grabbing;
+}
+
+/* Pflicht-Hinweis unter der Kugel: globe.js legt ein p.graph-note.globe-note
+   in die Bühne. Die Typografie (12 px, muted) liefert .graph-note aus
+   style.css:508-512 — hier steht nur die Overlay-Positionierung; über den
+   Punkten, aber klickdurchlässig (pointer-events none). Weiße Fläche mit
+   1px-Rand hält WCAG AA auch über dem Liniennetz der Kugel. */
+#globe .globe-note {
+  position: absolute;
+  inset-inline: 14px;
+  bottom: 12px;
+  z-index: 2;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  pointer-events: none;
+}
+
+/* Statischer Fallback (WebGL oder CDN nicht erreichbar): Hinweis statt
+   leerem Canvas, kein Erfolgs-Vortäuschen — dieselben Daten stehen in den
+   Cluster-Karten und in der Konten-Tabelle des Drilldowns. */
+#globe .globe-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--a6-graph-canvas);
+}
+
+#globe .globe-fallback .graph-note {
+  max-width: 56ch;
+  margin: 0;
+  color: var(--a6-body);
+  text-align: center;
+}
+
+/* Responsiv: Höhenstufen exakt wie #graph — 400 px ab 900 px
+   (style.css:796/799), 320 px ab 560 px (style.css:823/827). */
+@media (max-width: 900px) {
+  #globe {
+    height: 400px;
+  }
+}
+
+@media (max-width: 560px) {
+  #globe {
+    height: 320px;
+  }
+
+  #globe .globe-note {
+    inset-inline: 10px;
+    bottom: 10px;
+  }
+}
+
+/* Reduced Motion: Die DOM-Seite friert ein; globe.js friert zusätzlich die
+   Kugel-Animation ein (autoRotate aus, keine Puls-Ringe, zoomToFit(0) statt
+   animierter Kamera) — die Daten werden weiterhin aktualisiert. CSS greift
+   zusätzlich, Vorbild style.css:835-844. */
+@media (prefers-reduced-motion: reduce) {
+  #globe,
+  #globe *,
+  #globe *::before,
+  #globe *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* Forced Colors (Vorbild style.css:846 ff.): Bühne und Hinweise bleiben über
+   Systemfarben les- und trennbar, Schmuck-Hintergründe treten zurück. Das
+   WebGL-Bild der Kugel selbst färbt forced-colors nicht um — der
+   textliche Fallback-Hinweis und die Cluster-Karten sichern die Information. */
+@media (forced-colors: active) {
+  #globe {
+    border-color: CanvasText;
+  }
+
+  #globe .globe-note,
+  #globe .globe-fallback {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}

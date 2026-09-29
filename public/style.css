@@ -152,7 +152,7 @@ html, body {
 
 .stat-label {
   margin-top: 3px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--a6-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -185,6 +185,29 @@ html, body {
 
 .conn-dot.ok { background: var(--a6-success); }
 .conn-dot.err { background: var(--a6-error); }
+
+/* ---------------- Ansichts-Navigation ---------------- */
+
+/* Layout-Container der Views-Umschaltung (Dashboard, Historie, Konto-Check).
+   Markup kommt vom Verdrahtungs-Agenten: Die Buttons tragen die Doppelklasse
+   'view-tab graph-tab' und erben deshalb den .graph-tab-Stil weiter unten —
+   hier wird bewusst nur der Container definiert. */
+.view-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 26px 0;
+  max-width: 1400px;
+  margin-inline: auto;
+  width: 100%;
+}
+
+/* Anker-Ziele der Views nicht unter der Kopfzeile verschwinden lassen. */
+#view-dashboard,
+#view-history,
+#view-check {
+  scroll-margin-block-start: 84px;
+}
 
 /* ---------------- Panels ---------------- */
 
@@ -393,7 +416,7 @@ main {
 }
 
 .filter-select {
-  min-height: 40px;
+  min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   max-inline-size: 100%;
   min-inline-size: 0;
   padding: 8px 12px;
@@ -412,7 +435,7 @@ main {
 }
 
 .download-btn {
-  min-height: 40px;
+  min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
   border: 1px solid var(--a6-control-line);
@@ -440,7 +463,11 @@ main {
 
 .log-row {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) auto minmax(0, 2fr) auto;
+  /* 4. Spalte (Adresse) schrumpfbar machen statt reiner auto-Track — die
+     auto-Track nahm max-content an und drückte die volle Adresse einzeilig
+     an den Panelrand; break-all greift erst, wenn die Spalte schrumpfen
+     darf (Befund 2026-09-29). */
+  grid-template-columns: auto auto minmax(0, 1fr) minmax(0, auto) minmax(0, 2fr) auto;
   align-items: baseline;
   gap: 12px;
   padding: 8px 12px;
@@ -466,7 +493,7 @@ main {
 
 .log-sev {
   font-family: var(--a6-mono);
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -482,6 +509,20 @@ main {
   font-size: 12px;
   color: var(--a6-body);
   word-break: break-all;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Utility für Volladressen in neuen Flächen (Historie, Konto-Check): wird dort
+   nur referenziert, nicht doppelt definiert. Umbrechen statt Clippen; der
+   umgebende Container braucht ≥12 px Inline-Padding zum Rand. */
+.addr-full {
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-body);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  min-inline-size: 0;
 }
 
 .log-note { color: var(--a6-body); overflow-wrap: anywhere; }
@@ -505,6 +546,29 @@ main {
   border-radius: var(--a6-r-md);
 }
 
+/* vis-network-Tooltip (Knoten-, Kanten- und Cluster-Bubble-Titel): Das Bundle
+   injiziert sein Stylesheet zur Laufzeit als div.vis-tooltip mit
+   white-space:nowrap — NACH style.css. Containerspezifische Selektoren mit
+   höherer Spezifität gewinnen sonst keinen Konflikt; so brechen volle
+   Adressen im Tooltip um, statt über den Graph-Rand zu laufen
+   (Befund 2026-09-29). Der zweite Selektor deckt den 2D-Fallback im
+   Drilldown-Modal (drilldown.js nutzt .cluster-3d als Container). */
+#graph .vis-tooltip,
+.cluster-3d .vis-tooltip {
+  max-width: min(340px, 80vw);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  padding: 8px 10px;
+  background: var(--a6-surface);
+  color: var(--a6-ink);
+  border: 1px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-sm);
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  box-shadow: var(--a6-e1);
+}
+
 .graph-note {
   margin: 10px 0 0;
   color: var(--a6-muted);
@@ -525,7 +589,7 @@ main {
 }
 
 .graph-tab {
-  min-height: 40px;
+  min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
   color: var(--a6-body);
@@ -612,6 +676,7 @@ main {
   padding: 12px 14px;
   box-shadow: var(--a6-e1);
   cursor: pointer;
+  min-inline-size: 0; /* Grid-Kind darf schrumpfen, damit Inhalte umbrechen */
   transition: transform var(--a6-ui) var(--a6-ease), box-shadow var(--a6-ui) var(--a6-ease);
 }
 
@@ -640,6 +705,14 @@ main {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  /* Server-sanitiste Labels sind bis 200 Zeichen lang und angreiferkontrolliert;
+     ohne Umbruchregeln läuft ein unzerbrechlicher String über den Kartenrand
+     hinaus (Befund 2026-09-29). Gleiches Muster wie .addr-full/.log-addr —
+     gilt global, also auch für .cluster-label im Drilldown-Modal
+     (drilldown.js Shell). */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  min-inline-size: 0;
 }
 
 .cluster-roles {
@@ -697,6 +770,7 @@ main {
   margin-top: 10px;
   font-family: var(--a6-mono);
   font-size: 12px;
+  min-inline-size: 0; /* Kette darf schrumpfen, Chips umbrechen statt überlaufen */
 }
 
 .chain-node {
@@ -706,6 +780,10 @@ main {
   background: var(--a6-surface-alt);
   color: var(--a6-body);
   word-break: break-all;
+  /* Flex-Kind der Kette: darf schrumpfen, aber nie über die Karte hinaus
+     wachsen (Befund 2026-09-29 — volle Base58-Adresse bricht im Chip um). */
+  max-inline-size: 100%;
+  flex: 0 1 auto;
 }
 
 .chain-node.chain-source {
@@ -857,6 +935,7 @@ main {
   .cluster-card,
   .role-chip,
   .chain-node,
+  .vis-tooltip,
   #graph {
     border: 1px solid CanvasText;
     box-shadow: none;

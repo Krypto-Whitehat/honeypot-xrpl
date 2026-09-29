@@ -1,0 +1,338 @@
+/* Honeypot XRPL – Konto-Check (Explicit Accounts)
+   Designbasis: Astra 6 (siehe style.css) — weiße Fläche, 1px-Ink-Rand, klare
+   Radien, Mono für Daten, WCAG AA. Nutzt ausschließlich bestehende --a6-Tokens
+   und bestehende Komponentenklassen (.download-btn, .addr-full, .graph-note,
+   .cluster-table-wrap/.cluster-table aus drilldown.css, .risk-badge, .badge*,
+   .swatch-*); hier stehen nur die Eigenanteile des Konto-Checks.
+   Reduced motion wird durch die globale *-Regel in style.css (904–913)
+   abgedeckt; forced-colors wird unten ergänzt. Schriftgrößen >= 12 px,
+   Touch-Ziele >= 44 px (Eingabefeld und Prüfen-Button explizit angehoben —
+   .download-btn liegt global bei 40 px). */
+
+/* ---------------- Formular ---------------- */
+
+.check-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.check-label {
+  flex: 1 1 100%;
+  font-size: 12px;
+  color: var(--a6-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.check-input {
+  flex: 1 1 16rem;
+  min-inline-size: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-family: var(--a6-mono);
+  font-size: 1rem; /* Mono-Eingabe nicht unter Basisschriftgröße */
+  color: var(--a6-ink);
+  background: var(--a6-surface-alt);
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-sm);
+  transition: border-color var(--a6-fast), background-color var(--a6-fast);
+}
+
+.check-input:focus {
+  border-color: var(--a6-focus);
+  background: var(--a6-surface);
+  outline: none;
+}
+
+/* Prüfen-Button: Stil erbt aus .download-btn (style.css), Zielhöhe auf die
+   Astra-6-Mindestgröße von 44 px angehoben — berührt die Basisklasse nicht. */
+#check-go {
+  min-height: 44px;
+}
+
+.check-error {
+  margin: 0 0 12px;
+  color: var(--a6-error);
+  font-size: 13px;
+}
+
+/* ---------------- Status (Laden / Fehlerkarten) ---------------- */
+
+.check-loading {
+  margin: 0 0 12px;
+  color: var(--a6-muted);
+  font-size: 13px;
+}
+
+.check-card {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line);
+  border-left: 3px solid var(--a6-control-line);
+  border-radius: var(--a6-r-md);
+}
+
+.check-card-error {
+  background: var(--a6-error-soft);
+  border-color: rgba(179, 38, 30, 0.5);
+  border-left-color: var(--a6-error);
+}
+
+.check-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--a6-ink);
+}
+
+.check-card-error .check-card-title { color: var(--a6-error); }
+
+.check-card-detail {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--a6-body);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------- Report (Karten-Gliederung wie .cluster-card) ---------------- */
+
+.check-report {
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line);
+  border-left: 3px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-md);
+  padding: 14px 16px;
+  box-shadow: var(--a6-e1);
+  min-inline-size: 0;
+}
+
+.check-report-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 14px;
+}
+
+.check-report-addr {
+  font-size: 13px;
+  color: var(--a6-body);
+}
+
+.check-score {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.check-score-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--a6-ink);
+}
+
+.check-score-max {
+  font-size: 13px;
+  color: var(--a6-muted);
+}
+
+.check-summary {
+  margin: 10px 0 0;
+  font-size: 15px;
+  color: var(--a6-body);
+  overflow-wrap: anywhere;
+}
+
+.check-hint { margin: 8px 0 0; }
+
+/* ---------------- Abschnitte ---------------- */
+
+.check-section {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--a6-line);
+}
+
+.check-section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--a6-ink);
+}
+
+/* Score-Breakdown (dl) */
+.check-breakdown {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.check-breakdown-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 14px;
+  padding: 6px 10px;
+  background: var(--a6-surface-alt);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+}
+
+.check-breakdown-row dt {
+  font-size: 13px;
+  color: var(--a6-body);
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.check-breakdown-row dd {
+  margin: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.check-bd-wert { color: var(--a6-ink); }
+.check-bd-abzug { color: var(--a6-muted); }
+
+.check-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 8px 0 0;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.check-truncated { color: var(--a6-warn); }
+
+/* Rollenbeteiligung */
+.check-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.check-role-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 6px 0 0;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.check-note { margin: 8px 0 0; }
+
+/* Muster-Chips */
+.check-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.check-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
+  font-size: 12px;
+}
+
+.check-empty {
+  margin: 0;
+  color: var(--a6-muted);
+  font-size: 13px;
+}
+
+/* Off-Ramp-Einschätzung */
+.check-eligibility {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--a6-r-sm);
+  font-size: 13px;
+  border: 1px solid var(--a6-line);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
+  overflow-wrap: anywhere;
+}
+
+.check-eligibility-ok {
+  background: var(--a6-success-soft);
+  border-color: rgba(6, 99, 72, 0.35);
+  color: var(--a6-success);
+}
+
+.check-eligibility-review {
+  background: var(--a6-warn-soft);
+  border-color: rgba(154, 91, 0, 0.4);
+  color: var(--a6-warn);
+}
+
+.check-eligibility-unknown {
+  background: var(--a6-surface-alt);
+  border-color: var(--a6-control-line);
+  color: var(--a6-muted);
+}
+
+/* Disclaimers */
+.check-disclaimers { margin: 14px 0 0; }
+
+.check-disclaimers ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+/* ---------------- Responsiv ---------------- */
+
+@media (max-width: 560px) {
+  .check-input { flex: 1 1 100%; }
+  .check-score { margin-left: 0; }
+}
+
+/* ---------------- Forced Colors ---------------- */
+/* Reduced motion deckt die globale *-Regel in style.css ab; hier folgen nur
+   die Eigenanteile für erzwungene Farbschemata (Ränder bleiben sichtbar). */
+
+@media (forced-colors: active) {
+  .check-input,
+  .check-report,
+  .check-card,
+  .check-chip,
+  .check-breakdown-row,
+  .check-eligibility-ok,
+  .check-eligibility-review,
+  .check-eligibility-unknown {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+
+  .check-report,
+  .check-card-error {
+    border-left-width: 3px;
+    border-left-color: CanvasText;
+  }
+}

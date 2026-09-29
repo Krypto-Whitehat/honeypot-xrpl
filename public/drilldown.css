@@ -127,6 +127,28 @@ body.cluster-modal-open {
 
 .cluster-graph-note { margin: 0; }
 
+/* 3D-Beschriftungen (Knoten-/Kanten-Tooltip): 3d-force-graph rendert sie als
+   div.float-tooltip-kap im Bundle-Default (dunkler Scrim, sans-serif,
+   width:max-content) und injiziert sein Stylesheet zur Laufzeit — deshalb
+   containerspezifisch mit höherer Spezifität. Adressen brechen so um, bevor
+   sie an der Bühnenkante (.cluster-3d hat overflow:hidden) abgeschnitten
+   werden (Befund 2026-09-29; Klasse im gepinnten Bundle 3d-force-graph@1.80.0
+   verifiziert: nodeLabel/linkLabel sind nur API-Accessoren, keine CSS-Klassen). */
+.cluster-3d .float-tooltip-kap {
+  max-width: min(300px, 70vw);
+  width: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-ink);
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-sm);
+  padding: 6px 9px;
+}
+
 .cluster-modal-side {
   display: flex;
   flex-direction: column;
@@ -228,6 +250,7 @@ body.cluster-modal-open {
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-md);
   background: var(--a6-surface);
+  padding-inline: 2px; /* letzte Spalte klebt nicht am Scroll-Rand */
 }
 
 .cluster-table {
@@ -328,7 +351,7 @@ body.cluster-modal-open {
 }
 
 /* In Chain-Chips und Log-Zeilen kompakt unterbringen */
-.chain-node .addr-actions { margin-left: 6px; }
+.chain-node .addr-actions { margin-left: 6px; flex-shrink: 0; }
 .log-addr .addr-actions { margin-left: 6px; }
 
 /* ---------------- Responsiv ---------------- */
@@ -357,6 +380,7 @@ body.cluster-modal-open {
 @media (forced-colors: active) {
   .cluster-modal-surface,
   .cluster-3d,
+  .cluster-3d .float-tooltip-kap,
   .cluster-table-wrap,
   .role-bar-track,
   .addr-copy,

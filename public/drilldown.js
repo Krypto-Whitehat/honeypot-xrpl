@@ -37,6 +37,9 @@ export function initClusterDrilldown(ctx) {
   const edgeDefault = ctx.edgeDefault;
   const roleLabels = ctx.roleLabels;
   const addrActionsHtml = ctx.addrActionsHtml;
+  // 2D-Canvas-Label in Kurzform (Design-Fix): shortAddr kommt bereits im ctx
+  // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
+  const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
 
   const num = (v) => Number(v ?? 0).toLocaleString('de-DE');
   const cssEscape = (s) => (window.CSS && typeof window.CSS.escape === 'function')
@@ -435,7 +438,7 @@ export function initClusterDrilldown(ctx) {
         // Highlight und Klick-Scroll vergleichen deshalb gegen
         // displayAddr(n.id), nicht gegen die rohe Id.
         return `<tr data-addr="${esc(full ? id : shown)}">
-          <td class="cluster-td-addr">${esc(shown)}</td>
+          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}</td>
           <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabels[role] ?? role)}</span></td>
           <td>${badge}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
@@ -599,7 +602,7 @@ export function initClusterDrilldown(ctx) {
       const role = roleColors[n.role] ? n.role : 'unknown';
       return {
         id: String(n.id),
-        label: displayAddr(n.id),
+        label: shortAddrFn(n.id),
         title: `${displayAddr(n.id)} (${roleLabels[role] ?? role})`,
         shape: 'dot',
         size: 14,
@@ -626,7 +629,10 @@ export function initClusterDrilldown(ctx) {
       },
       edges: {
         smooth: { type: 'curvedCW', roundness: 0.14 },
-        font: { color: '#484850', size: 10, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
+        // size 12 wie der Hauptpfad (app.js): Schrift unter 12 px ist
+        // Astra-6-Microtype und verboten (globe.css-Designprinzipien) —
+        // Befund 2026-09-29 (war 10 px).
+        font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
       },
     });
     if (reducedMotion()) {

@@ -32,6 +32,16 @@ import {
 } from "../lib/sanitize.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
+import {
+  loadLocalHistory,
+  saveLocalHistory,
+  validateAndSanitizeHistoryPayload,
+  mergeHistory,
+  sanitizeHistoryList,
+  searchHistory,
+  rateLimitHistory,
+  clientKeyOf,
+} from "../lib/history.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -156,6 +166,82 @@ app.get("/api/bait-hashes", (req, res) => {
     .map((a) => createHash("sha256").update(a, "utf8").digest("hex"));
   res.setHeader("cache-control", "no-store");
   res.json({ hashes });
+});
+
+// ---------- Maliziöse Historie (GET+POST /api/history) ----------
+// Persistente, kollektive Historie AUSSCHLIESSLICH als maliziös eingestufter
+// Cluster; suspect/info erreichen die Persistenz nie (severity wird in
+// lib/history.mjs serverseitig erzwungen). Lokal gilt data/history.json
+// (atomar via tmp+rename) — KEIN Netz-Call: GitHub-Persistenz läuft nur in
+// der Vercel-Function api/history.js (Env GITHUB_HISTORY_TOKEN, separates
+// History-Repo; Details und BETRIEBSANFORDERUNGEN im Kopf von
+// lib/history.mjs). Express 4 fängt rejected Promises aus async Handlern
+// NICHT ab — beide Handler laufen deshalb komplett in try/catch wie die
+// Bestandsrouten (Muster /api/check, /api/ledger); Fehler -> neutrale 500
+// (console.error OHNE Adressen/Token).
+const HISTORY_FILE = path.join(DATA_DIR, "history.json");
+
+app.post("/api/history", express.json({ limit: "256kb" }), async (req, res) => {
+  try {
+    // Rate-Limit zuerst: max 6 POSTs/60 s je Client (Sliding Window).
+    const clientKey = clientKeyOf(req.headers["x-forwarded-for"], req.socket?.remoteAddress);
+    if (!rateLimitHistory(clientKey, Date.now())) {
+      res.setHeader("Retry-After", "60");
+      return res.status(429).json({ error: "Zu viele Meldungen — bitte später erneut versuchen." });
+    }
+    const existing = await loadLocalHistory(HISTORY_FILE); // Parse-Fehler wirft -> 500
+    const existingKeys = new Set(existing.map((c) => c?.key).filter(Boolean));
+    // Köder-Filter gegen die ROTIERENDE baitLabels-Union (reloadBait alle 5 s).
+    const validated = validateAndSanitizeHistoryPayload(req.body, baitLabels, existingKeys);
+    const merged = mergeHistory(existing, validated.accepted, Date.now(), baitLabels);
+    if (merged.changed || validated.accepted.length) {
+      await saveLocalHistory(HISTORY_FILE, merged.list); // atomar
+    }
+    res.status(202).json({
+      accepted: validated.accepted.length,
+      merged: merged.list.length,
+      ignored: validated.ignored,
+      dropped: merged.dropped,
+    });
+  } catch (err) {
+    console.error(`[history] POST /api/history fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+    res.status(500).json({ error: "Historie nicht verfügbar." });
+  }
+});
+
+app.get("/api/history", async (req, res) => {
+  try {
+    res.setHeader("cache-control", "no-store");
+    // Lesefilter gegen die AKTUELLE baitLabels — Rotation wirkt ohne Neustart.
+    const list = searchHistory(sanitizeHistoryList(await loadLocalHistory(HISTORY_FILE), baitLabels), req.query.q);
+    let updatedAt = null;
+    try {
+      updatedAt = fs.statSync(HISTORY_FILE).mtimeMs;
+    } catch {
+      /* Datei (noch) nicht vorhanden — Anlege-Fall */
+    }
+    res.json({ clusters: list, updatedAt });
+  } catch (err) {
+    console.error(`[history] GET /api/history fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+    res.status(500).json({ error: "Historie nicht verfügbar." });
+  }
+});
+
+// Generic Bridge für den Konto-Check: die Funktionsdatei gehört dem Account-
+// Agenten (api/account-report.js, Vercel-Stil default-export). Ist sie (noch)
+// nicht vorhanden oder lädt nicht, antwortet der Server ehrlich mit 503.
+// Die rotierende baitLabels-Union (reloadBait alle 5 s) wird explizit
+// durchgereicht — sonst liefe der Handler mit seiner leeren ENV-Karte und
+// lieferte Köder-Adressen einen vollen Report, während /api/check dieselbe
+// Adresse generisch abweist (Befund 2026-09-29; Muster /api/history oben).
+app.get("/api/account-report", async (req, res) => {
+  try {
+    const mod = await import("../api/account-report.js");
+    return await mod.default(req, res, { baitLabels });
+  } catch {
+    if (!res.headersSent) res.status(503).json({ error: "Konto-Check auf diesem Server nicht verfügbar." });
+    else res.end();
+  }
 });
 
 // ---------- Selbst-Check: Community-Adresse gegen die Threat-Liste ----------
@@ -430,7 +516,14 @@ app.get("/api/ledger", async (req, res) => {
 });
 
 // Engine für den Browser-Import: /lib/detector.mjs (single source of truth).
-app.use("/lib", express.static(path.join(ROOT, "lib")));
+// WHITELIST (identisch zu api/lib-detector.js:14): nur die drei Browser-
+// Engines werden ausgeliefert — lib/history.mjs (Köder-Filter-Engine) und
+// künftige Server-Dateien wie lib/account-report.mjs bleiben lokal privat.
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs"]);
+app.get("/lib/:name", (req, res) => {
+  if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
+  res.sendFile(path.join(ROOT, "lib", req.params.name));
+});
 
 // Statische Files aus public/ (wird parallel von einem anderen Agenten gebaut;
 // fehlt das Verzeichnis, geben die statischen Routen einfach 404 zurück).

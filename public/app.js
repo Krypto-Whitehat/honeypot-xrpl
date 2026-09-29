@@ -89,6 +89,76 @@ import('./drilldown.js')
   })
   .catch(() => { /* Drilldown offline (z. B. 404); Karten-Klick bleibt ohne Wirkung */ });
 
+/* Weltkugel, Historie und Konto-Check: dynamische Imports nach demselben
+ * Muster — nicht-blockierend, mit Null-Guard (.catch). Bei 404/Fehler läuft
+ * der Live-Betrieb unverändert weiter; die Module sind reine Konsumenten des
+ * Host-ctx. Adressen erreichen sie ausschließlich über displayAddr /
+ * isFullShownAddr / isDeniedAddr (Köder-Gates bleiben im Host) — die Module
+ * rendern und melden NIE selbst roh. */
+let globeMod = null;
+let historyMod = null;
+let checkMod = null;
+import('./globe.js')
+  .then((m) => {
+    if (m && typeof m.initGlobe === 'function') {
+      globeMod = m.initGlobe({
+        getClusterGraph: () => lastClusterGraph,
+        displayAddr: displayFindingAddr,
+        isDeniedAddr,
+        hashOf,
+        shortAddr,
+        esc,
+        roleColors: ROLE_COLORS,
+        edgeColors: EDGE_COLORS,
+        edgeDefault: EDGE_DEFAULT,
+        openCluster: openClusterModal,
+      });
+      // Trifft das Modul erst nach dem Tab-Wechsel ein, wird die Aktivierung
+      // nachgezogen (activate() ist idempotent: lazy Konstruktion bzw. resume).
+      if (activeGraphTab === 'globe') globeMod.activate();
+    }
+  })
+  .catch(() => { /* Weltkugel offline (z. B. 404); Live-/Cluster-Tabs laufen weiter */ });
+import('./history.js')
+  .then((m) => {
+    if (m && typeof m.initHistory === 'function') {
+      historyMod = m.initHistory({
+        displayAddr: displayFindingAddr,
+        isFullShownAddr,
+        isDeniedAddr,
+        shortAddr,
+        esc,
+        fmtXrp,
+        fmtClock,
+        addrActionsHtml,
+        ruleNames: RULE_NAME,
+      });
+      // Sichtbarkeit nachziehen, falls der View schon aktiv ist, bevor das
+      // Modul eintrifft (sonst startet der Lade-Timer erst beim nächsten Wechsel).
+      historyMod.setView(activeView === 'history');
+    }
+  })
+  .catch(() => { /* Historie offline (z. B. 404); Melden/Anzeige entfallen still */ });
+import('./account-check.js')
+  .then((m) => {
+    if (m && typeof m.initAccountCheck === 'function') {
+      checkMod = m.initAccountCheck({
+        displayAddr: displayFindingAddr,
+        isFullShownAddr,
+        shortAddr,
+        esc,
+        fmtXrp,
+        fmtClock,
+        addrActionsHtml,
+        roleLabels: ROLE_LABEL,
+        roleColors: ROLE_COLORS,
+        ruleNames: RULE_NAME,
+      });
+      checkMod.setView(activeView === 'check');
+    }
+  })
+  .catch(() => { /* Konto-Check offline (z. B. 404); View bleibt leer */ });
+
 const WSS_URL = 'wss://xrplcluster.com';
 const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
 const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
@@ -467,7 +537,7 @@ const PHYSICS_CLUSTER = {
 let nodesDS = null;
 let edgesDS = null;
 let network = null;
-let activeGraphTab = 'live';       // 'live' | 'cluster'
+let activeGraphTab = 'live';       // 'live' | 'cluster' | 'globe'
 let lastClusterGraph = null;       // Cache für Tab-Wechsel ohne Neuberechnung
 const clusterByVisId = new Map();  // vis-Clusterknoten-Id -> Cluster-Objekt
 
@@ -539,11 +609,14 @@ function updateRawGraph(cg) {
 
   const nextNodes = rawNodes.map((n) => {
     const role = ROLE_COLORS[n.role] ? n.role : 'unknown';
-    const label = displayFindingAddr(n.id);
+    // Knotenlabel IMMER Kurzform: vis-network zeichnet Canvas-Label ohne
+    // Umbruch/maxWidth — die volle Adresse klebte am Graph-Rand (Design-Fix).
+    // Die volle Anzeige bleibt im title-Tooltip (displayFindingAddr-Politik).
+    const label = shortAddr(n.id);
     return {
       id: String(n.id),
       label,
-      title: `${label} (${ROLE_LABEL[role]})`,
+      title: `${displayFindingAddr(n.id)} (${ROLE_LABEL[role]})`,
       shape: 'dot',
       size: 16,
       color: ROLE_COLORS[role],
@@ -564,7 +637,7 @@ function updateRawGraph(cg) {
       // auf der Deny-Liste, sonst Kurzform (displayFindingAddr, fail-closed).
       title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${type})`,
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
-      font: { color: '#484850', size: 10, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
+      font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
   });
 
@@ -670,13 +743,41 @@ function renderLiveGraph(cg) {
 }
 
 function setGraphTab(tab) {
-  if (!network || tab === activeGraphTab) return;
+  // GUARD NUR NOCH GEGEN DOPPELKLICK: Der frühere kombinierte Guard
+  // (!network || …) blockierte bei vis-network-CDN-Ausfall (network===null,
+  // initGraph-Fail-Pfad) auch den Weltkugel-Tab — obwohl die Kugel gerade
+  // dann ohne vis läuft. Die network-Abfrage steht jetzt ausschließlich in
+  // den live/cluster-Zweigen.
+  if (tab === activeGraphTab) return;
   activeGraphTab = tab;
   document.getElementById('tab-live').setAttribute('aria-selected', String(tab === 'live'));
   document.getElementById('tab-cluster').setAttribute('aria-selected', String(tab === 'cluster'));
+  document.getElementById('tab-globe').setAttribute('aria-selected', String(tab === 'globe'));
+  const globeEl = document.getElementById('globe');
+  const graphEl = document.getElementById('graph');
   const listEl = document.getElementById('cluster-list');
   const emptyEl = document.getElementById('cluster-empty');
   const hasClusters = Boolean(lastClusterGraph && Array.isArray(lastClusterGraph.clusters) && lastClusterGraph.clusters.length);
+  if (tab === 'globe') {
+    // GEGENSEITIGE SICHTBARKEIT der Bühnen: Kugel an, Canvas aus — sonst
+    // würden zwei Bühnen gleichzeitig rendern. Der globe-Zweig läuft ohne
+    // vis-network; activate() konstruiert lazy beim ersten Aufruf.
+    globeEl.hidden = false;
+    graphEl.hidden = true;
+    listEl.hidden = true;
+    emptyEl.hidden = true;
+    if (globeMod && typeof globeMod.activate === 'function') globeMod.activate();
+    return;
+  }
+  // Rückwechsel auf die vis-Bühne: Kugel pausieren (Loop stoppen), Canvas
+  // zeigen und deterministisch resizen — im hiddenen Container hatte
+  // vis-network Größe 0; autoResize erholt sich, der explizite resize()
+  // macht die Wiederherstellung sofort reproduzierbar.
+  globeEl.hidden = true;
+  if (globeMod && typeof globeMod.deactivate === 'function') globeMod.deactivate();
+  graphEl.hidden = false;
+  if (!network) return; // vis offline: Bühnenwechsel genügt, Fehlermeldung bleibt sichtbar
+  requestAnimationFrame(() => { try { network.resize(); } catch { /* egal */ } });
   if (tab === 'cluster') {
     listEl.hidden = !hasClusters;
     emptyEl.hidden = hasClusters;
@@ -706,7 +807,9 @@ function flowChainHtml(paths, opts = {}) {
     const address = String(x?.id ?? '');
     const shown = displayFindingAddr(address);
     const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
-    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}</span>`;
+    // title trägt NUR den Anzeigewert (gerenderter displayFindingAddr-Wert),
+    // nie die Roheadresse (Design-Fix, Muster drilldown.js-Konten-Tabelle).
+    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}" title="${esc(shown)}">${esc(shown)}${actions}</span>`;
   };
   const parts = [];
   let used = 0;
@@ -815,6 +918,7 @@ function renderClusterList(clusters) {
 function bindGraph() {
   document.getElementById('tab-live').addEventListener('click', () => setGraphTab('live'));
   document.getElementById('tab-cluster').addEventListener('click', () => setGraphTab('cluster'));
+  document.getElementById('tab-globe').addEventListener('click', () => setGraphTab('globe'));
   const listEl = document.getElementById('cluster-list');
   // Index-Lookup gegen den AKTUELLEN lastClusterGraph: die Karte trägt nur
   // ihren Listen-Index; aus ihm wird die cluster.id aufgelöst, die das Modal
@@ -837,6 +941,53 @@ function bindGraph() {
       if (card) { e.preventDefault(); openFromCard(card); }
     }
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Ansichts-Navigation (Dashboard / Historie / Konto-Check)            */
+/* ------------------------------------------------------------------ */
+/* Native Buttons (Klick + Enter/Leertaste) togglen das hidden-Attribut
+ * der drei View-Container und spiegeln aria-selected an allen drei Tabs
+ * — genau ein View ist sichtbar. Die Live-Engine (WSS-Verbindung,
+ * Cluster-Rebuild, Köder-Filter) läuft in allen Views weiter: Views sind
+ * reine Anzeigefilter ohne Teardown; nur der Weltkugel-Loop pausiert über
+ * setGraphTab. Hash-Synchronisation (#dashboard/#history/#check) per
+ * replaceState ohne Reload; ein ungültiger Hash fällt auf Dashboard
+ * zurück. Fokus-Ring läuft über die globale :focus-visible-Regel. */
+const VIEW_TABS = [
+  { view: 'dashboard', tabId: 'view-tab-dashboard', panelId: 'view-dashboard' },
+  { view: 'history', tabId: 'view-tab-history', panelId: 'view-history' },
+  { view: 'check', tabId: 'view-tab-check', panelId: 'view-check' },
+];
+let activeView = 'dashboard';
+
+function setView(view) {
+  const target = VIEW_TABS.some((v) => v.view === view) ? view : 'dashboard';
+  activeView = target;
+  for (const v of VIEW_TABS) {
+    const active = v.view === target;
+    document.getElementById(v.tabId).setAttribute('aria-selected', String(active));
+    document.getElementById(v.panelId).hidden = !active;
+  }
+  if (historyMod && typeof historyMod.setView === 'function') historyMod.setView(target === 'history');
+  if (checkMod && typeof checkMod.setView === 'function') checkMod.setView(target === 'check');
+  // Hash ohne Reload und ohne hashchange-Schleife nachziehen (replaceState
+  // erzeugt weder History-Eintrag noch ein hashchange-Event).
+  if (location.hash !== `#${target}`) {
+    try { history.replaceState(null, '', `#${target}`); } catch { /* egal */ }
+  }
+}
+
+function viewFromHash() {
+  const h = String(location.hash ?? '').replace(/^#/, '').toLowerCase();
+  return VIEW_TABS.some((v) => v.view === h) ? h : 'dashboard';
+}
+
+function bindViews() {
+  for (const v of VIEW_TABS) {
+    document.getElementById(v.tabId).addEventListener('click', () => setView(v.view));
+  }
+  window.addEventListener('hashchange', () => setView(viewFromHash()));
 }
 
 /* ------------------------------------------------------------------ */
@@ -882,6 +1033,14 @@ async function rebuildClusterGraph() {
   renderLiveGraph(cg);
   renderClusterList(cg.clusters);
   if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
+  // Neue Konsumenten desselben Neubau-Takts: Weltkugel (Punkte/Bögen/Ringe)
+  // und Historie (Melden neuer maliziöser Cluster — nur malicious, Köder
+  // wurden oben bereits aus beiden Fenstern gefiltert). Die Live-Engine
+  // (WSS, Fenster, Köder-Filter) bleibt von den View-States unabhängig.
+  if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh();
+  if (historyMod && typeof historyMod.onClusterRebuild === 'function') {
+    historyMod.onClusterRebuild(cg, graphFindings).catch(() => { /* Melden darf den Live-Betrieb nie brechen */ });
+  }
 }
 
 let lastLedgerAt = 0;
@@ -1042,7 +1201,7 @@ function renderLog() {
       <span class="log-time">${esc(fmtClock(e.t))}</span>
       <span class="log-sev sev-text-${esc(e.severity)}">${esc(e.severity === 'malicious' ? 'maliziös' : e.severity === 'suspect' ? 'verdächtig' : 'info')}</span>
       <span class="log-rule">${esc(RULE_NAME.get(e.ruleId) ?? e.ruleId)}</span>
-      <span class="log-addr">${esc(shown)}${actions}</span>
+      <span class="log-addr" title="${esc(shown)}">${esc(shown)}${actions}</span>
       <span class="log-note">${esc(defang(e.note))}</span>
       <span class="log-ledger">#${esc(e.ledgerIndex)}</span>
     </div>`;
@@ -1380,6 +1539,8 @@ function bindLive() {
 
 initGraph();
 bindGraph();
+bindViews();
+setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
 bindLive();
 bindAddrActions();
 document.getElementById('stat-network').textContent = 'XRPL Mainnet (xrplcluster.com)';

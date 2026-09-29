@@ -1,0 +1,116 @@
+/* Honeypot XRPL – Maliziöse Historie (public/history.css)
+ *
+ * Modul-eigenes Stylesheet für das Historie-Panel (#history-root). Nutzt die
+ * geteilten Utilities aus style.css — nur referenziert, nicht doppelt
+ * definiert: .cluster-list, .cluster-card, .cluster-head, .cluster-label,
+ * .cluster-metrics, .cluster-times, .risk-badge, .badge, .badge-partial,
+ * .filter-select, .filter-label, .graph-note, .addr-full, .addr-actions.
+ * Designbasis: Astra 6 (weiße Flächen, 1px-Ink-Ränder, Radien, ≥12 px Schrift,
+ * 44 px Touch-Ziele, WCAG AA, reduced-motion/forced-colors-Respekt). */
+
+/* ---------- Suchfeld ---------- */
+
+.history-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.history-search .filter-label {
+  font-size: 12px;
+  color: var(--a6-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* 44 px Touch-Ziel (Skill-Vorgabe) innerhalb des Moduls. */
+.history-search .filter-select {
+  flex: 1 1 240px;
+  max-width: 420px;
+  min-height: 44px;
+}
+
+/* ---------- Mitglieder-Liste ---------- */
+
+.history-members {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-inline-size: 0;
+}
+
+.history-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.history-member .addr-full {
+  flex: 1 1 auto;
+  min-inline-size: 0; /* Grid-/Flex-Kind darf schrumpfen, damit umbrochen wird */
+}
+
+/* ---------- „weitere N Mitglieder“ (details/summary) ---------- */
+
+.history-members-more {
+  margin-top: 8px;
+}
+
+.history-members-more summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px; /* Touch-Ziel */
+  padding: 6px 12px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.history-members-more summary:hover {
+  border-color: var(--a6-control-line);
+}
+
+.history-members-more[open] summary {
+  margin-bottom: 6px;
+}
+
+.history-members-more .history-members {
+  margin-top: 6px;
+}
+
+/* ---------- Regeln + Sichtungskennzeichnung ---------- */
+
+.history-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.history-sightings {
+  margin-top: 10px;
+}
+
+/* ---------- Zwangsfarben (Windows High Contrast) ----------
+   Keine Animationen im Modul — es gibt nichts für prefers-reduced-motion
+   zu deaktivieren; transitions werden bewusst nicht eingesetzt. */
+@media (forced-colors: active) {
+  .history-members-more summary {
+    border: 1px solid CanvasText;
+  }
+
+  .history-member .addr-full {
+    forced-color-adjust: none;
+  }
+}
