@@ -1,9 +1,10 @@
 # Sicherheitsgrenze für Vercel-Uploads — niemals Köder-Material auf den Server.
+# (Nur Projekt-Wurzel ankernd — public/data/ mit Registry/Länderdaten MUSS hochgeladen werden.)
 bait.json
 bait-history.json
 seeds/
 *.seed
-data/
+/data/
 logs/
 monitor.log
 .env
