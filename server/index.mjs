@@ -402,6 +402,13 @@ const LEDGER_MAX_RESOLVE = 40;
 const LEDGER_PARALLEL = 8;
 const LEDGER_CACHE_MS = 60000;
 let ledgerCache = null; // { time, body } — nur im Prozess-Speicher
+const LEDGER_ERROR_CACHE_MS = 5000;
+let ledgerErrorCache = null; // { time, message } — kurzer Negativ-Cache:
+                             // Wiederholte Anfragen innerhalb des Fensters
+                             // bedient der Fehler, statt erneut 3 RPC-Versuche
+                             // zu feuern — entlastet einen gedrosselten
+                             // Endpunkt zusätzlich zum clientseitigen
+                             // Poll-Backoff (Befund 2026-09-30).
 
 // slowDown-Backoff: xrplcluster (Clio) drosselt bei Häufung — live beobachtet
 // 2026-09-28. Ein Retry-Fenster pro Call macht den Snapshot robust.
@@ -460,6 +467,12 @@ app.get("/api/ledger", async (req, res) => {
     if (ledgerCache && Date.now() - ledgerCache.time < LEDGER_CACHE_MS) {
       return res.json(ledgerCache.body);
     }
+    // Negativ-Cache (Befund 2026-09-30): Der Erfolgscache hat Vorrang; erst
+    // danach entscheidet der kurze Fehler-Cache. Ein Client im 5-s-Poll-Takt
+    // löst so maximal eine Runde RPC-Versuche pro Fenster aus.
+    if (ledgerErrorCache && Date.now() - ledgerErrorCache.time < LEDGER_ERROR_CACHE_MS) {
+      return res.status(502).json({ error: ledgerErrorCache.message });
+    }
     const led = await rpcFetch("ledger", { ledger_index: "validated", transactions: true });
     const rawTxs = led?.ledger?.transactions ?? [];
     const closeTime =
@@ -509,9 +522,12 @@ app.get("/api/ledger", async (req, res) => {
         })),
     };
     ledgerCache = { time: Date.now(), body };
+    ledgerErrorCache = null; // Erfolg verdrängt einen etwaigen Fehler-Cache
     res.json(body);
   } catch (err) {
-    res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${err?.message ?? err}` });
+    const message = `Ledger-Abfrage fehlgeschlagen: ${err?.message ?? err}`;
+    ledgerErrorCache = { time: Date.now(), message };
+    res.status(502).json({ error: message });
   }
 });
 

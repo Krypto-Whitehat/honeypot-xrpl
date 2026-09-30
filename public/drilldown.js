@@ -10,8 +10,20 @@
  * cluster.id-Zentrierung: das Modal hält die cluster.id und re-looked sie bei
  * jedem Daten-Update gegen den aktuellen Cluster-Graphen (lastClusterGraph
  * wird pro Ledger ersetzt, Cluster sortieren neu) — nie ein stale Listen-
- * index. Verschwindet der Cluster, zeigt das Modal einen eleganten
- * 'Cluster nicht mehr aktuell'-Zustand.
+ * index. Die id ist instabil (sie wandert mit dem alphabetisch kleinsten
+ * Mitglied, lib/cluster.mjs): Fehlt sie im aktuellen Graphen, zeigt das Modal
+ * den LETZTEN bekannten Stand mit Alterungshinweis weiter ('Stand HH:MM:SS –
+ * Cluster nicht mehr im aktuellen Beobachtungsfenster'); ein Fallback-Lookup
+ * über die Mitglieder-Schnittmenge (≥2 gemeinsame Mitglieder UND ≥50 %,
+ * jeweils gegen die Mitglieder des ORIGINÄR geöffneten Clusters als Anker)
+ * übernimmt denselben Cluster nahtlos unter neuer id und meldet die Übernahme
+ * mit einem Hinweis. Der Anker verhindert transitives Wandern: Nur der
+ * ursprünglich geöffnete Cluster (oder ein Nachfolger mit ausreichend
+ * Ursprungs-Überlappung) kann übernommen werden — schrittweises Hüpfen über
+ * Zwischen-Snapshots hinaus ist ausgeschlossen (Befund 2026-09-30).
+ * Total-Leerung nur bei openCluster auf einen bereits verschwundenen Cluster,
+ * nach Snapshot-Kappe oder — immer vorrangig — bei Köder-Treffer in der
+ * Deny-Reprüfung je refresh-Tick.
  *
  * GRUNDSATZ: c.id ('cluster:<Adresse>') wird NIE im DOM gerendert — er ist
  * ausschließlich interner Lookup-Schlüssel. Adressen laufen ausschließlich
@@ -58,6 +70,32 @@ export function initClusterDrilldown(ctx) {
   let fg3dResizeObs = null;     // ResizeObserver der 3D-Bühne
   let vis2d = null;             // 2D-Ausweich-Instanz
   const highlightSet = new Set();
+
+  /* Modal-Lebenszyklus (Symptom 3, Diagnose 2026-09-30): cluster.id ist
+   * instabil — sie wird aus dem alphabetisch kleinsten Mitglied gebildet
+   * (lib/cluster.mjs) und wechselt, sobald dieser ID-Träger aus dem rollenden
+   * Fenster rollt, obwohl der Cluster unter neuer id weiterlebt. Fehlt die id
+   * im aktuellen Graphen, zeigt render() deshalb den LETZTEN bekannten Stand
+   * mit Alterungshinweis weiter (statt sofort total zu leeren); ein Fallback-
+   * Lookup über die Mitglieder-Schnittmenge nimmt den Cluster unter neuer id
+   * nahtlos auf. */
+  const STALE_SNAPSHOT_MAX_MS = 300000; // Kappe des eingefrorenen Standes
+                                        // (Akzeptanz fordert ≥60 s Lesbarkeit;
+                                        // der Köder-Recheck läuft je refresh-
+                                        // Tick unabhängig davon zusätzlich)
+  let snapshot = null;          // letzter voll gerenderter Stand:
+                                // {clusterId, at, members[]}
+  let staleShown = false;       // Alterungshinweis aktuell sichtbar?
+  let lastRenderDigest = null;  // Änderungs-Gate: unveränderte Inhalte → kein Vollrender
+  let graphClusterId = null;    // Cluster-id des 3D-Graphen — zoomToFit nur bei
+                                // Cluster-Wechsel/Erstrender (Kamera bleibt
+                                // bei reinen Inhalts-Updates erhalten)
+  let originMembers = null;     // Fallback-ANKER (Befund 2026-09-30): Mitglieder
+                                // des originär geöffneten Clusters, eingefroren
+                                // bei der ersten erfolgreichen Renderung nach
+                                // openCluster — bleibt stabil, damit der
+                                // Fallback-Lookup nicht transitiv wandern kann
+  let takeoverNoticeTimer = 0;  // Auto-Ausblendung des Übernahme-Hinweises
 
   function reducedMotion() {
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
@@ -107,6 +145,8 @@ export function initClusterDrilldown(ctx) {
           <div class="cluster-modal-metrics"></div>
           <button type="button" class="cluster-modal-close" aria-label="Schließen">&times;</button>
         </header>
+        <p class="graph-note cluster-modal-stale" role="status" hidden
+           style="margin:0;padding:10px 18px;border-bottom:1px solid var(--a6-line);background:var(--a6-surface-alt);"></p>
         <div class="cluster-modal-body">
           <section class="cluster-modal-graph" aria-label="Cluster-Graph">
             <div class="cluster-3d"></div>
@@ -170,6 +210,18 @@ export function initClusterDrilldown(ctx) {
     ensureShell();
     currentClusterId = String(clusterId);
     isOpen = true;
+    // openCluster beginnt IMMER bei null Stand: Ein überalterter Snapshot eines
+    // früher geöffneten Clusters wird verworfen — klickt der Nutzer auf einen
+    // inzwischen verschwundenen Cluster (stale Karte/Bubble), zeigt das Modal
+    // die ehrliche Total-Leerung statt eines fremden Letztstandes.
+    snapshot = null;
+    staleShown = false;
+    originMembers = null; // Fallback-ANKER neu einfrieren (Befund 2026-09-30)
+    clearTakeoverNotice();
+    const staleNote = overlay.querySelector('.cluster-modal-stale');
+    if (staleNote) staleNote.hidden = true;
+    lastRenderDigest = null; // Vollrender erzwingen (Modul-eigenes Änderungs-Gate)
+    graphClusterId = null;   // zoomToFit/Camera-Reset als Erstrender zulassen
     overlay.hidden = false;
     document.body.classList.add('cluster-modal-open');
     render();
@@ -189,6 +241,8 @@ export function initClusterDrilldown(ctx) {
     const id = currentClusterId;
     isOpen = false;
     currentClusterId = null;
+    originMembers = null; // Anker verfällt mit dem Modal (neues Öffnen friert neu)
+    clearTakeoverNotice();
     renderToken += 1;
     overlay.hidden = true;
     document.body.classList.remove('cluster-modal-open');
@@ -211,13 +265,148 @@ export function initClusterDrilldown(ctx) {
 
   /* ---------------- Rendern ---------------- */
 
+  // Fallback-Lookup mit GEKOPPELTER Schwelle, verankert am ORIGINÄR geöffneten
+  // Cluster (Befund 2026-09-30): Die neue cluster.id wird nur übernommen, wenn
+  // ≥2 gemeinsame Mitglieder mit dem ANKER (nicht dem jeweils letzten
+  // Snapshot) UND eine Schnittmenge von ≥50 % (bezogen auf die kleinere der
+  // beiden Mitgliederzahlen) vorliegen. Eine reine 50-%-Schwelle matcht bei
+  // 2er-Clustern jeden Cluster mit nur EINEM gemeinsamen Mitglied — genau das
+  // koppelt die zweite Bedingung ab. Das Matching gegen den Vorgänger-Snapshot
+  // ließ das Modal dagegen transitiv wandern (jeder Hopp verschob den
+  // Maßstab mit); der Anker bleibt über die Lebensdauer des geöffneten Modals
+  // stabil, sodass nur Nachfolger des ORIGINÄLLEN Clusters übernommen werden
+  // können — ein Cluster ohne gemeinsame Ursprungs-Mitglieder wird abgelehnt.
+  function findFallbackCluster(clusters) {
+    if (!originMembers || originMembers.size < 2) return null;
+    let best = null;
+    let bestInter = 0;
+    for (const c of clusters) {
+      const members = Array.isArray(c.memberAddresses) ? c.memberAddresses : [];
+      let inter = 0;
+      for (const m of members) {
+        if (originMembers.has(String(m))) inter += 1;
+      }
+      if (inter < 2) continue; // Bedingung 1: ≥2 gemeinsame Mitglieder mit dem Anker
+      const denom = Math.min(originMembers.size, members.length);
+      if (denom > 0 && inter / denom < 0.5) continue; // Bedingung 2: ≥50 %
+      if (inter > bestInter) { best = c; bestInter = inter; }
+    }
+    return best;
+  }
+
+  // Übernahme-Hinweis (Befund 2026-09-30): Der verankerte Fallback-Lookup hat
+  // denselben Cluster unter neuer id aufgenommen — der Titel wechselt mit,
+  // deshalb wird die Übernahme ehrlich gemeldet statt still vollzogen. Der
+  // Hinweis blendet sich nach kurzer Zeit selbst aus; ein aktiver
+  // Alterungshinweis bleibt unangetastet (dieser ist vorrangig).
+  function clearTakeoverNotice() {
+    if (takeoverNoticeTimer) { clearTimeout(takeoverNoticeTimer); takeoverNoticeTimer = 0; }
+  }
+
+  function showTakeoverNotice() {
+    const note = overlay && overlay.querySelector('.cluster-modal-stale');
+    if (note) {
+      note.textContent = 'Cluster läuft unter neuer Kennung weiter – automatisch übernommen (nahtlose Übernahme über die Mitglieder-Schnittmenge).';
+      note.hidden = false;
+    }
+    clearTakeoverNotice();
+    takeoverNoticeTimer = setTimeout(() => {
+      takeoverNoticeTimer = 0;
+      if (staleShown) return; // Alterungshinweis ist aktiv und bleibt stehen
+      const n = overlay && overlay.querySelector('.cluster-modal-stale');
+      if (n) n.hidden = true;
+    }, 10000);
+  }
+
+  // Änderungs-Gate INHALTLICH (im Modul, nicht im Aufrufer): Vergleicht id,
+  // Metriken, Mitglieder (inkl. Rollen/Drops/Schweregrad/Grade) und Kanten des
+  // ANGEZEIGTEN Clusters gegen den zuletzt gerenderten Stand. app.js bleibt der
+  // einfache Aufrufer (drilldown.refresh()), denn nur das Modul kennt seinen
+  // gerenderten Stand — sonst bliebe das ~4-s-Vollrender des offenen Modals bei
+  // Änderung IRGENDeines Clusters bestehen.
+  function clusterDigest(cluster, clusterNodes, clusterEdges) {
+    const nodes = clusterNodes
+      .map((n) => `${n.id}:${n.role ?? ''}:${n.inDrops ?? 0}:${n.outDrops ?? 0}:${n.degreeIn ?? 0}:${n.degreeOut ?? 0}:${n.severity ?? ''}`)
+      .sort()
+      .join('|');
+    const edges = clusterEdges
+      .map((e) => `${e.from}>${e.to}:${e.type ?? ''}:${e.txHash ?? ''}:${e.closeTime ?? ''}`)
+      .sort()
+      .join('|');
+    return `${cluster.id}#${cluster.label ?? ''}#${cluster.totalDrops ?? 0}#${cluster.txCount ?? 0}`
+      + `#${cluster.distinctAccounts ?? 0}#${cluster.firstSeen ?? ''}#${cluster.lastSeen ?? ''}#${nodes}#${edges}`;
+  }
+
+  // Alterungszustand lösen (Cluster wieder da): Hinweis verbergen, Graph fortsetzen.
+  function endStaleState() {
+    if (!staleShown) return;
+    staleShown = false;
+    const note = overlay.querySelector('.cluster-modal-stale');
+    if (note) note.hidden = true;
+    if (fg3d) { try { fg3d.resumeAnimation(); } catch { /* egal */ } }
+  }
+
+  // Ehrliche Total-Leerung (früher das Standardverhalten bei fehlender id):
+  // nur noch bei openCluster auf bereits verschwundenen Cluster, nach Ablauf
+  // der Snapshot-Kappe oder — vor allen anderen Gründen — bei Köder-Treffer.
+  function clearToEmptyState(els) {
+    snapshot = null;
+    staleShown = false;
+    clearTakeoverNotice(); // Übernahme-Hinweis hat seinen Cluster verloren
+    const note = overlay.querySelector('.cluster-modal-stale');
+    if (note) note.hidden = true;
+    els.titleEl.textContent = 'Cluster';
+    els.badgeEl.innerHTML = '';
+    els.metricsEl.innerHTML = '';
+    els.rolesEl.innerHTML = '';
+    els.timelineEl.innerHTML = '';
+    els.chainEl.innerHTML = '';
+    els.tableEl.innerHTML = '';
+    teardown3D();
+    teardown2D();
+    els.graphEl.innerHTML = '<p class="graph-note">Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.</p>';
+    els.noteEl.hidden = true;
+  }
+
+  // cluster.id fehlt im aktuellen Graphen: LETZTEN bekannten Stand weiterzeigen
+  // (Titel/Badge/Metriken/Rollen/Zeitachse/Kette/Tabelle bleiben im DOM, Graph
+  // pausiert) plus Alterungshinweis mit Stand-Zeitpunkt.
+  function renderMissingCluster(els) {
+    // KÖDER-SCHUTZ SCHLÄGT ALTERUNGSANZEIGE IN JEDEM FALL: Die Deny-Liste
+    // rotiert serverseitig alle 5 s, rebuildDisplayAndKnownBad bewertet bei
+    // jedem Load neu — der eingefrorene Snapshot darf diese Fail-closed-
+    // Neubewertung nie umgehen. Deshalb bei JEDEM refresh-Tick die Member-
+    // Hashes gegen die AKTUELLE baitHashDeny prüfen (isDeniedAddr synchron
+    // über den geprimten addrHashCache) und bei Treffer sofort leeren.
+    if (snapshot && typeof isDeniedAddr === 'function') {
+      for (const m of snapshot.members) {
+        if (isDeniedAddr(m)) {
+          clearToEmptyState(els);
+          return;
+        }
+      }
+    }
+    if (!snapshot || Date.now() - snapshot.at > STALE_SNAPSHOT_MAX_MS) {
+      clearToEmptyState(els);
+      return;
+    }
+    if (!staleShown) {
+      staleShown = true;
+      const note = overlay.querySelector('.cluster-modal-stale');
+      if (note) {
+        note.textContent = `Stand ${fmtClock(snapshot.at)} – Cluster nicht mehr im aktuellen Beobachtungsfenster.`;
+        note.hidden = false;
+      }
+      if (fg3d) { try { fg3d.pauseAnimation(); } catch { /* egal */ } }
+    }
+  }
+
   async function render() {
     const token = ++renderToken;
     const cg = ctx.getClusterGraph();
     const clusters = cg && Array.isArray(cg.clusters) ? cg.clusters : [];
     const allNodes = cg && Array.isArray(cg.nodes) ? cg.nodes : [];
     const allEdges = cg && Array.isArray(cg.edges) ? cg.edges : [];
-    const cluster = clusters.find((c) => c.id === currentClusterId);
 
     const titleEl = overlay.querySelector('#cluster-modal-title');
     const badgeEl = overlay.querySelector('.cluster-modal-badge');
@@ -228,21 +417,25 @@ export function initClusterDrilldown(ctx) {
     const tableEl = overlay.querySelector('.cluster-modal-table');
     const graphEl = overlay.querySelector('.cluster-3d');
     const noteEl = overlay.querySelector('.cluster-graph-note');
+    const els = { titleEl, badgeEl, metricsEl, rolesEl, timelineEl, chainEl, tableEl, graphEl, noteEl };
+
+    // Exakter Lookup über die cluster.id; bei Verfehlen (ID-Träger aus dem
+    // rollenden Fenster gerollt) Fallback über die Mitglieder-Schnittmenge
+    // gegen den ORIGIN-ANKER (Befund 2026-09-30).
+    let cluster = clusters.find((c) => c.id === currentClusterId);
+    if (!cluster) cluster = findFallbackCluster(clusters);
 
     if (!cluster) {
-      // Cluster ist aus dem aktuellen Beobachtungsfenster gefallen.
-      titleEl.textContent = 'Cluster';
-      badgeEl.innerHTML = '';
-      metricsEl.innerHTML = '';
-      rolesEl.innerHTML = '';
-      timelineEl.innerHTML = '';
-      chainEl.innerHTML = '';
-      tableEl.innerHTML = '';
-      teardown3D();
-      teardown2D();
-      graphEl.innerHTML = '<p class="graph-note">Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.</p>';
-      noteEl.hidden = true;
+      renderMissingCluster(els);
       return;
+    }
+    let takeoverPending = false;
+    if (cluster.id !== currentClusterId) {
+      // Nahtlose Übernahme: derselbe Cluster lebt unter neuer id weiter — der
+      // exakte Lookup kann keine fremde id liefern, jede Abweichung stammt
+      // aus dem verankerten Fallback. Hinweis folgt nach dem Vollrender.
+      currentClusterId = cluster.id;
+      takeoverPending = true;
     }
 
     // KNOTEN-GATE (Defense-in-Depth, Befund 2026-09-29): isDeniedAddr filtert
@@ -257,7 +450,23 @@ export function initClusterDrilldown(ctx) {
       : allNodes;
     const clusterNodes = visibleNodes.filter((n) => n.clusterId === cluster.id);
     const nodeIds = new Set(clusterNodes.map((n) => String(n.id)));
+    // Fallback-ANKER einfrieren (Befund 2026-09-30): Mitglieder des originär
+    // geöffneten Clusters bei der ERSTEN erfolgreichen Renderung nach
+    // openCluster. Erst wenn der exakte Lookup diesen Stand bestätigt hat,
+    // darf der Fallback später gegen ihn matchen — so ist der Anker stets der
+    // vom Nutzer geöffnete Cluster, nicht ein Zwischen-Snapshot.
+    if (!originMembers) originMembers = new Set(nodeIds);
     const clusterEdges = allEdges.filter((e) => nodeIds.has(String(e.from)) && nodeIds.has(String(e.to)));
+
+    // Änderungs-Gate: identischer Inhalt wie beim letzten Vollrender → nur
+    // einen eventuellen Alterungszustand lösen und zurück (kein Re-Render,
+    // kein graphData-Austausch, kein zoomToFit).
+    const digest = clusterDigest(cluster, clusterNodes, clusterEdges);
+    if (digest === lastRenderDigest) {
+      endStaleState();
+      return;
+    }
+    lastRenderDigest = digest;
 
     titleEl.textContent = cluster.label ?? 'Cluster';
     const sev = clusterSeverity(cluster, clusterNodes);
@@ -277,7 +486,13 @@ export function initClusterDrilldown(ctx) {
     renderTimeline(cluster, clusterEdges, timelineEl);
     renderChain(cluster, clusterNodes, clusterEdges, chainEl);
     renderTable(clusterNodes, tableEl);
-    await renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token);
+    // Letztstand einfrieren — Grundlage für Alterungsanzeige (members+at);
+    // das Fallback-Matching läuft seit Befund 2026-09-30 gegen den stabilen
+    // ORIGIN-ANKER (originMembers), nicht gegen diesen Snapshot.
+    snapshot = { clusterId: cluster.id, at: Date.now(), members: [...nodeIds] };
+    endStaleState();
+    if (takeoverPending) showTakeoverNotice();
+    await renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token, cluster.id);
   }
 
   function clusterSeverity(cluster, clusterNodes) {
@@ -469,7 +684,7 @@ export function initClusterDrilldown(ctx) {
 
   /* ---------------- Graph: 3D mit 2D-Ausweichansicht ---------------- */
 
-  async function renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token) {
+  async function renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token, clusterId) {
     noteEl.hidden = true;
     if (typeof window.ForceGraph3D !== 'function') {
       graphEl.innerHTML = '<p class="graph-note">3D-Ansicht wird geladen …</p>';
@@ -479,7 +694,7 @@ export function initClusterDrilldown(ctx) {
 
     if (ok3d && webglAvailable()) {
       try {
-        build3D(clusterNodes, clusterEdges, graphEl);
+        build3D(clusterNodes, clusterEdges, graphEl, clusterId);
         return;
       } catch {
         // Konstruktor-Fehler -> Fallback unten
@@ -511,7 +726,7 @@ export function initClusterDrilldown(ctx) {
     };
   }
 
-  function build3D(clusterNodes, clusterEdges, graphEl) {
+  function build3D(clusterNodes, clusterEdges, graphEl, clusterId) {
     teardown2D();
     const data = {
       nodes: clusterNodes.map((n) => ({
@@ -526,6 +741,11 @@ export function initClusterDrilldown(ctx) {
         type: String(e.type ?? ''),
       })),
     };
+    // Gleicher Cluster wie im aktuellen Graphen? Dann NUR die Daten
+    // aktualisieren — Kamera/Zoom bleiben erhalten. zoomToFit/Camera-Reset
+    // (und mit ihm der sichtbare Layout-Neustart) feuern ausschließlich bei
+    // Cluster-Wechsel oder Erstrender.
+    const sameCluster = Boolean(fg3d) && graphClusterId === clusterId;
     if (!fg3d) {
       graphEl.innerHTML = '';
       fg3d = window.ForceGraph3D()(graphEl);
@@ -558,6 +778,9 @@ export function initClusterDrilldown(ctx) {
         .linkDirectionalArrowLength(3)
         .onNodeClick((node) => on3dNodeClick(node));
     }
+    // graphData bei JEDER inhaltlichen Änderung des angezeigten Clusters —
+    // Mitglieder/Kanten/Metriken werden nie blockiert. Ein vorheriger
+    // Alterungs-Pause (Cluster war kurzzeitig verschwunden) wird gelöst.
     fg3d
       .graphData(data)
       .nodeColor(nodeColorAccessor())
@@ -565,15 +788,18 @@ export function initClusterDrilldown(ctx) {
       .linkColor((l) => edgeColors[String(l.type)] || edgeDefault)
       .linkDirectionalParticles((l) => (String(l.type) === 'Payment' && !reducedMotion() ? 2 : 0))
       .linkDirectionalParticleWidth(2);
+    try { fg3d.resumeAnimation(); } catch { /* egal */ }
     if (reducedMotion()) {
       // Reduced Motion (Befund 2026-09-29): Kraft-Simulation einfrieren —
       // Pendant zum 2D-Fallback, der die Physik per cooldownTicks 0 stoppt.
-      // Knoten driften nicht weiter; Kamera-Interaktion bleibt erhalten.
+      // Auch nach Inhalts-Updates (graphData tauet die Simulation wieder auf).
       try { fg3d.cooldownTicks(0); } catch { /* egal */ }
-      // Statische Bildfassung ohne Animation (Dauer 0 statt 400 ms).
-      setTimeout(() => { try { fg3d.zoomToFit(0); } catch { /* egal */ } }, 350);
-    } else {
-      setTimeout(() => { try { fg3d.zoomToFit(400); } catch { /* egal */ } }, 350);
+    }
+    if (!sameCluster) {
+      graphClusterId = clusterId;
+      // Camera-Reset/zoomToFit nur bei Cluster-Wechsel oder Erstrender.
+      const dur = reducedMotion() ? 0 : 400; // statische Bildfassung ohne Animation
+      setTimeout(() => { try { if (fg3d) fg3d.zoomToFit(dur); } catch { /* egal */ } }, 350);
     }
   }
 
@@ -652,7 +878,17 @@ export function initClusterDrilldown(ctx) {
     }
     if (!fg3d) return;
     try { fg3d.pauseAnimation(); } catch { /* egal */ }
+    // ECHTES Freigeben (Symptom 2b, WebGL-Context-Leck): Nur pause+null ließ
+    // den WebGL-Context der Instanz weiterleben — jeder Zyklus 'Cluster fiel
+    // aus dem Fenster → Modal geleert → neu geöffnet' leakte einen Live-
+    // Context; ab ~16 aktiven Contexten erzwingt Chrome Context-Loss am
+    // ältesten Context (= Weltkugel). _destructor() (kapsule-Standard)
+    // entsorgt Instanz, DOM und WebGL-Ressourcen.
+    try {
+      if (typeof fg3d._destructor === 'function') fg3d._destructor();
+    } catch { /* egal — fg3d=null bleibt als Minimum */ }
     fg3d = null;
+    graphClusterId = null;
   }
 
   function teardown2D() {

@@ -265,7 +265,22 @@ export function initAccountCheck(ctx = {}) {
     );
   }
 
-  function renderReport(report) {
+  // Hash-Priming über den Host (Befund 2026-09-30): isFullShownAddr entscheidet
+  // synchron aus dem addrHashCache des Hosts — ohne Priming blieben die geprüfte
+  // Adresse und die Kontakt-Gegenparteien auch bei geladener Bait-Allowlist in
+  // der Kurzform, ohne Kopieren-/xrplcharts-Aktionen (diese Adressen erscheinen
+  // nur hier, nicht im Cluster-Graph, und werden dort nie geprimt). Fail-closed:
+  // Ohne ctx.hashOf oder bei Priming-Fehlern bleibt die Kurzform.
+  async function renderReport(report) {
+    if (typeof ctx.hashOf === 'function') {
+      const targets = [report.address];
+      for (const c of Array.isArray(report.contacts) ? report.contacts : []) {
+        if (c && c.counterparty) targets.push(c.counterparty);
+      }
+      try {
+        await Promise.all(targets.map((a) => ctx.hashOf(String(a ?? ''))));
+      } catch { /* Priming fehlgeschlagen: fail-closed Kurzform bleibt */ }
+    }
     const badge = VERDICT_BADGE[report.verdict] ?? VERDICT_BADGE.unknown;
     const shownAddr = displayAddr(report.address);
     const actions = addrActionsHtml(report.address);
@@ -341,7 +356,7 @@ export function initAccountCheck(ctx = {}) {
         }
         return;
       }
-      renderReport(body);
+      await renderReport(body);
     } catch {
       renderErrorCard('Netzwerkfehler', 'Der Konto-Check ist derzeit nicht erreichbar — bitte später erneut versuchen.');
     } finally {

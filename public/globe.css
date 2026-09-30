@@ -64,6 +64,15 @@
   pointer-events: none;
 }
 
+/* FIX-B Zustandsvariante des Pflicht-Hinweises (WebGL-Kontextverlust):
+   dieselbe Fläche wie .globe-note — nur die Linienfarbe wechselt auf die
+   bestehende Warn-Farbe des Systems. Astra-6 bleibt gewahrt: weiße Fläche,
+   1px-Rand, Radien, Typografie und Touchziele unverändert (keine Schrift
+   unter 12 px, keine neuen Klassen- oder ID-Namen außer der Variante). */
+#globe .globe-note.globe-note-alert {
+  border-color: var(--a6-warn);
+}
+
 /* Statischer Fallback (WebGL oder CDN nicht erreichbar): Hinweis statt
    leerem Canvas, kein Erfolgs-Vortäuschen — dieselben Daten stehen in den
    Cluster-Karten und in der Konten-Tabelle des Drilldowns. */

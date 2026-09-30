@@ -8,9 +8,13 @@
 //
 // Auf Vercel stammt die Köder-Union ausschließlich aus ENV BAIT_ADDRESSES
 // (Komma-separiert) — bait.json/bait-history.json sind per .vercelignore vom
-// Upload ausgeschlossen (identisches Muster wie api/ledger.js:38-45). Ohne ENV
-// ist die Liste leer; der Client zeigt dann weiterhin die Kurzform an, bis der
-// Endpoint Daten liefert.
+// Upload ausgeschlossen (identisches Muster wie api/ledger.js). Ohne ENV ist
+// die Liste leer; der Client (refetchBaitHashes) behandelt die leere Antwort
+// als geladene Allowlist mit leerer Deny-Liste und zeigt Adressen dann in
+// VOLLFORM — es sind ja keine Köder konfiguriert (Befund 2026-09-30: die
+// frühere Kommentar-Behauptung „weiterhin Kurzform“ war gegen den Client-Code
+// unzutreffend). Köder-Schutz auf Vercel entsteht somit ausschließlich durch
+// gesetztes ENV; leer bedeutet „keine Köder“, nicht fail-closed.
 import { createHash } from "node:crypto";
 
 export default function handler(req, res) {

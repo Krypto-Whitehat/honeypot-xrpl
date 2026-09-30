@@ -94,7 +94,10 @@ import('./drilldown.js')
  * der Live-Betrieb unverändert weiter; die Module sind reine Konsumenten des
  * Host-ctx. Adressen erreichen sie ausschließlich über displayAddr /
  * isFullShownAddr / isDeniedAddr (Köder-Gates bleiben im Host) — die Module
- * rendern und melden NIE selbst roh. */
+ * rendern und melden NIE selbst roh. hashOf (SHA-256-Cache) dient ausschließlich
+ * dem Priming des addrHashCache, damit isFullShownAddr für außerhalb des
+ * Cluster-Graphen geprüfte Adressen entscheiden kann (Konto-Check,
+ * Befund 2026-09-30) — die Gate-Entscheidung bleibt im Host. */
 let globeMod = null;
 let historyMod = null;
 let checkMod = null;
@@ -145,6 +148,7 @@ import('./account-check.js')
       checkMod = m.initAccountCheck({
         displayAddr: displayFindingAddr,
         isFullShownAddr,
+        hashOf,
         shortAddr,
         esc,
         fmtXrp,
@@ -163,13 +167,31 @@ const WSS_URL = 'wss://xrplcluster.com';
 const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
 const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
 const QUOTA_CALLS_PER_MIN = 14;    // sliding window: max. ledger-Kommandos/60 s
+const QUOTA_COOLDOWN_FALLBACK_MS = 65000; // tooBusy ohne parsebares retry-Delta
+const QUOTA_COOLDOWN_MAX_MS = 120000;     // Cooldown-Deckel: sliding window gibt
+                                         // Einheiten kontinuierlich frei — kein
+                                         // striktes Warten auf die Server-Schätzung
 const PARALLEL = 6;                // max. parallele "tx"-Calls über den WSS
 const TX_TIMEOUT_MS = 8000;        // Einzel-Timeout pro tx-Call
+const SUBSCRIBE_ID = 1;            // feste Request-Id des ledger-Abos (reqId
+                                   // startet bei 1000 — keine Kollision)
+const WS_PROBE_MIN_MS = 15000;     // Untergrenze des Sonden-Abstands (billig,
+                                   // aber kein Hämmern gegen das erschöpfte Quota)
+const WS_PROBE_MAX_MS = 90000;     // Obergrenze (≤120 s laut Diagnose): Abstand
+                                   // zweier subscribe-Versuche, von der App
+                                   // selbst gesteuert statt am Server-Idle-Close
+const WS_STALL_MS = 90000;         // Liveness-Schwelle der EIGENEN WS-Uhr —
+                                   // bewusst ÜBER dem beobachteten 60-s-Idle-Close
 const FEED_CARDS = 12;             // Block-Karten im Feed
 const LOG_MAX = 400;               // Log-Einträge im Speicher
 const LOG_RENDER_MAX = 200;        // gerenderte Log-Zeilen
 const STALL_MS = 12000;            // ohne frischen Ledger -> Snapshot-Fallback
 const WATCHDOG_MS = 5000;          // Fallback-Prüfintervall
+const POLL_BACKOFF_BASE_MS = 5000; // Snapshot-Poll: Backoff-Start nach Fehlversuch
+const POLL_BACKOFF_MAX_MS = 60000; // Backoff-Deckel — ein dauerhaft fehlschlagender
+                                   // oder gedrosselter Endpunkt wird entlastet,
+                                   // statt im 5-s-Takt weiter belastet zu werden
+                                   // (Befund 2026-09-30; Pendant zu wsBackoff)
 const FIRST_SEEN_MAX = 20000;      // Frische-Fenster: Konten-Obergrenze
 const TX_WINDOW_CAP = 4000;        // rollendes Tx-Fenster für das Clustering
 const FINDINGS_WINDOW_CAP = 1000;  // rollendes Finding-Fenster für das Clustering
@@ -232,8 +254,23 @@ async function fetchJson(path) {
 
 // knownBad für die Live-Engine: ausschließlich aus Live-Funden mit
 // severity 'malicious' (Guard in onLedgerEvent) — niemals als Literal im Code.
-// Kein clear(): monoton wachsend pro Session.
+// Kein clear(), aber FIFO-Kappung (Befund 2026-09-30): Bei Überschreitung des
+// Deckels fällt das am längsten beigetragene Konto weg — known-bad-hit
+// vergisst dann nur altste Konten; die Struktur wächst nicht mehr unbegrenzt
+// pro Session (Angleichung an die Deckel der Nachbar-Strukturen).
+const KNOWN_BAD_MAX = 2000; // Deckel analog BAIT_PENDING_MAX
 const knownBad = new Set();
+
+// FIFO-Add mit Kappung: Set-Iterationsfolge = Einfügefolge; alle Zugriffe
+// laufen über dieses Gate.
+function knownBadAdd(address) {
+  knownBad.add(address);
+  while (knownBad.size > KNOWN_BAD_MAX) {
+    const oldest = knownBad.values().next().value;
+    if (oldest === undefined) break;
+    knownBad.delete(oldest);
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Bait-Hash-Allowlist: GET /api/bait-hashes (Deny-Liste, nur Hashes)  */
@@ -250,6 +287,12 @@ const BAIT_HASH_REFETCH_MS = 60000;      // Server rotiert lokal alle 5 s; 60 s 
 const BAIT_HASH_MIN_SPACING_MS = 15000;  // Mindestabstand zwischen Refetches
 const BAIT_HASH_MAX_FAILS = 3;           // danach: Vollanzeige dauerhaft aus
 const BAIT_PENDING_MAX = 2000;           // Obergrenze gepufferter knownBad-Kandidaten
+const ADDR_HASH_CACHE_MAX = 10000;       // LRU-Kappung des Hash-Caches (Befund
+                                         // 2026-09-30): bewusst über dem aktiven
+                                         // Fenster (TX_WINDOW_CAP 4000 +
+                                         // FINDINGS_WINDOW_CAP 1000), damit
+                                         // aktive Adressen nicht ständig
+                                         // verdrängt und neu gehasht werden
 
 const baitHashDeny = new Set();   // sha256-hex (klein) der Bait-Union
 const addrHashCache = new Map();  // Adresse -> sha256-hex (synchrone Deny-Prüfung)
@@ -259,6 +302,7 @@ let denyFailCount = 0;
 let denyPermanentlyFailed = false;
 let fullDisplay = false;          // denyLoaded && !denyPermanentlyFailed
 let lastDenyFetchAt = 0;
+let lastDenySig = null;           // Signatur des letzten Deny-Sets (Rotations-Erkennung)
 
 async function sha256Hex(value) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
@@ -267,19 +311,43 @@ async function sha256Hex(value) {
   return hex;
 }
 
+// Näherungs-LRU über die Einfügeordnung der Map (Befund 2026-09-30): Zugriff
+// frischt die Position auf (get + delete + set), Einfügen kappen die ältesten
+// Einträge. Fail-closed bleibt gewahrt: Eine verdrängte Adresse verliert nur
+// ihren Cache-Eintrag — isDeniedAddr verneint dann (kein Hash bekannt),
+// isFullShownAddr ebenso (Anzeige bleibt Kurzform), und der asynchrone Pfad
+// isDeniedAddrAsync hasht die Adresse bei Bedarf einfach neu.
+function addrHashCacheGet(a) {
+  const v = addrHashCache.get(a);
+  if (v !== undefined) {
+    addrHashCache.delete(a);
+    addrHashCache.set(a, v);
+  }
+  return v;
+}
+
+function addrHashCacheTrim() {
+  while (addrHashCache.size > ADDR_HASH_CACHE_MAX) {
+    const oldest = addrHashCache.keys().next().value;
+    if (oldest === undefined) break;
+    addrHashCache.delete(oldest);
+  }
+}
+
 async function hashOf(addr) {
   const a = String(addr ?? '').trim();
   if (!a) return '';
-  const cached = addrHashCache.get(a);
+  const cached = addrHashCacheGet(a);
   if (cached) return cached;
   const hex = await sha256Hex(a);
   addrHashCache.set(a, hex);
+  addrHashCacheTrim();
   return hex;
 }
 
 // Synchrone Deny-Prüfung: nur gehashte Adressen können getroffen werden.
 function isDeniedAddr(addr) {
-  const h = addrHashCache.get(String(addr ?? '').trim());
+  const h = addrHashCacheGet(String(addr ?? '').trim());
   return h !== undefined && baitHashDeny.has(h);
 }
 
@@ -307,7 +375,7 @@ async function recordTouchesBait(rec) {
 function isFullShownAddr(addr) {
   const a = String(addr ?? '').trim();
   if (!a || !fullDisplay) return false;
-  const h = addrHashCache.get(a);
+  const h = addrHashCacheGet(a);
   return h !== undefined && !baitHashDeny.has(h);
 }
 
@@ -321,7 +389,7 @@ async function rebuildDisplayAndKnownBad() {
   // Vor dem Load gepufferte Kandidaten nachbewerten.
   const buffered = pendingCandidates.splice(0, pendingCandidates.length);
   for (const a of buffered) {
-    if (!baitHashDeny.has(await hashOf(a))) knownBad.add(a);
+    if (!baitHashDeny.has(await hashOf(a))) knownBadAdd(a);
   }
 }
 
@@ -339,11 +407,28 @@ async function refetchBaitHashes(force) {
       const s = String(h ?? '').trim().toLowerCase();
       if (s) next.add(s);
     }
+    // Änderungssignatur: Hat die Rotation das Deny-Set tatsächlich verändert?
+    const nextSig = [...next].sort().join(',');
+    const denyChanged = nextSig !== lastDenySig;
+    lastDenySig = nextSig;
     baitHashDeny.clear();
     for (const h of next) baitHashDeny.add(h);
     denyLoaded = true;
     denyFailCount = 0;
     await rebuildDisplayAndKnownBad();
+    if (denyChanged) {
+      // Köder-frische Koordination: Nach jeder Rotation (Deny-Set geändert)
+      // Drilldown und Weltkugel sofort aktualisieren — das Modal prüft die
+      // Member-Hashes des eingefrorenen Snapshots gegen die AKTUELLE Deny-
+      // Liste (Fail-closed schlägt Alterungsanzeige); die Kugel erhält
+      // refresh(true) und wendet den frischen Datensatz SOFORT an, ohne auf
+      // das Fensterende des Anwendetakt-Deckels zu warten (Befund 2026-09-30:
+      // sonst bliebe ein frisch aktivierter Köder bis zu Deckel-Intervall
+      // länger sichtbar). Der WSS-Pfad filtert Köder rein clientseitig gegen
+      // diese Liste — ihr frischer Stand ist dort das einzige Gate.
+      if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
+      if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh(true);
+    }
   } catch (err) {
     denyFailCount += 1;
     if (denyFailCount >= BAIT_HASH_MAX_FAILS) {
@@ -353,7 +438,7 @@ async function refetchBaitHashes(force) {
       console.warn('Bait-Hash-Allowlist nicht erreichbar – Vollanzeige dauerhaft deaktiviert (fail-closed).', err);
       // Gepufferte Kandidaten dürfen in knownBad (known-bad-hit der Engine
       // bleibt im WSS-Pfad funktionsfähig); die Anzeige bleibt Kurzform.
-      for (const a of pendingCandidates) knownBad.add(a);
+      for (const a of pendingCandidates) knownBadAdd(a);
       pendingCandidates.length = 0;
     } else {
       console.warn(`Bait-Hash-Allowlist: Versuch ${denyFailCount} fehlgeschlagen (${err && err.message})`);
@@ -371,7 +456,7 @@ async function offerKnownBadCandidate(address) {
     return;
   }
   if (baitHashDeny.has(await hashOf(a))) return;
-  knownBad.add(a);
+  knownBadAdd(a);
 }
 
 // Hashes aller Anzeigeadressen vor dem Rendern vorhalten, damit
@@ -963,11 +1048,26 @@ let activeView = 'dashboard';
 
 function setView(view) {
   const target = VIEW_TABS.some((v) => v.view === view) ? view : 'dashboard';
+  const prev = activeView;
   activeView = target;
   for (const v of VIEW_TABS) {
     const active = v.view === target;
     document.getElementById(v.tabId).setAttribute('aria-selected', String(active));
     document.getElementById(v.panelId).hidden = !active;
+  }
+  // Weltkugel-Pause beim Verlassen des Dashboards (Symptom 2b): Ohne diese
+  // Pause lief die Kugel-Renderloop auch im versteckten View weiter (gemessen
+  // ~2158 rAF/s versteckt). deactivate() ist idempotent und pausiert nur eine
+  // konstruierte Kugel — der Lazy-Load-Vertrag bleibt unberührt.
+  if (prev === 'dashboard' && target !== 'dashboard') {
+    if (globeMod && typeof globeMod.deactivate === 'function') globeMod.deactivate();
+  }
+  // Rückkehr zum Dashboard: activate() NUR bei aktivem Globe-Tab (bedingtes
+  // Muster wie beim Modul-Import). NIE bedingungslos activate() — das würde
+  // die Kugel beim ersten Aufruf eager konstruieren (1,9-MB-CDN-Bundle) bzw.
+  // bei aktiven live/cluster-Tabs eine unsichtbare Renderloop resumen.
+  if (target === 'dashboard' && prev !== 'dashboard' && activeGraphTab === 'globe') {
+    if (globeMod && typeof globeMod.activate === 'function') globeMod.activate();
   }
   if (historyMod && typeof historyMod.setView === 'function') historyMod.setView(target === 'history');
   if (checkMod && typeof checkMod.setView === 'function') checkMod.setView(target === 'check');
@@ -1063,6 +1163,54 @@ let wsAttemptTimer = null;
 let reqId = 1000;
 const pendingTx = new Map();        // id -> resolve-Funktion
 
+/* ---------- WSS-Diagnose: Abo-Antwort, Drosselung, Liveness ---------- */
+/* xrplcluster lehnt bei erschöpfter IP-Quota das subscribe (und jedes
+ * ledger-/tx-Kommando) mit error "tooBusy" + error_message
+ * "… retry in ~NNNNms" ab — der Socket bleibt dabei offen und stumm. Diese
+ * Zustände machen die Ablehnung sichtbar (Statuszeile + Konsole) und steuern
+ * den Sonden-Rhythmus selbst, statt auf den Server-Idle-Close (~62 s) zu
+ * warten. Das Quota ist ein sliding window: Einheiten werden kontinuierlich
+ * frei, deshalb wird die Server-Schätzung (retry-Delta) nur als Obergrenze
+ * des Probe-Abstands und im Statustext verwendet — nie strikt abgewartet. */
+let lastWsMsgAt = 0;               // EIGENE WS-Uhr: onopen + JEDE onmessage
+let wssSubscribeError = null;      // {error, message, retryMs, at, throttled}
+let wsProbeTimer = null;           // Sonden-Timer für abgelehntes Abo
+let wssSubscribeOk = false;        // aktuelles Abo wurde angenommen
+let wssSubscribeOkAt = 0;          // Zeitpunkt der Abo-Annahme (Status-Fenster)
+const WSS_SUBSCRIBE_OK_WINDOW_MS = 30000; // so lange gilt 'WSS verbunden' nach
+                                          // Abo-Annahme auch ohne Event (der
+                                          // erste ledgerClosed folgt sonst in
+                                          // ~4 s; dauerhafter Event-Mangel fällt
+                                          // danach ehrlich auf den Fallback-Text)
+
+// retry-Delta aus der error_message parsen (undokumentiertes Endpunkt-Format,
+// deshalb robust mit Fallback): "retry in ~1299564ms", "retry in 90 seconds".
+function parseRetryMs(text) {
+  const s = String(text ?? '');
+  let m = s.match(/retry[^0-9]{0,24}?(\d+)\s*ms/i);
+  if (m) {
+    const v = Number(m[1]);
+    if (Number.isFinite(v) && v > 0) return v;
+  }
+  m = s.match(/retry[^0-9]{0,24}?(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hours)\b/i);
+  if (m) {
+    const v = Number(m[1]);
+    if (Number.isFinite(v) && v > 0) {
+      const unit = m[2].toLowerCase();
+      const factor = unit.startsWith('ms') ? 1 : unit[0] === 's' ? 1000 : unit[0] === 'm' ? 60000 : 3600000;
+      return v * factor;
+    }
+  }
+  return 0;
+}
+
+function fmtDur(ms) {
+  const v = Math.max(0, Math.round(ms / 1000));
+  if (v < 90) return `${v} s`;
+  const min = Math.round(v / 60);
+  return `~${min} min`;
+}
+
 function setConn(ok, text) {
   const dot = document.getElementById('conn-dot');
   const el = document.getElementById('conn-text');
@@ -1073,7 +1221,27 @@ function setConn(ok, text) {
 
 function connLabel() {
   if (liveMode === 'wss') return 'Live – WSS verbunden';
-  if (liveMode === 'poll') return 'Live – Snapshot-Fallback (WSS ohne Events)';
+  if (liveMode === 'poll') {
+    if (wssSubscribeError) {
+      // Volle Server-Schätzung (retry-Delta) NUR hier im Text — der
+      // Sonden-Rhythmus bleibt auf min(Delta, 90 s) geklemmt.
+      const rest = wssSubscribeError.retryMs
+        ? Math.max(0, wssSubscribeError.at + wssSubscribeError.retryMs - Date.now())
+        : 0;
+      const est = rest > 0 ? `, Endpunkt-Schätzung ${fmtDur(rest)}` : '';
+      if (wssSubscribeError.throttled) {
+        return `Live – Snapshot-Fallback (Endpunkt-Drosselung: rate limit${est})`;
+      }
+      return `Live – Snapshot-Fallback (WSS-Abo abgelehnt: ${wssSubscribeError.error}${est})`;
+    }
+    // Abo frisch angenommen: 'WSS verbunden' schon mit dem ersten erfolgreichen
+    // subscribe-Versuch (Events folgen in ~4 s). Bleiben Events dauerhaft aus,
+    // fällt die Anzeige danach ehrlich auf den generischen Fallback-Text.
+    if (wssSubscribeOk && Date.now() - wssSubscribeOkAt < WSS_SUBSCRIBE_OK_WINDOW_MS) {
+      return 'Live – WSS verbunden';
+    }
+    return 'Live – Snapshot-Fallback (WSS ohne Events)';
+  }
   return 'Live-Verbindung wird aufgebaut …';
 }
 
@@ -1275,17 +1443,23 @@ function wsLedgerCommand(ledgerIndex) {
   return new Promise((resolve) => {
     if (!ws || ws.readyState !== 1) { resolve(null); return; }
     const id = ++reqId;
-    const settle = (result) => resolve(result);
+    let timer = null;
+    // settle-Wrapper mit clearTimeout (Muster wsTxCommand): Der Timeout-Timer
+    // lief bisher auch nach rechtzeitiger Antwort weiter auf.
+    const settle = (result) => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      resolve(result);
+    };
     pendingTx.set(id, settle);
-    const timer = setTimeout(() => {
-      if (pendingTx.get(id) === settle) { pendingTx.delete(id); resolve(null); }
+    timer = setTimeout(() => {
+      pendingTx.delete(id);
+      settle(null);
     }, LEDGER_TIMEOUT_MS);
     try {
       ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true, expand: true }));
     } catch {
       pendingTx.delete(id);
-      clearTimeout(timer);
-      resolve(null);
+      settle(null);
     }
   });
 }
@@ -1310,6 +1484,11 @@ function wsTxCommand(hash) {
   });
 }
 
+/* Rückgabe: { throttled, entries, error_message }. throttled=true bricht die
+ * Chunk-Schleife beim ERSTEN tooBusy/slowDown einer tx-Antwort ab — der
+ * Aufrufer (onLedgerEvent) setzt dann Cooldown + Drossel-Badge und verlässt
+ * die Blockkarte früh, damit finishBlockCard keine zusätzliche 0/N-Badge
+ * erzeugt (Quota-Fallgrube: 0/N ist nur für echten Timeout legitim). */
 async function resolveHashes(hashes) {
   const entries = [];
   const list = hashes.slice(0, MAX_RESOLVE);
@@ -1318,15 +1497,30 @@ async function resolveHashes(hashes) {
     const chunk = list.slice(i, i + PARALLEL);
     const results = await Promise.all(chunk.map(wsTxCommand));
     for (const r of results) {
+      if (r && typeof r === 'object' && (r.error === 'tooBusy' || r.error === 'slowDown')) {
+        return { throttled: true, entries, error_message: r.error_message ?? null };
+      }
       // tx liefert die vollen Tx-Felder plus meta (flach oder als result.tx/result.meta).
       const norm = normalizeLedgerTxEntry(r);
       if (norm) entries.push(norm);
     }
   }
-  return entries;
+  return { throttled: false, entries, error_message: null };
 }
 
 /* ---------- Ledger-Event ("ledgerClosed" bzw. "ledger" vom Abo) ---------- */
+// Drossel-Badge + Cooldown für tooBusy/slowDown aus einer Kommando-Antwort.
+// Cooldown = min(geparstes retry-Delta, 120 s) bzw. 65 s Fallback: Das Quota
+// ist ein sliding window (Einheiten werden kontinuierlich frei), deshalb wird
+// die Server-Punktschätzung nicht strikt abgewartet — nach Ablauf des Deckels
+// probiert der nächste Ledger cheap nach.
+function markQuotaThrottled(card, errorMessage) {
+  const cooldownMs = Math.min(parseRetryMs(errorMessage) || QUOTA_COOLDOWN_FALLBACK_MS, QUOTA_COOLDOWN_MAX_MS);
+  quotaCooldownUntil = Date.now() + cooldownMs;
+  card.querySelector('.block-badges').innerHTML =
+    '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse pausiert</span>';
+}
+
 async function onLedgerEvent(msg) {
   const idx = msg.ledger_index;
   if (idx == null || seenLedgers.has(idx)) return;
@@ -1337,6 +1531,20 @@ async function onLedgerEvent(msg) {
   }
   lastLedgerAt = Date.now();
   liveMode = 'wss';
+  // Ledger-Events fließen → der Endpunkt ist wieder gesund: Den Snapshot-Poll-
+  // Backoff zurücksetzen, damit der Fallback im Störungsfall sofort wieder
+  // bereitsteht (Befund 2026-09-30).
+  if (pollFailCount || pollBackoffUntil) {
+    pollFailCount = 0;
+    pollBackoffUntil = 0;
+  }
+  // Ledger-Events fließen → eine frühere Abo-Ablehnung ist überwunden.
+  if (wssSubscribeError || wsProbeTimer) {
+    wssSubscribeError = null;
+    if (wsProbeTimer) { clearTimeout(wsProbeTimer); wsProbeTimer = null; }
+  }
+  wssSubscribeOk = true;
+  wssSubscribeOkAt = Date.now();
 
   const eventHashes = Array.isArray(msg.transactions) ? msg.transactions : [];
   const declaredCount = Number(msg.txn_count ?? eventHashes.length ?? 0);
@@ -1353,13 +1561,22 @@ async function onLedgerEvent(msg) {
       '<span class="badge badge-partial">Quota-Budget erschöpft – Analyse übersprungen</span>';
     return;
   }
-  const led = (eventHashes.length || inCooldown) ? null : await wsLedgerCommand(idx);
-  if (led && !eventHashes.length) quotaWindow.push(Date.now());
-  if (led?.error === 'tooBusy') {
-    quotaCooldownUntil = Date.now() + 65000;
-    card.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse pausiert</span>';
-    return;
+  // quotaWindow zählt NUR die ledger-Kommandos — und zwar zum SENDE-Zeitpunkt
+  // (früher wurde erst nach der Antwort gepusht, abgelehnte Kommandos fehlten).
+  // Die tx-Kommandos aus resolveHashes (bis ≈50 pro Ledger) dürfen NIEMALS
+  // hineingezählt werden, sonst bliebe das Budget permanent überschritten und
+  // der overBudget-Zweig überspränge jede Analyse.
+  const needLedgerFetch = !eventHashes.length && !inCooldown;
+  let led = null;
+  if (needLedgerFetch) {
+    quotaWindow.push(Date.now());
+    led = await wsLedgerCommand(idx);
+  }
+  // Fehler-Antworten kommen seit der settle-Umstellung als {error, error_message}
+  // statt null durch — der tooBusy-Zweig greift jetzt tatsächlich.
+  if (led && typeof led === 'object' && (led.error === 'tooBusy' || led.error === 'slowDown')) {
+    markQuotaThrottled(card, led.error_message ?? null);
+    return; // Early-Return: finishBlockCard würde sonst zusätzlich 0/N erzeugen
   }
   if (inCooldown) {
     card.querySelector('.block-badges').innerHTML =
@@ -1367,17 +1584,25 @@ async function onLedgerEvent(msg) {
     return;
   }
   const rawTxs = led?.ledger?.transactions;
+  let resolved = null; // Ergebnis von resolveHashes (Hash-Auflösung)
   if (Array.isArray(rawTxs) && rawTxs.length) {
     ledgerTxCount = rawTxs.length;
     if (rawTxs.every((t) => typeof t === 'string')) {
-      entries = await resolveHashes(rawTxs); // Hash-Strings -> tx-Einzelauflösung
+      resolved = await resolveHashes(rawTxs); // Hash-Strings -> tx-Einzelauflösung
     } else {
       entries = rawTxs.slice(0, MAX_RESOLVE).map(normalizeLedgerTxEntry).filter(Boolean);
     }
   } else if (eventHashes.length) {
     ledgerTxCount = eventHashes.length;
-    entries = await resolveHashes(eventHashes);
+    resolved = await resolveHashes(eventHashes);
   }
+  if (resolved && resolved.throttled) {
+    // tooBusy auf dem tx-Pfad: Early-Return-Muster wie der ledger-Pfad —
+    // Cooldown setzen, Drossel-Badge zeigen, Blockkarte früh verlassen.
+    markQuotaThrottled(card, resolved.error_message);
+    return;
+  }
+  if (resolved) entries = resolved.entries;
 
   recordFirstSeen(entries);
   const result = analyzeLedger({ transactions: entries }, buildCtx());
@@ -1425,6 +1650,65 @@ async function onLedgerEvent(msg) {
 }
 
 /* ---------- WebSocket mit Auto-Reconnect ---------- */
+// Fehler-Antworten als {error, error_message} statt null durchreichen: null
+// machte tooBusy von echtem Timeout/Verbindungsverlust ununterscheidbar. Der
+// Erfolgswert bleibt unverändert msg.result — die Konsumenten
+// (normalizeLedgerTxEntry, led.ledger.transactions) bleiben unangetastet;
+// Fehler-Objekte laufen in normalizeLedgerTxEntry als null heraus.
+function settleValue(msg) {
+  if (msg.error) {
+    return { error: String(msg.error), error_message: msg.error_message != null ? String(msg.error_message) : null };
+  }
+  return msg.result ?? null;
+}
+
+// Subscribe-Antwort (id=1) auswerten — früher landete sie ungeprüft im Nirwana
+// (pendingTx kennt nur ids ≥ 1001): tooBusy war unsichtbar, 0 Konsolenmeldungen.
+function handleSubscribeResponse(msg) {
+  if (msg.status !== 'error' && !msg.error) {
+    // Abo angenommen: Drosselzustand und Sonde fallen weg; mit dem ERSTEN
+    // erfolgreichen Versuch steht 'Live – WSS verbunden' (ohne Seitenreload).
+    wssSubscribeError = null;
+    wssSubscribeOk = true;
+    wssSubscribeOkAt = Date.now();
+    if (wsProbeTimer) { clearTimeout(wsProbeTimer); wsProbeTimer = null; }
+    setConn(true, 'Live – WSS verbunden');
+    return;
+  }
+  const error = String(msg.error ?? 'unbekannt');
+  const message = msg.error_message != null ? String(msg.error_message) : '';
+  const retryMs = parseRetryMs(message);
+  const throttled = error === 'tooBusy' || error === 'slowDown' || /rate\s*limit/i.test(message);
+  wssSubscribeError = { error, message, retryMs, at: Date.now(), throttled };
+  wssSubscribeOk = false;
+  // Ein abgelehntes Abo liefert nie Events — liveMode 'wss' wäre gelogen
+  // (sticky bis zum nächsten Snapshot); der Snapshot-Fallback ist ab jetzt
+  // die Datenquelle. onLedgerEvent stellt 'wss' beim ersten Event wieder her.
+  if (liveMode === 'wss') liveMode = 'poll';
+  const est = retryMs ? ` – Endpunkt-Schätzung ${fmtDur(retryMs)}, Sonde früher` : '';
+  console.warn(`WSS-Abo abgelehnt (${error})${message ? `: ${message}` : ''}${est}. Snapshot-Fallback bleibt aktiv.`);
+  scheduleWssProbe(retryMs);
+  setConn(liveMode !== 'init', connLabel());
+}
+
+// Sonden-Rhythmus nach abgelehntem Abo: Abstand = min(retry-Delta, 90 s)
+// (Untergrenze 15 s) — bewusst NICHT die volle Server-Schätzung, weil das
+// Quota ein sliding window ist und Einheiten kontinuierlich frei werden.
+// Die Sonde schließt nur DEN Socket, auf dessen Ablehnung sie gehört wurde,
+// und nur, solange keine Ledger-Events fließen (liveMode 'wss').
+function scheduleWssProbe(retryMs) {
+  if (wsProbeTimer) { clearTimeout(wsProbeTimer); wsProbeTimer = null; }
+  const socket = ws;
+  const delay = Math.min(Math.max(retryMs || WS_PROBE_MAX_MS, WS_PROBE_MIN_MS), WS_PROBE_MAX_MS);
+  wsProbeTimer = setTimeout(() => {
+    wsProbeTimer = null;
+    if (socket !== ws || !ws || ws.readyState !== 1) return;
+    if (liveMode === 'wss') return; // Abo aktiv, Events fließen — nichts zu sondieren
+    try { ws.close(); } catch { /* onclose fehlt dann eben; watchdog übernimmt */ }
+    // onclose feuert und trägt den Reconnect nach (Backoff bleibt aktiv).
+  }, delay);
+}
+
 function connectLive() {
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
   try {
@@ -1436,13 +1720,15 @@ function connectLive() {
 
   ws.onopen = () => {
     wsBackoff = 2000;
+    lastWsMsgAt = Date.now();
     try {
-      ws.send(JSON.stringify({ command: 'subscribe', id: 1, streams: ['ledger'], transactions: true }));
+      ws.send(JSON.stringify({ command: 'subscribe', id: SUBSCRIBE_ID, streams: ['ledger'], transactions: true }));
     } catch { /* onclose behandelt es */ }
     if (liveMode !== 'poll') setConn(true, 'WSS verbunden – warte auf Ledger …');
   };
 
   ws.onmessage = (ev) => {
+    lastWsMsgAt = Date.now(); // EIGENE WS-Uhr: JEDE Message zählt (auch Responses)
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     // xrplcluster sendet "ledgerClosed" (verifiziert); "ledger" bleibt abgedeckt.
@@ -1450,14 +1736,23 @@ function connectLive() {
       onLedgerEvent(msg).catch((err) => { console.error('ledger event', err); });
       return;
     }
+    if (msg.type === 'response' && msg.id === SUBSCRIBE_ID) {
+      handleSubscribeResponse(msg);
+      return;
+    }
     if (msg.type === 'response' && pendingTx.has(msg.id)) {
       const settle = pendingTx.get(msg.id);
       pendingTx.delete(msg.id);
-      settle(msg.result ?? null);
+      settle(settleValue(msg));
     }
   };
 
   ws.onclose = () => {
+    wssSubscribeOk = false; // ab hier kann kein Abo dieses Sockets mehr liefern
+    // Socket-Tod im WSS-Live-Betrieb: 'wss' ist sticky und würde weiter
+    // 'Live – WSS verbunden' zeigen, obwohl die Datenquelle ab jetzt der
+    // Snapshot-Fallback ist (onLedgerEvent stellt 'wss' wieder her).
+    if (liveMode === 'wss') liveMode = 'poll';
     if (liveMode !== 'poll') setConn(false, `Verbindung getrennt – erneuter Versuch in ${Math.round(wsBackoff / 1000)} s`);
     scheduleReconnect();
   };
@@ -1476,11 +1771,23 @@ function scheduleReconnect() {
 }
 
 /* ---------- Snapshot-Fallback (verifizierter Serverpfad /api/ledger) ---------- */
+/* Fehler-Backoff (Befund 2026-09-30): Der Watchdog rief pollSnapshotFallback
+ * bei dauerhaftem Fehler unverändert alle 5 s auf — der Server wiederholt je
+ * Anfrage 3 RPC-Versuche, ein gedrosselter Endpunkt wurde also mit bis zu 36
+ * Versuchen/min weiter belastet statt entlastet. Wie beim WSS-Reconnect
+ * (wsBackoff) verdoppelt sich der Abstand je Fehlversuch (5 s → 60 s Deckel);
+ * ein erfolgreicher Poll und wieder fließende WSS-Events setzen ihn zurück. */
+let pollFailCount = 0;      // aufeinanderfolgende fehlgeschlagene Snapshot-Polls
+let pollBackoffUntil = 0;   // bis zu diesem Zeitpunkt bleibt /api/ledger ausgesetzt
+
 async function pollSnapshotFallback() {
   // Snapshot-Zyklus zieht die Bait-Hash-Allowlist mit (Mindestabstand beachten).
   refetchBaitHashes(false);
   try {
     const body = await fetchJson('/api/ledger');
+    // Endpunkt erreichbar: Backoff zurücksetzen (auch ohne neuen Ledger-Index).
+    pollFailCount = 0;
+    pollBackoffUntil = 0;
     const idx = body?.ledgerIndex;
     if (idx == null) return;
     if (!seenLedgers.has(idx)) {
@@ -1489,7 +1796,15 @@ async function pollSnapshotFallback() {
       liveMode = 'poll';
       const txCount = Number(body.stats?.txs ?? 0);
       const resolved = Number(body.resolvedTxCount ?? 0);
-      const findings = Array.isArray(body.findings) ? body.findings : [];
+      // Köder-Filter (Snapshot-Pfad, Befund 2026-09-30): Der Server filtert
+      // bereits über baitLabels (server/index.mjs /api/ledger, api/ledger.js),
+      // aber bei leerem BAIT_ADDRESSES-ENV wäre der Server-Filter inaktiv —
+      // derselbe clientseitige Hash-Deny-Recheck wie im WSS-Pfad (Köder-Filter
+      // in onLedgerEvent) hält Köder-Funde aus Live-Log und JSON-Export fern.
+      const findings = [];
+      for (const f of Array.isArray(body.findings) ? body.findings : []) {
+        if (!(await isDeniedAddrAsync(f?.address))) findings.push(f);
+      }
       const card = addBlockCard(idx, body.closeTime ?? null, txCount, 'done');
       finishBlockCard(card, findings, txCount, resolved);
       registerFindings(findings, idx);
@@ -1514,15 +1829,50 @@ async function pollSnapshotFallback() {
     }
     setConn(true, connLabel());
   } catch (err) {
-    if (liveMode !== 'wss') setConn(false, `Keine Ledger-Daten erreichbar (${err && err.message})`);
+    // Fehler-Backoff fortschreiben (5 s → 10 s → 20 s → 40 s → 60 s Deckel).
+    pollFailCount += 1;
+    pollBackoffUntil = Date.now() + Math.min(
+      POLL_BACKOFF_BASE_MS * 2 ** Math.min(pollFailCount - 1, 5),
+      POLL_BACKOFF_MAX_MS,
+    );
+    if (liveMode !== 'wss') {
+      // Drosselungs-Kontext bleibt sichtbar (Befund 2026-09-30): Lehnt das
+      // WSS-Abo bereits mit tooBusy/rate limit ab, wäre der generische
+      // Fehltext ein Informationsverlust — connLabel() nennt die Endpunkt-
+      // Drosselung samt Schätzung, der Snapshot-Fehler wird angehängt.
+      const msg = err && err.message ? String(err.message) : 'unbekannter Fehler';
+      if (liveMode === 'poll' && wssSubscribeError && wssSubscribeError.throttled) {
+        setConn(false, `${connLabel()} – Ledger-Snapshot nicht erreichbar (${msg})`);
+      } else {
+        setConn(false, `Keine Ledger-Daten erreichbar (${msg})`);
+      }
+    }
   }
 }
 
 async function watchdog() {
+  // Liveness mit der EIGENEN WS-Uhr lastWsMsgAt (onopen + jede Message) —
+  // bewusst NICHT lastLedgerAt: pollSnapshotFallback setzt das ebenfalls bei
+  // jedem NEUEN Snapshot-Index (~alle 60 s), eine Kopplung an STALL_MS (12 s)
+  // würde im gesunden Poll-Betrieb Dauerfeuern/Reconnect-Stürme auslösen.
+  // WS_STALL_MS (90 s) liegt über dem beobachteten 60-s-Server-Idle-Close und
+  // weit über dem ~4-s-Event-Takt: Ein Socket, der 90 s komplett stumm ist
+  // (NAT-Timeout, Suspend/Resume ohne close-Frame, Endpunkt-Stall), ist ein
+  // Zombie — auch wenn liveMode sticky 'wss' ist (live-observiert: Offline-
+  // Emulation ließ die Statuszeile 'WSS verbunden' zeigen, obwohl 0 Events
+  // ankamen). Aktiver close; onclose trägt den Reconnect nach (Backoff aktiv).
+  if (ws && ws.readyState === 1 && Date.now() - lastWsMsgAt > WS_STALL_MS) {
+    if (liveMode === 'wss') liveMode = 'poll'; // Quelle ab jetzt: Snapshot-Fallback
+    try { ws.close(); } catch { /* egal — onclose fehlt dann, nächster Zyklus */ }
+  }
   if (Date.now() - lastLedgerAt < STALL_MS) {
     if (liveMode === 'wss' || liveMode === 'poll') setConn(true, connLabel());
     return;
   }
+  // Fehler-Backoff (Befund 2026-09-30): Während des Backoff-Fensters bleibt
+  // /api/ledger ausgesetzt — der Watchdog-Takt allein darf den gedrosselten
+  // Endpunkt nicht weiter im 5-s-Takt belasten.
+  if (Date.now() < pollBackoffUntil) return;
   await pollSnapshotFallback();
 }
 

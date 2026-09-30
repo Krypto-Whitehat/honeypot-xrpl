@@ -13,12 +13,22 @@
  *   activate()   – erster Aufruf injiziert globe.gl und baut die Kugel;
  *                  weitere Aufrufe führen nur resumeAnimation aus.
  *   deactivate() – pauseAnimation() (Tab/View inaktiv).
- *   refresh()    – setzt Punkte/Bögen/Ringe aus ctx.getClusterGraph() neu;
- *                  leerer/fehlender Graph leert die Datensätze, statt zu
- *                  crashen. Trifft refresh() ein, bevor die Konstruktion aus
- *                  activate() abgeschlossen ist, wird der Datensatz intern
- *                  gepuffert und beim Konstruktions-Abschluss angewandt —
- *                  frühe Ledger-Events gehen nicht verloren.
+ *   refresh(force) – bietet Punkte/Bögen/Ring-Quellen aus ctx.getClusterGraph()
+ *                  an (leerer/fehlender Graph leert die Datensätze, statt zu
+ *                  crashen). Die Anwendung ist GEDÄMPFT (FIX-B, siehe
+ *                  Konstantenblock): Anwendetakt-Deckel primär, Signatur-Skip
+ *                  sekundär, Puls-Ringe im eigenen Takt. Trifft refresh() ein,
+ *                  bevor die Konstruktion aus activate() abgeschlossen ist,
+ *                  wird der Datensatz intern gepuffert (latestDs) und beim
+ *                  Konstruktions-Abschluss angewandt — frühe Ledger-Events
+ *                  gehen nicht verloren.
+ * Selbstverwaltung ohne Host-Beteiligung (app.js bleibt unberührt):
+ *   – IntersectionObserver auf #globe + visibilitychange: unsichtbar →
+ *     pauseAnimation, wieder sichtbar → resumeAnimation plus GENAU EIN
+ *     refresh (idempotent zur bedingten Tab-Pause des Hosts).
+ *   – webglcontextlost/-restored am Canvas: klarer Hinweis statt schwarzem
+ *     Stand, GENAU EIN vollständiger Neuaufbau-Versuch, danach Terminal-
+ *     zustand wie showFallback (kein Retry-Loop).
  *
  * ctx (nur Host-Funktionen des Hosts app.js): getClusterGraph, displayAddr
  * (displayFindingAddr), isDeniedAddr, shortAddr, esc, fmtXrp, roleColors
@@ -37,7 +47,10 @@
  * sind deterministisch aus der Adresse abgeleitet (SHA-256 über ctx.hashOf;
  * der Cache wird vom Host via primeAddrHashes gefüllt) — kein Math.random
  * und kein Date.now für Positionen. KEIN globeImageUrl, KEINE Länder-Polygone;
- * stattdessen showGraticules(true) als neutrales Liniennetz.
+ * stattdessen showGraticules(true) als neutrales Liniennetz. Die Kugel-
+ * OBERFLÄCHE selbst wird über globeMaterial() auf die Token-Farbe der Bühne
+ * (--a6-graph-canvas, Weiß) gesetzt — der Bundle-Default wäre opak schwarz
+ * (Befund 2026-09-30).
  *
  * Der zugehörige Tab-Button #tab-globe, der Container #globe und der
  * dynamische Import kommen vom Verdrahtungs-Agenten (app.js/index.html).
@@ -60,6 +73,39 @@ const AUTO_ROTATE_SPEED = 0.4;     // autoRotate-Geschwindigkeit (OrbitControls)
 const POV_START = { lat: 20, lng: 0, altitude: 2.2 };
 const SEV_RANK = { info: 1, suspect: 2, malicious: 3 }; // wie SEVERITY_RANK, lib/cluster.mjs:43
 const GLOBE_NOTE = 'Positionen sind deterministisch aus der Adresse abgeleitet (Hash) — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht, keine geografische Zuordnung.';
+const GLOBE_CTX_LOST_NOTE = 'WebGL-Grafikkontext verloren — genau ein Wiederherstellungsversuch wird gestartet …';
+
+/* FIX-B „Update statt Rebuild": globe.gl baut bei jedem pointsData-/arcsData-/
+ * ringsData-Setter alle Szenen-Objekte neu auf; der ~4-s-Takt des Hosts
+ * (rebuildClusterGraph → refresh, app.js:1040) ließ die Bogen-Dash-Animation
+ * dadurch ~15×/min neu starten („Weltkugel reloaded ständig“). Zwei getrennte
+ * Dämpfungs-Mechanismen:
+ *   1. PRIMÄR: Anwendetakt-Deckel — höchstens eine vollständige Punkte/Bögen-
+ *      Anwendung je APPLY_MIN_INTERVAL_MS. Unter WSS-Last ändern sich Kanten-
+ *      mengen real pro Ledger, ein reiner Signaturvergleich entlastet kaum.
+ *   2. SEKUNDÄR: Signatur-Skip bei inhaltlich unveränderten Daten. Die
+ *      Signatur umfasst VERPFLICHTEND die visuell kodierenden Felder:
+ *      Punkte lat/lng/color/radius/altitude (Radius/Höhe codieren in-/outDrops)
+ *      und Bögen Endpunkte/color/stroke/dashLen/dashGap (codieren malicious-
+ *      Beteiligung) — sonst veralten Security-Signalisierung und Punktgrößen
+ *      bei gleichbleibenden Ids.
+ * Puls-Ringe sind ZEITFENSTERIG (RING_WINDOW_MS gegen now) und ändern sich
+ * ohne Graph-Änderung: Sie stehen NICHT in der Signatur, sondern laufen in
+ * einem eigenen Takt (RINGS_TICK_MS), der gegen das aktuelle now filtert.
+ * AUSNAHMEN ohne Deckel (nur über globe-sichtbare Daten definiert — der
+ * Modal-Zustand ist hier nicht zugänglich): allererste Daten nach der
+ * Konstruktion, Wechsel des clusterId-Sets der Punkte (point.clusterId) sowie
+ * refresh(true) — der Host ruft Letzteres nach Bait-Hash-Rotation, damit ein
+ * frisch aktivierter Köder-Ausschluss (Deny-Set-Änderung) SOFORT greift und
+ * nicht erst zum Fensterende des Deckels (Befund 2026-09-30). BEKANNTE
+ * BEGRENZUNG: Bei gewöhnlichen refresh()-Aufrufen ohne force veralten
+ * Labels/Filter um ≤ APPLY_MIN_INTERVAL_MS (u. a. displayAddr-Voll-/Kurzform);
+ * der Deny-Ausschluss selbst veraltet maximal bis zur nächsten erkannten
+ * Deny-Set-Änderung, die der Host mit refresh(true) sofort durchschlägt. */
+const APPLY_MIN_INTERVAL_MS = 10000; // Deckel: max. eine Punkte/Bögen-Anwendung je 10 s (≤ 6/min)
+const RINGS_TICK_MS = 10000;         // eigener Takt der Puls-Ringe (≤ 10 s), außerhalb der Signatur
+const RING_SOURCE_EXTRA_MS = 60000;  // Ring-Quellen breiter sammeln; der Takt filtert gegen das aktuelle now
+const CTX_RESTORE_GRACE_MS = 3000;   // Frist für webglcontextrestored, danach der eine Neuaufbau-Versuch
 const GLOBE_FALLBACK_NOTE = 'Weltkugel nicht verfügbar (WebGL oder CDN nicht erreichbar) — dieselben Daten stehen in den Cluster-Karten und in der Konten-Tabelle des Drilldowns.';
 
 export function initGlobe(ctx) {
@@ -90,8 +136,27 @@ export function initGlobe(ctx) {
   let buildFailed = false;   // WebGL/CDN/Konstruktion gescheitert -> Fallback
   let wantActive = false;    // gewünschter Aktiv-Zustand (Tab sichtbar)
   let userGrabbed = false;   // erste Nutzereingabe: autoRotate bleibt dauerhaft aus
-  let pendingData = null;    // gepufferter Datensatz bis zum Konstruktions-Abschluss
   let refreshSeq = 0;        // Guard gegen überlappte async-Datenaufbauten
+  /* FIX-B-Zustand: Dämpfung (latestDs puffert Vor-Konstruktion-Angebote) */
+  let latestDs = null;       // neuester Datensatz (Puffer bis zum Konstruktions-Abschluss)
+  let hasAppliedData = false;  // Erstdaten-Ausnahme: erste Anwendung ohne Deckel
+  let lastApplyAt = 0;         // Zeitpunkt der letzten Punkte/Bögen-Anwendung
+  let lastPointsSig = '';      // Signatur des zuletzt angewandten Punktdatensatzes
+  let lastArcsSig = '';        // Signatur des zuletzt angewandten Bogendatensatzes
+  let lastClusterSetSig = '';  // clusterId-Set der Punkte (Ausnahme-Trigger)
+  let applyTimer = 0;          // Deckel-Verzögerung (Anwendung zum Fensterende)
+  /* FIX-B-Zustand: Puls-Ringe im eigenen Takt */
+  let ringSources = [];        // Zeitfenster-Quellen { key, lat, lng, sev, ep }
+  let lastRingsSig = '';       // Signatur der zuletzt gesetzten Ringdaten
+  let ringTimer = 0;           // Eigen-Takt der Ringe (nur laufend, wenn sichtbar)
+  /* FIX-B-Zustand: Sichtbarkeit (IntersectionObserver + Dokument-Tab) */
+  let io = null;               // IntersectionObserver auf dem #globe-Container
+  let ioVisible = false;       // Observer-Entscheidung (nur bei nachweislicher Sichtbarkeit resume)
+  let visBound = false;        // visibilitychange-Listener vorhanden
+  /* FIX-B-Zustand: WebGL-Kontextverlust */
+  let ctxLost = false;         // webglcontextlost aktiv
+  let ctxRestoreTried = false; // GENAU EIN Restaurationsversuch pro Seitenleben
+  let ctxRestoreTimer = 0;     // Frist-Timer für webglcontextrestored
 
   /* ---------------- Hilfen ---------------- */
 
@@ -202,7 +267,7 @@ export function initGlobe(ctx) {
     return cssToken(alt) || cssToken('--a6-sev-neutral') || edgeDefault || null;
   }
 
-  function showNote(el, text) {
+  function showNote(el, text, isAlert) {
     try {
       // globe.gl ERSETZT den Container-Inhalt beim Mount (window.Globe()(el)):
       // Ein vor dem Mount angehängter Hinweis wird dabei DETACHED — der alte
@@ -216,6 +281,10 @@ export function initGlobe(ctx) {
         noteEl.className = 'graph-note globe-note';
         el.appendChild(noteEl);
       }
+      // isAlert (WebGL-Kontextverlust): nur eine Zustandsvariante desselben
+      // Hinweises — .globe-note-alert färbt in globe.css ausschließlich die
+      // Linienfarbe um (Astra-6: Fläche, Typografie und Touchziele bleiben).
+      noteEl.className = isAlert ? 'graph-note globe-note globe-note-alert' : 'graph-note globe-note';
       noteEl.textContent = text;
     } catch { /* DOM nicht schreibbar: Hinweis entfällt, wirft aber nicht */ }
   }
@@ -350,7 +419,7 @@ export function initGlobe(ctx) {
       .slice(-GLOBE_MAX_ARCS);
 
     const now = Date.now(); // nur für das Zeitfenster der Puls-Ringe, nie für Positionen
-    const ringSev = new Map();
+    const ringSources = [];
     const arcs = [];
     for (const e of keptEdges) {
       const from = String(e.from);
@@ -377,59 +446,340 @@ export function initGlobe(ctx) {
         dashGap: flagged ? ARC_DASH_GAP_FLAGGED : 0,
         label: `${esc(displayAddr(from))} → ${esc(displayAddr(to))}`,
       });
-      // Puls-Ringe nur für Kanten mit closeTime jünger als 30 s — Farbe nach
-      // Schweregrad der Endknoten (schlimster gewinnt), je Knoten ein Ring.
+      // Puls-Ring-Quellen: Kanten mit closeTime im erweiterten Fenster
+      // (RING_WINDOW_MS + Takt-Vorlauf). Die Aggregation (Farbe nach
+      // Schweregrad der Endknoten, schlimmer gewinnt; je Knoten ein Ring)
+      // macht applyRingsNow im eigenen Takt gegen das AKTUELLE now — so
+      // veralten die Ringe nicht, ohne den Punkte/Bögen-Digest zu triggern.
       const ep = epochOf(e);
-      if (ep >= now - RING_WINDOW_MS && ep <= now + 60000) {
-        for (const pair of [[from, sevByNode.get(from)], [to, sevByNode.get(to)]]) {
-          const nid = pair[0];
-          const sev = String(pair[1] ?? 'info');
-          const cur = ringSev.get(nid);
-          if (!cur || (SEV_RANK[sev] ?? 1) > (SEV_RANK[cur] ?? 1)) ringSev.set(nid, sev);
-        }
+      if (ep >= now - RING_WINDOW_MS - RING_SOURCE_EXTRA_MS && ep <= now + 60000) {
+        ringSources.push(
+          { key: a[0] + ',' + a[1], lat: a[0], lng: a[1], sev: String(sevByNode.get(from) ?? 'info'), ep },
+          { key: b[0] + ',' + b[1], lat: b[0], lng: b[1], sev: String(sevByNode.get(to) ?? 'info'), ep },
+        );
       }
     }
 
-    const rings = [];
-    for (const [nid, sev] of ringSev) {
-      const c = coords.get(nid);
-      const color = c ? sevTokenColor(sev) : null;
-      if (c && color) rings.push({ lat: c[0], lng: c[1], color });
-    }
-
-    return { points, arcs, rings };
+    return {
+      points,
+      arcs,
+      ringSources,
+      // Signaturen (SEKUNDÄR-Skip, s. Konstantenblock): umfassen die visuell
+      // kodierenden Felder, sortiert — reine Umordnungen zählen nicht als
+      // Änderung; Labels hinzugefügt, damit reine Label-Änderungen (u. a.
+      // displayAddr-Voll-/Kurzform) höchstens um den Deckel veralten.
+      pointsSig: sigOfPoints(points),
+      arcsSig: sigOfArcs(arcs),
+      clusterSetSig: sigOfClusterSet(points),
+    };
   }
 
-  /* ---------------- Anwenden / refresh ---------------- */
+  /* ---------------- Anwenden / Dämpfung / Ringe / refresh (FIX-B) ---------------- */
 
-  function applyData(ds) {
-    if (!buildDone || !globe) {
-      pendingData = ds; // PUFFERN statt verwerfen (Prüfer-Kleinigkeit)
+  // Signatur-Helfer: JSON.stringify je Element (exakte Zahlendarstellung),
+  // dann sortiert — inhaltlich gleiche Datensätze in anderer Reihenfolge
+  // erzeugen dieselbe Signatur (kein Neustart durch reine Umordnung).
+  function sigOfPoints(points) {
+    return points
+      .map((p) => JSON.stringify([p.lat, p.lng, p.color, p.radius, p.altitude, p.label]))
+      .sort()
+      .join('\n');
+  }
+
+  function sigOfArcs(arcs) {
+    return arcs
+      .map((a) => JSON.stringify([a.startLat, a.startLng, a.endLat, a.endLng, a.color, a.stroke, a.dashLen, a.dashGap, a.label]))
+      .sort()
+      .join('\n');
+  }
+
+  function sigOfClusterSet(points) {
+    const ids = new Set();
+    for (const p of points) ids.add(p.clusterId == null ? '\u0000' : String(p.clusterId));
+    return Array.from(ids).sort().join('\n');
+  }
+
+  function clearApplyTimer() {
+    if (applyTimer) { clearTimeout(applyTimer); applyTimer = 0; }
+  }
+
+  function stopRingTimer() {
+    if (ringTimer) { clearInterval(ringTimer); ringTimer = 0; }
+  }
+
+  // Vollständige Anwendung von Punkten und Bögen — JEDER dieser Setter baut
+  // bei globe.gl die komplette Szene neu auf (sichtbarer „Reload“), deshalb
+  // nur unter dem Deckel bzw. über die definierten Ausnahmen.
+  function applyPointsArcs(ds) {
+    if (!buildDone || !globe) return false;
+    try {
+      globe.pointsData(ds.points).arcsData(ds.arcs);
+    } catch { /* Renderer-Fehler: alter Stand bleibt, kein Crash */ return false; }
+    lastApplyAt = Date.now();
+    lastPointsSig = ds.pointsSig;
+    lastArcsSig = ds.arcsSig;
+    lastClusterSetSig = ds.clusterSetSig;
+    hasAppliedData = true;
+    // Reduced Motion: keine animierte Kamera, statische Bildfassung
+    // (zoomToFit(0), Muster drilldown.js:565-574) — wie bisher je Anwendung.
+    if (reducedMotion() && ds.points.length) {
+      try { globe.zoomToFit(0); } catch { /* egal */ }
+    }
+    return true;
+  }
+
+  // Puls-Ringe gegen das AKTUELLE now (die Quellen stammen aus buildDatasets
+  // mit erweitertem Fenster): schlimmster Schweregrad je Knoten gewinnt,
+  // Farbe über sevTokenColor — Aggregation wie zuvor, nur zeitfrisch.
+  function computeRings(now) {
+    const sevByKey = new Map();
+    for (const r of ringSources) {
+      if (r.ep < now - RING_WINDOW_MS || r.ep > now + 60000) continue;
+      const cur = sevByKey.get(r.key);
+      if (!cur || (SEV_RANK[r.sev] ?? 1) > (SEV_RANK[cur.sev] ?? 1)) sevByKey.set(r.key, r);
+    }
+    const rings = [];
+    for (const r of sevByKey.values()) {
+      const color = sevTokenColor(r.sev);
+      if (color) rings.push({ lat: r.lat, lng: r.lng, color });
+    }
+    return rings;
+  }
+
+  function applyRingsNow() {
+    if (!buildDone || !globe) return;
+    const rings = reducedMotion() ? [] : computeRings(Date.now());
+    const sig = rings.map((r) => JSON.stringify([r.lat, r.lng, r.color])).join('\n');
+    if (sig === lastRingsSig) return; // unverändert: kein Setter, kein Neuaufbau
+    lastRingsSig = sig;
+    try { globe.ringsData(rings); } catch { /* egal */ }
+  }
+
+  function shallRun() {
+    return wantActive && ioVisible && !document.hidden && buildDone && Boolean(globe)
+      && !buildFailed && !ctxLost;
+  }
+
+  // Zentrale Animationsschaltung: die Renderloop läuft nur, wenn Tab UND
+  // Container sichtbar sind (wantActive aus activate/deactivate des Hosts,
+  // ioVisible aus dem IntersectionObserver). Idempotent — die bedingte
+  // Tab-Pause des Hosts und die Selbst-Pause koordinieren sich schadfrei.
+  function syncAnimation() {
+    if (buildFailed) { stopRingTimer(); return; }
+    if (!buildDone || !globe) return;
+    const run = shallRun();
+    try { run ? globe.resumeAnimation() : globe.pauseAnimation(); } catch { /* egal */ }
+    if (run) {
+      if (!ringTimer) {
+        // Eigener Ring-Takt (≤ RINGS_TICK_MS): zeitfensterige Ringe bleiben
+        // frisch, ohne den Punkte/Bögen-Digest oder deren Deckel zu berühren.
+        ringTimer = setInterval(() => {
+          if (!shallRun()) { stopRingTimer(); return; }
+          applyRingsNow();
+        }, RINGS_TICK_MS);
+      }
+    } else {
+      stopRingTimer();
+    }
+  }
+
+  // Kern der Dämpfung: entscheidet über die Anwendung des neuesten Datensatzes.
+  // force = true nur nach (Neu-)Aufbau der Szene — diese ist dann leer, eine
+  // sofortige Anwendung kostet keinen sichtbaren Neustart.
+  function maybeApplyNow(force) {
+    if (!buildDone || !globe) return; // latestDs bleibt als Puffer erhalten
+    const ds = latestDs;
+    if (!ds) return;
+    const first = !hasAppliedData;
+    // AUSNAHMEN ohne Deckel: Erstdaten, Wechsel des clusterId-Sets der Punkte
+    // (neuer Cluster erschienen/verschwunden — globe-seitig berechenbar) bzw.
+    // erzwungene Anwendung nach Konstruktion.
+    if (force || first || ds.clusterSetSig !== lastClusterSetSig) {
+      clearApplyTimer();
+      applyPointsArcs(ds);
+      applyRingsNow();
       return;
     }
-    try {
-      globe.pointsData(ds.points)
-        .arcsData(ds.arcs)
-        .ringsData(reducedMotion() ? [] : ds.rings);
-      // Reduced Motion: keine Puls-Ringe, statische Bildfassung ohne
-      // animierte Kamera (zoomToFit(0), Muster drilldown.js:565-574).
-      if (reducedMotion() && ds.points.length) {
-        try { globe.zoomToFit(0); } catch { /* egal */ }
-      }
-    } catch { /* Renderer-Fehler: alter Stand bleibt, kein Crash */ }
+    // SEKUNDÄR: inhaltlich unverändert — keine Anwendung, kein nachlaufender
+    // Timer (0 Anwendungen trotz refresh-Aufrufen bei Cache-Treffern).
+    if (ds.pointsSig === lastPointsSig && ds.arcsSig === lastArcsSig) {
+      clearApplyTimer();
+      return;
+    }
+    // PRIMÄR: Anwendetakt-Deckel — Änderungen werden spätestens zum
+    // Fensterende angewandt, auch wenn kein weiteres refresh() mehr kommt.
+    const dueAt = lastApplyAt + APPLY_MIN_INTERVAL_MS;
+    if (Date.now() >= dueAt) {
+      clearApplyTimer();
+      applyPointsArcs(ds);
+      applyRingsNow();
+    } else if (!applyTimer) {
+      applyTimer = setTimeout(() => {
+        applyTimer = 0;
+        maybeApplyNow(false);
+      }, Math.max(0, dueAt - Date.now()));
+    }
   }
 
-  function refresh() {
+  function offerData(ds, force) {
+    latestDs = ds;
+    ringSources = Array.isArray(ds.ringSources) ? ds.ringSources : [];
+    maybeApplyNow(Boolean(force));
+  }
+
+  /* Sichtbarkeit ohne Host-Beteiligung: IntersectionObserver auf den
+   * #globe-Container (View-Wechsel und Rauscrollen erkennen) plus
+   * visibilitychange am Dokument (Tab in den Hintergrund). Unsichtbar →
+   * pauseAnimation; wieder sichtbar → resumeAnimation plus GENAU EIN
+   * refresh. resume feuert nur bei nachweislich sichtbarem Container. */
+  function onVisibilityChanged() {
+    if (buildFailed) return;
+    if (ioVisible && !document.hidden && wantActive) {
+      syncAnimation(); // resume, sofern konstruiert
+      refresh();       // GENAU EIN Daten-Refresh pro Sichtbarkeits-Wechsel
+    } else {
+      syncAnimation(); // pause + Ring-Takt stoppen
+    }
+  }
+
+  function watchVisibility(el) {
+    if (typeof IntersectionObserver === 'function') {
+      if (!io) {
+        io = new IntersectionObserver((entries) => {
+          let visible = null;
+          for (const en of entries) visible = en.isIntersecting; // letzter Eintrag zählt
+          if (visible === null || visible === ioVisible) return;
+          ioVisible = visible;
+          onVisibilityChanged();
+        });
+        try {
+          io.observe(el);
+        } catch {
+          ioVisible = true; // Beobachtung fehlgeschlagen: sichtbar annehmen
+        }
+      }
+    } else if (!io) {
+      ioVisible = true; // ohne IntersectionObserver: Sichtbarkeit über wantActive/hidden allein
+    }
+    if (!visBound) {
+      visBound = true;
+      document.addEventListener('visibilitychange', onVisibilityChanged);
+    }
+  }
+
+  /* WebGL-Kontextverlust (Symptom 2b-Mitverursacher): klarer Hinweis statt
+   * schwarzem Stand, GENAU EIN Restaurationsversuch als vollständiger
+   * Neuaufbau — ausgelöst durch webglcontextrestored oder, bleibt das
+   * Ereignis aus, nach kurzer Frist. Ein zweiter Verlust führt in den
+   * Terminalzustand wie showFallback; kein Retry-Loop. */
+  function onContextLost(ev) {
+    try { ev.preventDefault(); } catch { /* egal */ } // erlaubt dem Browser die Restaurierung
+    if (ctxLost || buildFailed || !globe) return;
+    ctxLost = true;
+    if (ctxRestoreTried) { terminalContextLoss(); return; } // Budget verbraucht
+    syncAnimation(); // pausiert (ctxLost) und stoppt den Ring-Takt
+    if (container) showNote(container, GLOBE_CTX_LOST_NOTE, true);
+    if (ctxRestoreTimer) clearTimeout(ctxRestoreTimer);
+    ctxRestoreTimer = setTimeout(() => {
+      ctxRestoreTimer = 0;
+      attemptContextRestore();
+    }, CTX_RESTORE_GRACE_MS);
+  }
+
+  function onContextRestored() {
+    if (!ctxLost || ctxRestoreTried || buildFailed) return;
+    if (ctxRestoreTimer) { clearTimeout(ctxRestoreTimer); ctxRestoreTimer = 0; }
+    attemptContextRestore();
+  }
+
+  function attemptContextRestore() {
+    if (!ctxLost || ctxRestoreTried || buildFailed) return;
+    ctxRestoreTried = true; // einmalig pro Seitenleben — kein Retry-Loop
+    ctxLost = false;
+    rebuildGlobe();
+  }
+
+  function terminalContextLoss() {
+    buildFailed = true;
+    buildDone = false;
+    stopRingTimer();
+    clearApplyTimer();
+    if (ctxRestoreTimer) { clearTimeout(ctxRestoreTimer); ctxRestoreTimer = 0; }
+    try { if (globe) globe.pauseAnimation(); } catch { /* egal */ }
+    globe = null;
+    controls = null;
+    if (resizeObs) {
+      try { resizeObs.disconnect(); } catch { /* egal */ }
+      resizeObs = null;
+    }
+    const el = container || document.getElementById('globe');
+    if (el) showFallback(el);
+  }
+
+  // Der EINE Neuaufbau nach Kontextverlust: alte Instanz wegwerfen (deren
+  // GPU-Ressourcen hat der Browser bereits freigegeben — innerHTML'' genügt,
+  // auf undokumentierte Destruktoren wird bewusst verzichtet), dann den
+  // gemeinsamen Konstruktions-Rumpf mit dem gepufferten Datensatz neu laufen
+  // lassen. Misslingt er: Terminalzustand (showFallback).
+  async function rebuildGlobe() {
+    const el = container || document.getElementById('globe');
+    stopRingTimer();
+    clearApplyTimer();
+    if (resizeObs) {
+      try { resizeObs.disconnect(); } catch { /* egal */ }
+      resizeObs = null;
+    }
+    globe = null;
+    controls = null;
+    buildDone = false;
+    if (el) {
+      try { el.innerHTML = ''; } catch { /* egal */ }
+      noteEl = null;
+      showNote(el, 'Weltkugel wird neu aufgebaut …');
+    }
+    try {
+      if (!el) throw new Error('no-container');
+      await buildGlobe(el);
+    } catch {
+      globe = null;
+      container = null;
+      controls = null;
+      buildDone = false;
+      buildFailed = true;
+      if (resizeObs) {
+        try { resizeObs.disconnect(); } catch { /* egal */ }
+        resizeObs = null;
+      }
+      if (el) showFallback(el);
+    }
+  }
+
+  function bindContextEvents(el) {
+    try {
+      const canvas = el.querySelector('canvas');
+      if (!canvas) return;
+      // Capture-Phase: das Ereignis targetet den Canvas selbst; capture
+      // wertet es aus, bevor etwaige Bibliotheks-Listener reagieren.
+      canvas.addEventListener('webglcontextlost', onContextLost, true);
+      canvas.addEventListener('webglcontextrestored', onContextRestored, true);
+    } catch { /* egal */ }
+  }
+
+  // force=true erzwingt die sofortige Anwendung des frischen Datensatzes
+  // (Ausnahme vom Deckel, siehe Konstantenblock): Der Host nutzt es nach
+  // erkannter Bait-Hash-Rotation, damit der aktualisierte Deny-Ausschluss
+  // und die Anzeige-Stände ohne Deckel-Verzögerung greifen (Befund 2026-09-30).
+  function refresh(force) {
     if (buildFailed) return;
     // Vor dem ersten activate() passiv: Der Konstruktions-Abschluss zieht
     // selbst frische Daten (kein Verlust, da getClusterGraph live ist).
     if (!buildStarted && !buildDone) return;
     const seq = ++refreshSeq;
+    const applyForce = Boolean(force);
     buildDatasets()
       .then((ds) => {
         if (seq !== refreshSeq) return; // veraltet: neuere Anfrage läuft
-        if (buildDone) applyData(ds);
-        else pendingData = ds; // PUFFERN: refresh vor Konstruktions-Abschluss
+        offerData(ds, applyForce); // PUFFERN (latestDs); force DÄMPFUNG umgeht offerData/maybeApplyNow
       })
       .catch(() => { /* Datenaufbau gescheitert: alter Stand bleibt, kein Crash */ });
   }
@@ -442,6 +792,27 @@ export function initGlobe(ctx) {
     buildStarted = true;
     showNote(el, 'Weltkugel wird geladen …');
     try {
+      await buildGlobe(el);
+    } catch {
+      globe = null;
+      container = null;
+      controls = null;
+      buildDone = false;
+      buildFailed = true;
+      stopRingTimer();
+      clearApplyTimer();
+      if (resizeObs) {
+        try { resizeObs.disconnect(); } catch { /* egal */ }
+        resizeObs = null;
+      }
+      showFallback(el);
+    }
+  }
+
+  // Gemeinsamer Konstruktions-Rumpf für den Erstbau (construct) und den EINEN
+  // Neuaufbau nach WebGL-Kontextverlust (rebuildGlobe). Wirft bei WebGL-/CDN-/
+  // Konstruktionsfehlern — die Aufrufer zeigen showFallback.
+  async function buildGlobe(el) {
       if (!webglAvailable()) throw new Error('webgl');
       const loaded = await loadGlobeGl();
       if (!loaded || typeof window.Globe !== 'function') throw new Error('cdn');
@@ -451,12 +822,29 @@ export function initGlobe(ctx) {
       // Alpha-Weg ist im Bundle verifiziert (setClearColor mit geparstem
       // Alpha), die weiße Punkt-Bühne von #globe scheint durch.
       g.backgroundColor('rgba(0, 0, 0, 0)');
+      // KUGEL-MATERIAL auf Bühnen-Weiß (Befund 2026-09-30): Der Bundle-Default
+      // ist ein opak schwarzes Phong-Material (new THREE.MeshPhongMaterial
+      // ({color:0}), am gepinnten Bundle nachgeprüft) — die transparente Szene
+      // allein ließ die Kugel-Silhouette dunkel auf der weißen Bühne rendern.
+      // globeMaterial() (Bundle-Getter auf globeObj.material) liefert das
+      // Material; seine Farbe wird aus dem bestehenden Token --a6-graph-canvas
+      // (style.css:37, #ffffff) gelesen, damit der Astra-6-Weiß-Standard auch
+      // im Silhouetten-Bereich gilt und kein zweites Farbsystem entsteht.
+      // Fail-closed: Ungültiges/fehlendes Token oder fehlende Material-API
+      // lässt den Bundle-Default unverändert — Punkte/Bögen/Ringe laufen
+      // unabhängig davon.
+      try {
+        const tokenSurface = cssToken('--a6-graph-canvas');
+        const surface = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(tokenSurface ?? '')) ? tokenSurface : '#ffffff';
+        const mat = g.globeMaterial();
+        if (mat && mat.color && typeof mat.color.set === 'function') mat.color.set(surface);
+      } catch { /* Material-API fehlt: Bundle-Default bleibt, kein Crash */ }
       // DESIGN-ABWEICHUNG, bewusst akzeptiert (Prüfer-Fund 2026-09-29): Die
       // Graticule-Farbe ist im Bundle-LineBasicMaterial hardcoded
       // ('lightgrey', transparent, Opazität 0.1); eine Farb-API für
       // Graticules existiert nicht (0 Treffer im Bundle) und CSS-Tokens
       // können WebGL-Linien nicht färben. Der Bundle-Default wird übernommen;
-      // ein Material-Patch über die three-Szene wäre nicht API-stabil.
+      // ein Material-Patch über die three-szene wäre nicht API-stabil.
       g.showGraticules(true);
       const atmosphere = resolveAtmosphereColor();
       if (atmosphere) g.atmosphereColor(atmosphere);
@@ -470,7 +858,17 @@ export function initGlobe(ctx) {
         .pointLabel((d) => d.label)
         .onPointClick((d) => {
           const cid = d && d.clusterId ? String(d.clusterId) : '';
-          if (cid && openCluster) openCluster(cid);
+          if (!cid || !openCluster) return;
+          // FIX-B Klick-Zeit-Validierung: Die Punktdaten stammen aus dem
+          // zuletzt ANGEWANDTEN Satz; ist der Cluster inzwischen aus dem
+          // Graph gefallen (rollendes Fenster, instabile Cluster-id), wird
+          // der Klick ignoriert, statt das Modal in den Leerezustand zu
+          // öffnen.
+          let cg = null;
+          try { cg = ctx.getClusterGraph(); } catch { cg = null; }
+          const clusters = cg && Array.isArray(cg.clusters) ? cg.clusters : null;
+          if (!clusters || !clusters.some((c) => c && String(c.id) === cid)) return;
+          openCluster(cid);
         })
         .pointsData([])
         .arcStartLat((d) => d.startLat)
@@ -517,38 +915,31 @@ export function initGlobe(ctx) {
       }
       buildDone = true;
       showNote(el, GLOBE_NOTE);
-      if (!wantActive) {
-        try { g.pauseAnimation(); } catch { /* egal */ }
-      }
-      if (pendingData) {
-        const ds = pendingData;
-        pendingData = null;
-        applyData(ds);
+      // FIX-B: Kontextverlust-Ereignisse am Canvas (Capture-Phase) und
+      // Sichtbarkeitsbeobachtung (IntersectionObserver + visibilitychange).
+      bindContextEvents(el);
+      watchVisibility(el);
+      // Animation nur bei aktivem UND nachweislich sichtbarem Zustand — die
+      // bisherige !wantActive-Bedingung ist darin enthalten.
+      syncAnimation();
+      if (latestDs) {
+        // Szene ist leer (Erstbau oder Neuaufbau nach Kontextverlust):
+        // sofortige Anwendung; der Deckel regelt erst danach.
+        offerData(latestDs, true);
       } else {
         refresh();
       }
-    } catch {
-      globe = null;
-      container = null;
-      controls = null;
-      buildDone = false;
-      buildFailed = true;
-      if (resizeObs) {
-        try { resizeObs.disconnect(); } catch { /* egal */ }
-        resizeObs = null;
-      }
-      showFallback(el);
-    }
   }
 
   function activate() {
     wantActive = true;
     if (buildFailed) return;
     if (buildStarted) {
-      if (buildDone && globe) {
-        try { globe.resumeAnimation(); } catch { /* egal */ }
-        syncAutoRotate();
-      }
+      // resume nur bei konstruierter UND sichtbarer Kugel (syncAnimation
+      // prüft wantActive/ioVisible/document.hidden intern); autoRotate wird
+      // wie bisher bei jedem activate nachgezogen.
+      syncAnimation();
+      if (buildDone && globe) syncAutoRotate();
       return;
     }
     construct();
@@ -556,9 +947,9 @@ export function initGlobe(ctx) {
 
   function deactivate() {
     wantActive = false;
-    if (buildDone && globe) {
-      try { globe.pauseAnimation(); } catch { /* egal */ }
-    }
+    // pausiert nur bei konstruierter Kugel (interne Guards) und stoppt den
+    // Ring-Takt — idempotent zur Sichtbarkeits-Selbstpause des Observers.
+    syncAnimation();
   }
 
   return { activate, deactivate, refresh };

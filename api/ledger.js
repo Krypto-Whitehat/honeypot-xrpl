@@ -48,8 +48,14 @@ const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const MAX_RESOLVE = 40; // Hash-Auflösungsbudget pro Snapshot (Serverless-Budget)
 const PARALLEL = 8; // max. 8 parallele tx-Calls (verifiziertes Muster)
 const CACHE_MS = 60000; // 60-s-Cache wie threats-service
+const ERROR_CACHE_MS = 5000; // kurzer Negativ-Cache: Wiederholte Anfragen im
+                             // Fenster bedient der Fehler, statt erneut 3
+                             // RPC-Versuche zu feuern — entlastet einen
+                             // gedrosselten Endpunkt zusätzlich zum
+                             // clientseitigen Poll-Backoff (Befund 2026-09-30).
 
 let snapshotCache = null; // { time, body } — nur im Prozess-Speicher
+let errorCache = null; // { time } — nur im Prozess-Speicher
 
 // slowDown-Backoff: xrplcluster (Clio) drosselt bei Häufung — live beobachtet
 // 2026-09-28. Ein Retry-Fenster pro Call macht den Snapshot robust.
@@ -116,6 +122,11 @@ export default async function handler(req, res) {
     if (snapshotCache && Date.now() - snapshotCache.time < CACHE_MS) {
       return res.status(200).json(snapshotCache.body);
     }
+    // Negativ-Cache (Befund 2026-09-30): Erfolgscache hat Vorrang; danach
+    // entscheidet der kurze Fehler-Cache (max. eine RPC-Runde pro Fenster).
+    if (errorCache && Date.now() - errorCache.time < ERROR_CACHE_MS) {
+      return res.status(502).json({ error: "Ledger-Abfrage fehlgeschlagen." });
+    }
 
     const led = await rpc("ledger", { ledger_index: "validated", transactions: true });
     const rawTxs = led?.ledger?.transactions ?? [];
@@ -170,8 +181,10 @@ export default async function handler(req, res) {
         })),
     };
     snapshotCache = { time: Date.now(), body };
+    errorCache = null; // Erfolg verdrängt einen etwaigen Fehler-Cache
     res.status(200).json(body);
   } catch {
+    errorCache = { time: Date.now() };
     res.status(502).json({ error: "Ledger-Abfrage fehlgeschlagen." });
   }
 }
