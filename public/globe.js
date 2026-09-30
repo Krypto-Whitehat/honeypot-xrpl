@@ -9,6 +9,14 @@
  * Das Bundle wird nie eager geladen: Erst der erste activate()-Aufruf
  * injiziert das <script> lazy (Singleton-Promise, Muster drilldown.js:75-87).
  *
+ * Für den Länder-Layer kommt topojson-client@3.1.0 GEPINNT dazu (UMD,
+ * https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js — ohne
+ * Patch-Angabe leitet unpkg nur um; am Bundle window.topojson.feature
+ * verifiziert), gleiches Lazy-Muster beim ersten activate(). Die Attribution-
+ * Logik (Registry-Parsing, Länder-Matching, Fluss-Aggregation) liegt im
+ * same-origin ESM public/attribution.mjs (dynamischer Import; läuft identisch
+ * in Node, getestet in lib/attribution.test.mjs).
+ *
  * MODUL-VERTRAG: export function initGlobe(ctx) -> { activate, deactivate, refresh }
  *   activate()   – erster Aufruf injiziert globe.gl und baut die Kugel;
  *                  weitere Aufrufe führen nur resumeAnimation aus.
@@ -44,13 +52,17 @@
  * loggt keine Adressen.
  *
  * Ehrliche Platzierung: das XRPL-Ledger enthält KEINE Geodaten. Positionen
- * sind deterministisch aus der Adresse abgeleitet (SHA-256 über ctx.hashOf;
- * der Cache wird vom Host via primeAddrHashes gefüllt) — kein Math.random
- * und kein Date.now für Positionen. KEIN globeImageUrl, KEINE Länder-Polygone;
- * stattdessen showGraticules(true) als neutrales Liniennetz. Die Kugel-
- * OBERFLÄCHE selbst wird über globeMaterial() auf die Token-Farbe der Bühne
- * (--a6-graph-canvas, Weiß) gesetzt — der Bundle-Default wäre opak schwarz
- * (Befund 2026-09-30).
+ * UNZUGEORDNETER Adressen sind deterministisch aus der Adresse abgeleitet
+ * (SHA-256 über ctx.hashOf; der Cache wird vom Host via primeAddrHashes
+ * gefüllt) — kein Math.random und kein Date.now für Positionen. KEIN
+ * globeImageUrl. Seit dem Attribution-Layer (2026-09-30) zeigen zusätzlich
+ * LÄNDER-POLYGONE (Natural Earth, /data/countries-50m.json via topojson-
+ * client) die Grenzen; Börsen-Registry-Adressen (/data/exchange-registry.json)
+ * werden über ihr Sitzland platziert (aggregateCountryFlows aus
+ * public/attribution.mjs) — Zuordnung ausschließlich über die Registry,
+ * alles andere bleibt symbolisch hash-platziert. Die Kugel-OBERFLÄCHE selbst
+ * wird über globeMaterial() auf die Token-Farbe der Bühne (--a6-graph-canvas,
+ * Weiß) gesetzt — der Bundle-Default wäre opak schwarz (Befund 2026-09-30).
  *
  * Der zugehörige Tab-Button #tab-globe, der Container #globe und der
  * dynamische Import kommen vom Verdrahtungs-Agenten (app.js/index.html).
@@ -59,6 +71,17 @@
  */
 
 const GLOBE_GL_URL = 'https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js';
+// SRI-Integrität (Lieferketten-Hygiene, Befund 2026-09-30): Beide CDN-
+// Bundles laufen mit Subresource-Integrity — ein kompromittiertes CDN kann
+// den Bundle-Inhalt nicht unbemerkt tauschen. Hashes über die exakten Bytes
+// der gepinnten URLs (globe.gl: 1.885.160 Bytes, wie oben im Modul-Kommentar
+// dokumentiert), Format sha384-Base64. crossorigin="anonymous" ist zu SRI
+// Pflicht (CORS-Modus); unpkg sendet Access-Control-Allow-Origin: *.
+const GLOBE_GL_INTEGRITY = 'sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT';
+const TOPOJSON_URL = 'https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js'; // GEPINNT mit Patch: die ungepatchte @3-URL leitet auf unpkg um
+const TOPOJSON_INTEGRITY = 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67';
+const EXCHANGE_REGISTRY_URL = '/data/exchange-registry.json'; // same-origin (express.static, server/index.mjs)
+const COUNTRIES_URL = '/data/countries-50m.json';             // Natural-Earth-TopoJSON (241 Länder)
 const GLOBE_MAX_ARCS = 300;        // Deckel: zuletzt 300 Kanten (Analogon CLUSTER_MAX_EDGES, app.js:106)
 const RING_WINDOW_MS = 30000;      // Puls-Ringe nur für Kanten mit closeTime jünger als 30 s
 const RING_REPEAT_MS = 1200;       // ringRepeatPeriod laut Plan
@@ -72,8 +95,25 @@ const ARC_DASH_ANIMATE_MS = 2500;  // wandernde Striche nur ohne prefers-reduced
 const AUTO_ROTATE_SPEED = 0.4;     // autoRotate-Geschwindigkeit (OrbitControls)
 const POV_START = { lat: 20, lng: 0, altitude: 2.2 };
 const SEV_RANK = { info: 1, suspect: 2, malicious: 3 }; // wie SEVERITY_RANK, lib/cluster.mjs:43
-const GLOBE_NOTE = 'Positionen sind deterministisch aus der Adresse abgeleitet (Hash) — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht, keine geografische Zuordnung.';
+const GLOBE_NOTE = 'Positionen sind deterministisch aus dem Adress-Hash abgeleitet — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar.';
+const GLOBE_NOTE_COUNTRIES = 'Ländergrenzen: Natural Earth (TopoJSON). Länderzuordnung ausschließlich über die Börsen-Registry (Sitzländer der Börsen); Adressen ohne Zuordnung bleiben deterministisch aus dem Adress-Hash platziert — das XRPL-Ledger selbst enthält keine Standortdaten.';
+/* aria-label-Stufen für #globe (Befund 2026-09-30): Das statische Label in
+ * index.html (GLOBE_ARIA_BASE) behauptet KEINE Ländergrenzen — erst der
+ * nachgewiesene Zustand des Länder-Layers ergänzt sie. GLOBE_ARIA_FAILED
+ * hält den Terminalzustand 'failed' (CDN-/Fetch-Fehler, terminal bis
+ * Seiten-Reload) ehrlich eingeschränkt; GLOBE_ARIA_BASE gilt für 'loading'.
+ * Der Text von GLOBE_ARIA_BASE ist identisch zum aria-label in index.html. */
+const GLOBE_ARIA_BASE = 'Weltkugel der Live-Aktivität; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert';
+const GLOBE_ARIA_COUNTRIES = 'Weltkugel der Live-Aktivität mit Ländergrenzen; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert';
+const GLOBE_ARIA_FAILED = 'Weltkugel der Live-Aktivität; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar, Positionen bleiben symbolisch aus dem Adress-Hash abgeleitet';
 const GLOBE_CTX_LOST_NOTE = 'WebGL-Grafikkontext verloren — genau ein Wiederherstellungsversuch wird gestartet …';
+/* Länder-Layer (Attribution): dezent — Grenzen sichtbar, Fläche transparent */
+const GLOBE_POLYGON_ALTITUDE = 0.006;   // Polygone knapp über der Kugel-Oberfläche
+const GLOBE_POLYGON_FILL = 'rgba(255, 255, 255, 0)'; // neutrale Kappe/Seiten (Bühnen-Weiß, Alpha 0): nur Grenzlinien sichtbar
+const GLOBE_COUNTRY_LABELS_MAX = 12;    // Beschriftung nur der aktivsten Länder (klafterfrei)
+const GLOBE_COUNTRY_REF_ACTIVITY = 20;  // Skalenreferenz: ab 20 Aktivitäten voller Länderpunkt-Radius (log-skaliert)
+const GLOBE_ARC_FLOW_REF_COUNT = 10;    // Skalenreferenz: ab 10 Kanten volle Fluss-Bogen-Strichstärke
+const SEV_TEXT = { malicious: 'maliziös', suspect: 'verdächtig', info: 'Info' }; // deutsche Severity-Wörter für Bogen-Labels
 
 /* FIX-B „Update statt Rebuild": globe.gl baut bei jedem pointsData-/arcsData-/
  * ringsData-Setter alle Szenen-Objekte neu auf; der ~4-s-Takt des Hosts
@@ -157,6 +197,24 @@ export function initGlobe(ctx) {
   let ctxLost = false;         // webglcontextlost aktiv
   let ctxRestoreTried = false; // GENAU EIN Restaurationsversuch pro Seitenleben
   let ctxRestoreTimer = 0;     // Frist-Timer für webglcontextrestored
+  /* Länder-Layer (Attribution): Drei-Zustands-Maschine countryData.state
+   *   'loading' — Daten werden (einmalig) geladen; Kugel läuft symbolisch
+   *               weiter, ein hängender Fetch ist KEIN Fehler (kein Retry,
+   *               kein Blockieren, kein Blinken).
+   *   'ready'   — Registry + Länder-Index gecacht; applyCountryLayer() an
+   *               die Instanz anwenden (falls konstruiert), DANACH EINEN
+   *               refresh() anstoßen.
+   *   'failed'  — terminal bis Seiten-Reload (Script-onerror, Fetch-Fehler,
+   *               Parse-Fehler, leere Registry/leerer Länder-Index):
+   *               symbolischer Modus mit ehrlichem Hinweis, kein Retry-Loop. */
+  let countryData = { state: 'loading', registry: null, countryIndex: null, features: [] };
+  let countryLoadStarted = false; // EINMALiges Laden (Lazy beim ersten activate())
+  let topojsonPromise = null;     // Singleton-Ladezustand topojson-client
+  let attributionMod = null;      // dynamisch importiertes public/attribution.mjs
+  let countryLayerApplied = false; // Instanz-Flag: Polygone an DIESE Instanz gesetzt (Reset in buildGlobe)
+  let legendEl = null;            // Legende .globe-legend (Re-Erzeugen nach showNote-Muster)
+  let lastLabelsSig = '';         // Signatur der zuletzt angewandten Länder-Labels
+  let lastLegendSig = '';         // Signatur der zuletzt angewandten Legende
 
   /* ---------------- Hilfen ---------------- */
 
@@ -200,12 +258,212 @@ export function initGlobe(ctx) {
     scriptPromise = new Promise((resolve) => {
       const s = document.createElement('script');
       s.src = GLOBE_GL_URL;
+      s.integrity = GLOBE_GL_INTEGRITY; // SRI: bei Hash-Mismatch verweigert der Browser die Ausführung
+      s.crossOrigin = 'anonymous';
       s.async = true;
       s.onload = () => resolve(typeof window.Globe === 'function');
       s.onerror = () => resolve(false);
       document.head.appendChild(s);
     });
     return scriptPromise;
+  }
+
+  // topojson-client lazy laden — gleiche Singleton-Mechanik wie loadGlobeGl.
+  // GEPINNTE URL mit Patch-Version: die ungepatchte @3-URL antwortet nur mit
+  // einem Redirect-Body; das gepinnte Bundle stellt window.topojson.feature
+  // bereit (am Bundle verifiziert).
+  function loadTopojson() {
+    if (window.topojson && typeof window.topojson.feature === 'function') return Promise.resolve(true);
+    if (topojsonPromise) return topojsonPromise;
+    topojsonPromise = new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = TOPOJSON_URL;
+      s.integrity = TOPOJSON_INTEGRITY; // SRI wie bei globe.gl (gleiche Lieferkette, gleicher Schutz)
+      s.crossOrigin = 'anonymous';
+      s.async = true;
+      s.onload = () => resolve(Boolean(window.topojson && typeof window.topojson.feature === 'function'));
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+    return topojsonPromise;
+  }
+
+  // Nutzbarer Centroid: Array der Länge 2 mit endlichen Zahlen ([lat, lng]).
+  // Definiert „platzierbar" für Länderpunkte, Per-Edge-Positionen, Fluss-
+  // Bögen und den Legenden-Zähler (schließt noPolygon- und centroid:null-
+  // Treffer ausdrücklich NICHT als zugeordnet ein).
+  function isUsableCentroid(c) {
+    return Array.isArray(c) && c.length === 2 && Number.isFinite(c[0]) && Number.isFinite(c[1]);
+  }
+
+  // Der Länder-Layer gilt als aktiv, wenn die Polygone an die aktuelle
+  // Instanz gesetzt wurden UND die Daten bereitstehen (Notiz- und Legenden-
+  // Ehrlichkeit: keine Grenzen behaupten, die gerade fehlen).
+  function countryLayerActive() {
+    return countryLayerApplied && countryData.state === 'ready';
+  }
+
+  // aria-label des #globe-Containers an den Länder-Layer-Zustand koppeln
+  // (Befund 2026-09-30): Ein statisches Label hätte im Terminalzustand
+  // 'failed' Grenzen behauptet, die es nicht gibt. Aufgerufen bei jedem
+  // Zustandsübergang (ensureCountryData) und nach jedem (Neu-)Aufbau der
+  // Instanz (buildGlobe); ohne Container bleibt das statische Label stehen.
+  function syncGlobeAria() {
+    if (!container) return;
+    try {
+      container.setAttribute(
+        'aria-label',
+        countryLayerActive() ? GLOBE_ARIA_COUNTRIES
+          : countryData.state === 'failed' ? GLOBE_ARIA_FAILED
+            : GLOBE_ARIA_BASE
+      );
+    } catch { /* DOM nicht schreibbar: statisches Label bleibt, wirft nicht */ }
+  }
+
+  /* Grenzlinien-Farbe: Vertragskette cssToken('--a6-line') || EDGE_DEFAULT —
+   * mit einer am gepinnten Bundle verifizierten Bewertung (2026-09-30):
+   * --a6-line ist ein UI-Border-Token MIT Alpha (rgba(20, 20, 22, 0.12)); im
+   * DOM ergibt das die feinen 1px-Ränder der Flächen, in WebGL-Linien wird
+   * dasselbe Alpha dagegen als Material-Deckkraft angewandt (opacity 0.12,
+   * transparent — live nachgeprüft). 12 % Ink über weißer Bühne liegt mit
+   * ≈ #E3E3E5 unter dem WCAG-Grafikkontrast (3:1) und wäre praktisch
+   * unsichtbar (gleiche Größenordnung wie die Graticules). Damit der
+   * Layer-Zweck „Grenzen sichtbar" hält, fällt die Kette bei rgba-Alpha
+   * unter 0.5 auf den dokumentierten Fallback derselben Kette durch:
+   * EDGE_DEFAULT (#62626b, neutral, Kontrast ≈ 5,6:1). Opake Token-Werte
+   * und solche mit Alpha >= 0.5 werden unverändert übernommen. */
+  function resolveStrokeColor() {
+    const raw = cssToken('--a6-line');
+    if (raw) {
+      const m = raw.match(/^rgba?\(\s*[\d.]+\s*[,\s]+[\d.]+\s*[,\s]+[\d.]+\s*[,/]\s*([\d.]+)%?\s*\)$/i);
+      if (!m) return raw; // opake Farbe (#hex/named): direkt durchreichen
+      const a = m[1].endsWith('%') ? parseFloat(m[1]) / 100 : parseFloat(m[1]);
+      if (Number.isFinite(a) && a >= 0.5) return raw; // ausreichend deckend
+    }
+    return edgeDefault; // dokumentierter Fallback der Vertragskette
+  }
+
+  /* Länder-Daten EINMAL lazy laden (erster activate()): Registry + TopoJSON
+   * + Attribution-Modul, alles fail-soft — kein Fehler hier darf die Kugel
+   * oder den Tab reißen (der dynamische import mit .catch ist reine
+   * Laufzeit-Robustheit für Produktions-404, kein Ersatz für die Datei).
+   * Zustandsübergänge siehe countryData-Kommentar oben. */
+  async function ensureCountryData() {
+    if (countryLoadStarted) return;
+    countryLoadStarted = true;
+    countryData = { state: 'loading', registry: null, countryIndex: null, features: [] };
+    try {
+      const mod = await import('./attribution.mjs'); // same-origin ESM (Vertragspartner)
+      if (!mod || typeof mod.parseExchangeRegistry !== 'function'
+        || typeof mod.indexCountryFeatures !== 'function'
+        || typeof mod.aggregateCountryFlows !== 'function') throw new Error('attribution-modul');
+      const topoOk = await loadTopojson();
+      if (!topoOk) throw new Error('topojson-cdn');
+      const [regRaw, topoRaw] = await Promise.all([
+        fetch(EXCHANGE_REGISTRY_URL).then((r) => { if (!r.ok) throw new Error('registry-http'); return r.json(); }),
+        fetch(COUNTRIES_URL).then((r) => { if (!r.ok) throw new Error('countries-http'); return r.json(); }),
+      ]);
+      const registry = mod.parseExchangeRegistry(regRaw);
+      if (!registry || registry.ok !== true) throw new Error('registry-leer');
+      if (!topoRaw || typeof topoRaw !== 'object' || !topoRaw.objects
+        || !topoRaw.objects.countries) throw new Error('topologie-ungueltig');
+      let features = null;
+      try { features = window.topojson.feature(topoRaw, topoRaw.objects.countries).features; } catch { features = null; }
+      if (!Array.isArray(features) || features.length === 0) throw new Error('features-leer');
+      const countryIndex = mod.indexCountryFeatures(features);
+      if (!countryIndex || !(countryIndex.byName instanceof Map) || countryIndex.count === 0) {
+        throw new Error('laender-index-leer');
+      }
+      attributionMod = mod;
+      countryData = { state: 'ready', registry, countryIndex, features };
+    } catch {
+      attributionMod = null;
+      countryData = { state: 'failed', registry: null, countryIndex: null, features: [] };
+    }
+    // Zustand anwenden (idempotent; ist die Kugel noch unkonstruiert, zieht
+    // buildGlobe den Zustand beim Konstruktions-Abschluss selbst nach).
+    if (countryData.state === 'ready') {
+      if (buildDone && globe && container) {
+        applyCountryLayer();
+        showNote(container, GLOBE_NOTE_COUNTRIES);
+        syncGlobeAria(); // Grenzen existieren nachweislich -> aria-label ergänzen
+      }
+      refresh(); // GENAU EIN Daten-Refresh nach Bereitstellen des Layers
+    } else if (countryData.state === 'failed' && buildDone && globe && container) {
+      showNote(container, GLOBE_NOTE); // symbolische Variante: keine Grenzen behaupten
+      syncGlobeAria(); // Terminalzustand: aria-label ehrlich einschränken
+    }
+  }
+
+  /* Länder-Polygone an die AKTUELLE Instanz setzen — idempotent über das
+   * Instanz-Flag (Reset zu Beginn von buildGlobe): rebuildGlobe() erzeugt
+   * eine NEUE Instanz und leert den Container; Accessors und Daten müssen
+   * je Instanz gesetzt werden (Accessors in buildGlobe, Daten hier). */
+  function applyCountryLayer() {
+    if (!globe || !buildDone || countryLayerApplied) return;
+    if (countryData.state !== 'ready') return;
+    try {
+      globe.polygonsData(countryData.features);
+      countryLayerApplied = true;
+    } catch { /* Polygon-Setter fehlt: kein Länder-Layer, Rest läuft weiter */ }
+  }
+
+  /* Legende des Länder-Layers (Overlay .globe-legend in #globe): Re-Erzeugen,
+   * sobald der Knoten nicht mehr im Container hängt — showNote-Muster
+   * (globe.js, Detach durch rebuildGlobe/el.innerHTML=''). Der Zähler wird
+   * vom Anwendungspfad (applyPointsArcs) mit dem frischen Datensatz versorgt;
+   * Severity-Swatches nutzen die bestehenden Klassen .swatch/.swatch-sev-*
+   * (style.css:632-658) — kein zweites Farbsystem. */
+  function ensureLegend(unassignedCount) {
+    if (!container) return;
+    try {
+      if (!legendEl || legendEl.parentElement !== container) {
+        legendEl = document.createElement('div');
+        legendEl.className = 'globe-legend';
+        const title = document.createElement('p');
+        title.className = 'globe-legend-title';
+        title.textContent = 'Länderaktivität';
+        legendEl.appendChild(title);
+        const rows = [
+          ['swatch-sev-malicious', 'Maliziös'],
+          ['swatch-sev-suspect', 'Verdächtig'],
+          ['swatch-sev-info', 'Info'],
+        ];
+        for (const [swatchClass, text] of rows) {
+          const row = document.createElement('p');
+          row.className = 'globe-legend-row';
+          const sw = document.createElement('span');
+          sw.className = 'swatch ' + swatchClass;
+          row.appendChild(sw);
+          row.appendChild(document.createTextNode(text));
+          legendEl.appendChild(row);
+        }
+        const count = document.createElement('p');
+        count.className = 'globe-legend-count';
+        legendEl.appendChild(count);
+        const src = document.createElement('p');
+        src.className = 'globe-legend-src';
+        src.textContent = 'Zuordnung ausschließlich über die Börsen-Registry · Grenzen: Natural Earth (TopoJSON)';
+        legendEl.appendChild(src);
+        container.appendChild(legendEl);
+      }
+      const countEl = legendEl.querySelector('.globe-legend-count');
+      if (countEl) countEl.textContent = `Adressen ohne Länderzuordnung: ${unassignedCount}`;
+    } catch { /* DOM nicht schreibbar: Legende entfällt, wirft aber nicht */ }
+  }
+
+  function removeLegend() {
+    try {
+      if (legendEl && legendEl.parentElement) legendEl.parentElement.removeChild(legendEl);
+    } catch { /* egal */ }
+    legendEl = null;
+  }
+
+  // Legende nur mit aktivem Länder-Layer zeigen — ein Overlay mit Quellen-
+  // Hinweis darf keine Grenzen behaupten, die gerade fehlen.
+  function syncLegend(legend) {
+    if (legend && legend.show && countryLayerActive()) ensureLegend(legend.unassigned);
+    else removeLegend();
   }
 
   // Deterministische Koordinaten aus dem Adress-Hash (SHA-256-Hex, vom Host
@@ -279,6 +537,12 @@ export function initGlobe(ctx) {
       if (!noteEl || noteEl.parentElement !== el) {
         noteEl = document.createElement('p');
         noteEl.className = 'graph-note globe-note';
+        // role=status (impliziert aria-live=polite; Muster showFallback,
+        // globe.js showFallback-Box): Der Zustandswechsel des Länder-Layers
+        // (ready/failed) wird damit auch Screenreadern angekündigt, nicht
+        // nur visuell (Befund 2026-09-30 — zuvor war die Korrektur rein
+        // optisch und das aria-label behauptete Grenzen weiter).
+        noteEl.setAttribute('role', 'status');
         el.appendChild(noteEl);
       }
       // isAlert (WebGL-Kontextverlust): nur eine Zustandsvariante desselben
@@ -354,10 +618,55 @@ export function initGlobe(ctx) {
       }));
     }
 
+    // LÄNDER-ATTRIBUTION (NACH dem Deny-Gate, auf visibleNodes): Registry-
+    // Zuordnung + Fluss-Aggregation aus public/attribution.mjs. Fail-soft:
+    // null/undefiniert -> symbolischer Modus wie zuvor.
+    let attribution = null;
+    if (countryData.state === 'ready' && attributionMod) {
+      try {
+        const visibleIds = new Set(visibleNodes.map((n) => String(n.id ?? '')));
+        const graphEdges = edges.filter((e) => visibleIds.has(String(e.from ?? ''))
+          && visibleIds.has(String(e.to ?? '')));
+        attribution = attributionMod.aggregateCountryFlows({
+          nodes: visibleNodes,
+          edges: graphEdges,
+          registry: countryData.registry,
+          countryIndex: countryData.countryIndex,
+        });
+      } catch { attribution = null; }
+    }
+
+    // Positionen je Node: CENTROID-ODER-HASH — Registry-Adressen mit nutzbarem
+    // Sitzland-Centroid stehen am Land (Börsen-Sitz, keine Standortdaten des
+    // Ledgers), alles andere bleibt deterministisch Hash-platziert.
+    const centroidPos = new Map();
+    if (attribution) {
+      for (const n of visibleNodes) {
+        const id = String(n.id ?? '');
+        if (!id || centroidPos.has(id)) continue;
+        const info = attribution.assignedByAddress.get(id);
+        if (info && isUsableCentroid(info.centroid)) centroidPos.set(id, info.centroid);
+      }
+    }
+    const posOf = new Map();
     const sevByNode = new Map();
+    for (const n of visibleNodes) {
+      const id = String(n.id ?? '');
+      if (!id || posOf.has(id)) continue;
+      const c = centroidPos.get(id) || coords.get(id);
+      if (!c) continue;
+      posOf.set(id, c);
+      sevByNode.set(id, String(n.severity ?? 'info'));
+    }
+
     const points = [];
     for (const n of visibleNodes) {
       const id = String(n.id ?? '');
+      // Attribuierte Adresse mit nutzbarem Centroid: KEIN eigener Punkt — der
+      // Länderpunkt vertritt das Land (s. u.); ihr Klick-zu-Cluster entfällt
+      // bewusst (clusterId null, onPointClick bleibt No-op), Cluster-Details
+      // bleiben über Cluster-Tab und Cluster-Karten erreichbar.
+      if (centroidPos.has(id)) continue;
       const c = coords.get(id);
       if (!c) continue;
       const rc = roleColors[n.role] || roleColors.unknown;
@@ -391,7 +700,61 @@ export function initGlobe(ctx) {
         label: esc(displayAddr(id)),
         clusterId: n.clusterId != null ? String(n.clusterId) : null,
       });
-      sevByNode.set(id, String(n.severity ?? 'info'));
+    }
+
+    // LÄNDERPUNKTE und LABELS (aus countries[]): Zufluss/Abfluss (I/O) zählt
+    // die Kugel selbst aus flows[] — I = Summe count aller Flows mit
+    // toCountry === Name, O = Summe count mit fromCountry === Name; die
+    // null-seitigen Off-Ramp-Flows (null->Land, Land->null) sind ausdrück-
+    // lich ZÄHLDATEN und fließen genau hier ein (definierter Konsument).
+    const labels = [];
+    if (attribution) {
+      const centroidByName = new Map();
+      const inflowByCountry = new Map();
+      const outflowByCountry = new Map();
+      for (const c of attribution.countries) {
+        if (isUsableCentroid(c.centroid)) centroidByName.set(c.name, c.centroid);
+      }
+      for (const f of attribution.flows) {
+        if (f.toCountry) inflowByCountry.set(f.toCountry, (inflowByCountry.get(f.toCountry) || 0) + f.count);
+        if (f.fromCountry) outflowByCountry.set(f.fromCountry, (outflowByCountry.get(f.fromCountry) || 0) + f.count);
+      }
+      for (const c of attribution.countries) {
+        if (!isUsableCentroid(c.centroid)) continue;
+        const color = sevTokenColor(c.worstSeverity);
+        if (!color) continue;
+        const t = Math.max(0, Math.min(1,
+          Math.log10(1 + Math.max(0, c.activity)) / Math.log10(1 + GLOBE_COUNTRY_REF_ACTIVITY)));
+        const inflow = inflowByCountry.get(c.name) || 0;
+        const outflow = outflowByCountry.get(c.name) || 0;
+        const exchanges = c.exchanges.length ? c.exchanges.join(', ') : '–';
+        points.push({
+          lat: c.centroid[0],
+          lng: c.centroid[1],
+          color,
+          radius: 0.22 + 0.5 * t,
+          altitude: 0.02,
+          label: `<strong>${esc(c.name)}</strong> · ${c.activity} ${c.activity === 1 ? 'Aktivität' : 'Aktivitäten'} · ${c.severities.malicious} maliziös · Zufluss: ${inflow} ${inflow === 1 ? 'Kante' : 'Kanten'} · Abfluss: ${outflow} ${outflow === 1 ? 'Kante' : 'Kanten'} · Börsen: ${esc(exchanges)}`,
+          clusterId: null, // bewusst: onPointClick ist für Länderpunkte ein No-op
+        });
+      }
+      // Beschriftung nur der aktivsten Länder (countries[] ist nach activity
+      // desc sortiert) — gesetzt im gedämpften Takt der Punkte/Bögen-Anwendung.
+      let labelled = 0;
+      for (const c of attribution.countries) {
+        if (labelled >= GLOBE_COUNTRY_LABELS_MAX) break;
+        if (!isUsableCentroid(c.centroid)) continue;
+        labels.push({
+          lat: c.centroid[0],
+          lng: c.centroid[1],
+          text: esc(c.name),
+          size: 0.5,
+          color: cssToken('--a6-ink') || edgeDefault,
+          dotRadius: 0.1,
+          altitude: 0.01, // knapp über der Polygon-Fläche (0.006)
+        });
+        labelled += 1;
+      }
     }
 
     // Kanten: nur zwischen verorteten Knoten; deterministisch chronologisch
@@ -413,8 +776,18 @@ export function initGlobe(ctx) {
       if (f !== 0) return f;
       return cmpStr(String(a.to ?? ''), String(b.to ?? ''));
     };
+    // Per-Edge-Kanten: Positionen centroid-oder-Hash; Kanten, bei denen BEIDE
+    // Endpunkte attribuiert-mit-centroid sind, laufen stattdessen im
+    // AGGREGIERTEN Land-zu-Land-Bogen (s. u.) — GLOBE_MAX_ARCS-Deckel und
+    // chronologische Sortierung gelten unverändert für diesen Per-Edge-Anteil.
+    // Die einseitig zugeordneten Off-Ramp-Kanten werden über diesen Pfad
+    // sichtbar (Centroid auf der Länder-, Hash-Position auf der offenen Seite).
     const keptEdges = edges
-      .filter((e) => coords.has(String(e.from ?? '')) && coords.has(String(e.to ?? '')))
+      .filter((e) => {
+        const f = String(e.from ?? '');
+        const t = String(e.to ?? '');
+        return posOf.has(f) && posOf.has(t) && !(centroidPos.has(f) && centroidPos.has(t));
+      })
       .sort(cmpEdges)
       .slice(-GLOBE_MAX_ARCS);
 
@@ -424,8 +797,8 @@ export function initGlobe(ctx) {
     for (const e of keptEdges) {
       const from = String(e.from);
       const to = String(e.to);
-      const a = coords.get(from);
-      const b = coords.get(to);
+      const a = posOf.get(from); // centroid-oder-Hash
+      const b = posOf.get(to);
       // Farbe exakt EDGE_COLORS/EDGE_DEFAULT (app.js:382-395) — dieselbe
       // Codierung wie Legende und Graph-Tab.
       const color = edgeColors[String(e.type ?? '')] || edgeDefault;
@@ -460,17 +833,78 @@ export function initGlobe(ctx) {
       }
     }
 
+    // AGGREGIERTE Land-zu-Land-Bögen: nur Flows, bei denen BEIDE Seiten über
+    // die name->centroid-Map aus countries[] auflösbar sind; null-seitige
+    // Flows (null->Land, Land->null) sind per Definition nicht bogenfähig
+    // (die null-Seite hat keinen Centroid) — ihre Kanten laufen oben im
+    // Per-Edge-Pfad, ihre counts als Zufluss/Abfluss in den Länderpunkt-
+    // Labels. Konstanten nicht mischen: 1.6 ist Strichstärke (Stroke),
+    // 0.45/0.25 sind Strichlänge/-lücke (Dash) — Dash nur bei malicious.
+    if (attribution) {
+      const centroidByName = new Map();
+      for (const c of attribution.countries) {
+        if (isUsableCentroid(c.centroid)) centroidByName.set(c.name, c.centroid);
+      }
+      for (const f of attribution.flows) {
+        if (f.fromCountry === null || f.toCountry === null) continue;
+        const a = centroidByName.get(f.fromCountry);
+        const b = centroidByName.get(f.toCountry);
+        if (!a || !b) continue;
+        // start==end: kein Bogen. Seit der Intra-Land-Ausschluss in
+        // aggregateCountryFlows (attribution.mjs, Befund 2026-09-30) kann
+        // dieser Fall aus flows[] nicht mehr eintreten — der Guard bleibt
+        // als defensive Prüfung bestehen.
+        if (a[0] === b[0] && a[1] === b[1]) continue;
+        const color = sevTokenColor(f.worstSeverity);
+        if (!color) continue;
+        const t = Math.max(0, Math.min(1, (f.count - 1) / (GLOBE_ARC_FLOW_REF_COUNT - 1)));
+        arcs.push({
+          startLat: a[0],
+          startLng: a[1],
+          endLat: b[0],
+          endLng: b[1],
+          color,
+          stroke: ARC_STROKE_DEFAULT + (ARC_STROKE_FLAGGED - ARC_STROKE_DEFAULT) * t,
+          dashLen: f.worstSeverity === 'malicious' ? ARC_DASH_LEN_FLAGGED : 1,
+          dashGap: f.worstSeverity === 'malicious' ? ARC_DASH_GAP_FLAGGED : 0,
+          label: `${esc(f.fromCountry)} → ${esc(f.toCountry)}: ${f.count} ${f.count === 1 ? 'Transaktion' : 'Transaktionen'} · ${SEV_TEXT[f.worstSeverity] || 'Info'} · Börsen: ${esc(f.exchanges.length ? f.exchanges.join(', ') : '–')}`,
+        });
+      }
+    }
+
+    // LEGENDEN-ZÄHLER (OPERATIONELL definiert): Anzahl sichtbarer Nodes, für
+    // die assignedByAddress KEIN Eintrag mit nutzbarem Centroid (Array der
+    // Länge 2 mit endlichen Zahlen) vorliegt — umfasst Unzugeordnete,
+    // noPolygon-Treffer UND matchCountry-Treffer mit degeneriertem centroid:
+    // null; keine Summenformel. Ohne Attribution wäre jeder Node unzugeordnet
+    // (show:false blendet die Legende dann aus, der Wert bleibt ehrlich).
+    let unassignedCount = visibleNodes.length;
+    if (attribution) {
+      unassignedCount = 0;
+      for (const n of visibleNodes) {
+        const info = attribution.assignedByAddress.get(String(n.id ?? ''));
+        if (!(info && isUsableCentroid(info.centroid))) unassignedCount += 1;
+      }
+    }
+    const legend = { show: countryData.state === 'ready', unassigned: unassignedCount };
+
     return {
       points,
       arcs,
+      labels,
+      legend,
       ringSources,
       // Signaturen (SEKUNDÄR-Skip, s. Konstantenblock): umfassen die visuell
       // kodierenden Felder, sortiert — reine Umordnungen zählen nicht als
       // Änderung; Labels hinzugefügt, damit reine Label-Änderungen (u. a.
-      // displayAddr-Voll-/Kurzform) höchstens um den Deckel veralten.
+      // displayAddr-Voll-/Kurzform) höchstens um den Deckel veralten. Länder-
+      // punkte laufen über pointsSig (gleichen Felder), Fluss-Bögen über
+      // arcsSig, Länder-Beschriftungen und Legende über ihre eigenen Sigs.
       pointsSig: sigOfPoints(points),
       arcsSig: sigOfArcs(arcs),
       clusterSetSig: sigOfClusterSet(points),
+      labelsSig: sigOfLabels(labels),
+      legendSig: JSON.stringify(legend),
     };
   }
 
@@ -499,6 +933,15 @@ export function initGlobe(ctx) {
     return Array.from(ids).sort().join('\n');
   }
 
+  // Signatur der Länder-Beschriftungen (gleiches Muster wie Punkte/Bögen):
+  // Ländernamen sind englisch und unverändert; reine Umordnungen zählen nicht.
+  function sigOfLabels(labels) {
+    return labels
+      .map((l) => JSON.stringify([l.lat, l.lng, l.text, l.size, l.color, l.dotRadius, l.altitude]))
+      .sort()
+      .join('\n');
+  }
+
   function clearApplyTimer() {
     if (applyTimer) { clearTimeout(applyTimer); applyTimer = 0; }
   }
@@ -507,18 +950,22 @@ export function initGlobe(ctx) {
     if (ringTimer) { clearInterval(ringTimer); ringTimer = 0; }
   }
 
-  // Vollständige Anwendung von Punkten und Bögen — JEDER dieser Setter baut
-  // bei globe.gl die komplette Szene neu auf (sichtbarer „Reload“), deshalb
-  // nur unter dem Deckel bzw. über die definierten Ausnahmen.
+  // Vollständige Anwendung von Punkten, Bögen und Länder-Beschriftungen —
+  // JEDER dieser Setter baut bei globe.gl die komplette Szene neu auf
+  // (sichtbarer „Reload”), deshalb nur unter dem Deckel bzw. über die
+  // definierten Ausnahmen. Die Legende (DOM-Overlay) läuft im selben Takt.
   function applyPointsArcs(ds) {
     if (!buildDone || !globe) return false;
     try {
-      globe.pointsData(ds.points).arcsData(ds.arcs);
+      globe.pointsData(ds.points).arcsData(ds.arcs).labelsData(ds.labels);
     } catch { /* Renderer-Fehler: alter Stand bleibt, kein Crash */ return false; }
     lastApplyAt = Date.now();
     lastPointsSig = ds.pointsSig;
     lastArcsSig = ds.arcsSig;
     lastClusterSetSig = ds.clusterSetSig;
+    lastLabelsSig = ds.labelsSig;
+    lastLegendSig = ds.legendSig;
+    syncLegend(ds.legend);
     hasAppliedData = true;
     // Reduced Motion: keine animierte Kamera, statische Bildfassung
     // (zoomToFit(0), Muster drilldown.js:565-574) — wie bisher je Anwendung.
@@ -601,8 +1048,11 @@ export function initGlobe(ctx) {
       return;
     }
     // SEKUNDÄR: inhaltlich unverändert — keine Anwendung, kein nachlaufender
-    // Timer (0 Anwendungen trotz refresh-Aufrufen bei Cache-Treffern).
-    if (ds.pointsSig === lastPointsSig && ds.arcsSig === lastArcsSig) {
+    // Timer (0 Anwendungen trotz refresh-Aufrufen bei Cache-Treffern). Die
+    // Bedingung umfasst auch Länder-Beschriftungen und Legende (neue Felder
+    // des Länder-Layers) — Helfer unverändert, nur zusätzliche Prüfung.
+    if (ds.pointsSig === lastPointsSig && ds.arcsSig === lastArcsSig
+      && ds.labelsSig === lastLabelsSig && ds.legendSig === lastLegendSig) {
       clearApplyTimer();
       return;
     }
@@ -791,6 +1241,9 @@ export function initGlobe(ctx) {
     if (!el) return; // Null-Guard: kein #globe im DOM -> initGlobe bleibt passiv
     buildStarted = true;
     showNote(el, 'Weltkugel wird geladen …');
+    // Länder-Layer parallel zur Kugel laden (Lazy beim ersten activate(),
+    // fire-and-forget, fail-soft über die Drei-Zustands-Maschine).
+    ensureCountryData();
     try {
       await buildGlobe(el);
     } catch {
@@ -813,7 +1266,9 @@ export function initGlobe(ctx) {
   // Neuaufbau nach WebGL-Kontextverlust (rebuildGlobe). Wirft bei WebGL-/CDN-/
   // Konstruktionsfehlern — die Aufrufer zeigen showFallback.
   async function buildGlobe(el) {
-      if (!webglAvailable()) throw new Error('webgl');
+    countryLayerApplied = false; // Instanz-Flag zurücksetzen: NEUE Instanz, Polygone noch nicht gesetzt
+    const strokeColor = resolveStrokeColor(); // einmal je Instanz (getComputedStyle ist teuer)
+    if (!webglAvailable()) throw new Error('webgl');
       const loaded = await loadGlobeGl();
       if (!loaded || typeof window.Globe !== 'function') throw new Error('cdn');
       const g = window.Globe({ animateIn: !reducedMotion() })(el);
@@ -888,7 +1343,39 @@ export function initGlobe(ctx) {
         .ringMaxRadius(RING_MAX_RADIUS_DEG)
         .ringPropagationSpeed(RING_PROPAGATION_SPEED)
         .ringRepeatPeriod(RING_REPEAT_MS)
-        .ringsData([]);
+        .ringsData([])
+        // LÄNDER-LAYER (Attribution): Accessor-Verdrahtung PRO INSTANZ hier in
+        // buildGlobe — rebuildGlobe() erzeugt eine NEUE Instanz und leert den
+        // Container (el.innerHTML=''), außerhalb gesetzte Layer wären danach
+        // weg (Detach-Problem wie noteEl). Die Polygon-DATEN setzt die
+        // idempotente applyCountryLayer() (Instanz-Flag, Reset oben) am Ende
+        // dieser Funktion bzw. aus der Fetch-Fortsetzung; onPolygonClick/
+        // onPolygonHover werden bewusst NICHT verwendet — der Hover-Tooltip
+        // entsteht allein durch polygonLabel (immer-wahrer englischer Name).
+        // WICHTIG (Bundle-Fund 2026-09-30, live am gepinnten globe.gl@2.46.2
+        // verifiziert): Konstante STRING-/Zahl-Werte sind für die Polygon-
+        // Accessors WIRKUNGSLOS — der Accessor-Aufruf liefert dann undefined,
+        // die Grenzlinien bleiben unsichtbares Bundle-Weiß (visible=false).
+        // Alle konstanten Werte stehen deshalb als FUNKTIONEN (Muster der
+        // offiziellen globe.gl-Polygon-Beispiele).
+        .polygonsData([])
+        .polygonCapColor(() => GLOBE_POLYGON_FILL)
+        .polygonSideColor(() => GLOBE_POLYGON_FILL)
+        .polygonStrokeColor(() => strokeColor)
+        .polygonAltitude(() => GLOBE_POLYGON_ALTITUDE)
+        .polygonLabel((f) => esc(f && f.properties ? f.properties.name : ''))
+        // AKTIVE LÄNDER: labelsData hier initialisieren (leer), im Anwendungs-
+        // pfad (applyPointsArcs, gedämpfter Takt) neu gesetzt — so überlebt
+        // der gesamte Länder-Layer den einen WebGL-Kontext-Restore.
+        .labelsData([])
+        .labelLat((d) => d.lat)
+        .labelLng((d) => d.lng)
+        .labelText((d) => d.text)
+        .labelSize((d) => d.size)
+        .labelColor((d) => d.color)
+        .labelDotRadius((d) => d.dotRadius)
+        .labelAltitude((d) => d.altitude)
+        .labelResolution(2);
 
       // Start-Perspektive ohne ms-Argument: sofort, keine Kamerafahrt.
       g.pointOfView(POV_START);
@@ -914,7 +1401,12 @@ export function initGlobe(ctx) {
         resizeObs.observe(el);
       }
       buildDone = true;
-      showNote(el, GLOBE_NOTE);
+      // Länder-Layer anwenden, falls die Daten schon bereit sind (Reihenfolge
+      // vor der Notiz, damit der Hinweis den tatsächlichen Zustand trifft);
+      // sonst zieht die Fetch-Fortsetzung (ensureCountryData) ihn nach.
+      applyCountryLayer();
+      showNote(el, countryLayerActive() ? GLOBE_NOTE_COUNTRIES : GLOBE_NOTE);
+      syncGlobeAria(); // aria-label an den tatsächlichen Layer-Zustand koppeln
       // FIX-B: Kontextverlust-Ereignisse am Canvas (Capture-Phase) und
       // Sichtbarkeitsbeobachtung (IntersectionObserver + visibilitychange).
       bindContextEvents(el);

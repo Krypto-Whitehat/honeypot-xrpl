@@ -94,6 +94,57 @@
   text-align: center;
 }
 
+/* Länder-Legende des Attribution-Layers (globe.js ensureLegend): Overlay in
+   der Bühne nach dem Muster der Pflicht-Notiz .globe-note — weiße Fläche,
+   1px-Ink-Rand, Radius, klickdurchlässig (pointer-events none), keine Schrift
+   unter 12 px. Die Severity-Swatches nutzen die bestehenden Klassen .swatch/
+   .swatch-sev-* aus style.css:632-658 — kein zweites Farbsystem, deshalb
+   ist auch kein neuer Token nötig (alle Werte laufen über bestehende
+   Variablen). globe.js zeigt die Legende nur bei aktivem Länder-Layer und
+   re-erzeugt sie nach dem showNote-Muster, wenn rebuildGlobe den Container
+   geleert hat. */
+#globe .globe-legend {
+  position: absolute;
+  top: 12px;
+  inset-inline-end: 14px;
+  z-index: 2;
+  max-width: min(300px, calc(100% - 28px));
+  padding: 10px 12px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--a6-body);
+}
+
+#globe .globe-legend p {
+  margin: 0;
+}
+
+#globe .globe-legend-title {
+  font-weight: 650;
+  color: var(--a6-ink);
+}
+
+/* Severity-Reihen kompakt nebeneinander (Swatch + Text, Muster .legend-item
+   aus style.css:630). */
+#globe .globe-legend-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-end: 12px;
+}
+
+#globe .globe-legend-count {
+  color: var(--a6-body);
+}
+
+#globe .globe-legend-src {
+  color: var(--a6-muted);
+}
+
 /* Responsiv: Höhenstufen exakt wie #graph — 400 px ab 900 px
    (style.css:796/799), 320 px ab 560 px (style.css:823/827). */
 @media (max-width: 900px) {
@@ -116,7 +167,8 @@
 /* Reduced Motion: Die DOM-Seite friert ein; globe.js friert zusätzlich die
    Kugel-Animation ein (autoRotate aus, keine Puls-Ringe, zoomToFit(0) statt
    animierter Kamera) — die Daten werden weiterhin aktualisiert. CSS greift
-   zusätzlich, Vorbild style.css:835-844. */
+   zusätzlich, Vorbild style.css:835-844. Die Legende hat keine eigenen
+   Animationen und wird vom universalen Selektor unten mit abgedeckt. */
 @media (prefers-reduced-motion: reduce) {
   #globe,
   #globe *,
@@ -140,5 +192,22 @@
   #globe .globe-fallback {
     border: 1px solid CanvasText;
     background: Canvas;
+  }
+
+  #globe .globe-legend {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+}
+
+/* Responsiv (Legende): Randabstände wie .globe-note ab 560 px
+   (style.css-Vorbild oben) — die Kugel bleibt bedienbar, die Legende
+   verkleinert ihre Fläche statt zu überdecken. */
+@media (max-width: 560px) {
+  #globe .globe-legend {
+    top: 10px;
+    inset-inline-end: 10px;
+    max-width: calc(100% - 20px);
+    padding: 8px 10px;
   }
 }

@@ -4,8 +4,8 @@ bait-history.json
 seeds/
 *.seed
 
-# Laufzeit-Zustand
-data/
+# Laufzeit-Zustand (nur Projekt-Wurzel — public/data/ muss deploybar bleiben)
+/data/
 logs/
 monitor.log
 

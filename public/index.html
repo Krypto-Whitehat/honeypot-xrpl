@@ -122,7 +122,7 @@
       <p class="graph-disclaimer">Rollen (Source, Drainer, Kollektor, Relay) sind Heuristiken aus Ein-/Ausgrad und Geldfluss – kein Schuldnachweis.</p>
 
       <div id="graph" aria-label="Netzwerkgraph der erkannten Aktivitäten"></div>
-      <div id="globe" aria-label="Symbolische Weltkugel der Live-Aktivität" hidden></div>
+      <div id="globe" aria-label="Weltkugel der Live-Aktivität; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert" hidden></div>
 
       <ul class="cluster-list" id="cluster-list" aria-label="Cluster-Zusammenfassung" hidden></ul>
       <p class="empty" id="cluster-empty" hidden>Noch keine Cluster – warte auf Ledger.</p>
@@ -145,7 +145,7 @@
     <span class="foot-note">Anonymität der Köder: Seeds und Köder-Adressen werden vom Server nie ausgeliefert und vom Client nie gerendert.</span>
   </footer>
 
-  <script src="https://unpkg.com/vis-network@10.1.2/standalone/umd/vis-network.min.js"></script>
+  <script src="https://unpkg.com/vis-network@10.1.2/standalone/umd/vis-network.min.js" integrity="sha384-RDdG1CLOxjNlTHh4JYx/rnAueaMHbkBHmeHwrEyljMQw3LF0it4SkuNotIY/FPxD" crossorigin="anonymous"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

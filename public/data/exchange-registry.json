@@ -1,0 +1,337 @@
+{
+  "version": 1,
+  "updatedAt": "2026-09-30",
+  "note": "Sitzland = primäre juristische Entität der Börse (vereinfachte Heuristik)",
+  "entries": [
+    {
+      "address": "rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh",
+      "exchange": "Binance",
+      "country": "Cayman Is.",
+      "countryCode": "KY",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rEb8TK3gBgk5auZkwc6sHnwrGVJH8DuaLh",
+      "note": "XRPScan-Verzeichnis: „Binance (1)“, Domain binance.com, verifiziertes Label; Hotwallet, Destination Tag erforderlich"
+    },
+    {
+      "address": "rJb5KsHsDHF1YS5B5DU6QCkH5NsPaKQTcy",
+      "exchange": "Binance",
+      "country": "Cayman Is.",
+      "countryCode": "KY",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rJb5KsHsDHF1YS5B5DU6QCkH5NsPaKQTcy",
+      "note": "XRPScan-Verzeichnis: „Binance (2)“, Domain binance.com, verifiziertes Label; zweite betriebliche Wallet"
+    },
+    {
+      "address": "rrpNnNLKrartuEqfJGpqyDwPj1AFPg9vn1",
+      "exchange": "Bitstamp",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rrpNnNLKrartuEqfJGpqyDwPj1AFPg9vn1",
+      "note": "XRPScan-Verzeichnis: „Bitstamp-hot“, Domain bitstamp.net; Wurzeln in Slowenien, Robinhood-Übernahme 2025, Gesellschaft bleibt UK-registriert"
+    },
+    {
+      "address": "rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
+      "exchange": "Kraken",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rLHzPsX6oXkzU2qL12kHCH8G8cnZv1rBJh",
+      "note": "XRPScan-Verzeichnis: „Kraken (1)“, Domain kraken.com, verifiziertes Label; zentrale XRP-Hotwallet (Payward, Inc., San Francisco)"
+    },
+    {
+      "address": "rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns",
+      "exchange": "Uphold",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rMdG3ju8pgyVh29ELPWaDuA74CpWW6Fxns",
+      "note": "XRPScan-Verzeichnis: „Uphold (3)“, Domain uphold.com, verifiziertes Label; Uphold HQ Inc., Charleston (South Carolina)"
+    },
+    {
+      "address": "rsXT3AQqhHDusFs3nQQuwcA1yXRLZJAXKw",
+      "exchange": "Uphold",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rsXT3AQqhHDusFs3nQQuwcA1yXRLZJAXKw",
+      "note": "XRPScan-Verzeichnis: „Uphold (12)“, Domain uphold.com; großes Verwahrlager (laut Branchenberichten ~1,4 Mrd. XRP)"
+    },
+    {
+      "address": "rUzWJkXyEtT8ekSSxkBYPqCvHpngcy6Fks",
+      "exchange": "OKX",
+      "country": "Seychelles",
+      "countryCode": "SC",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rUzWJkXyEtT8ekSSxkBYPqCvHpngcy6Fks",
+      "note": "XRPScan-Verzeichnis: „OKX“, Domain okx.com, verifiziertes Label; Betreibergesellschaft Aux Cayes FinTech (Seychellen), große Standorte u. a. Hongkong, Singapur, Dubai"
+    },
+    {
+      "address": "rKV8HEL3vLc6q9waTiJcewdRdSFyx67QFb",
+      "exchange": "Crypto.com Exchange",
+      "country": "Singapore",
+      "countryCode": "SG",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rKV8HEL3vLc6q9waTiJcewdRdSFyx67QFb",
+      "note": "XRPScan-Verzeichnis: „Crypto.com Exchange (1)“, Domain crypto.com, verifiziertes Label; Betreiber Foris DAX Asia (Singapore), Gründung in Hongkong"
+    },
+    {
+      "address": "rJmXYcKCGJSayp4sAdp6Eo4CdSFtDVv7WG",
+      "exchange": "Crypto.com",
+      "country": "Singapore",
+      "countryCode": "SG",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rJmXYcKCGJSayp4sAdp6Eo4CdSFtDVv7WG",
+      "note": "XRPScan-Verzeichnis: „Crypto.com (3)“, Domain crypto.com, verifiziertes Label; App-/Zahlungsverkehr-Wallet"
+    },
+    {
+      "address": "rKNwXQh9GMjaU8uTqKLECsqyib47g5dMvo",
+      "exchange": "Crypto.com",
+      "country": "Singapore",
+      "countryCode": "SG",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rKNwXQh9GMjaU8uTqKLECsqyib47g5dMvo",
+      "note": "XRPScan-Verzeichnis: „Crypto.com (4)“, Domain crypto.com"
+    },
+    {
+      "address": "rMvCasZ9cohYrSZRNYPTZfoaaSUQMfgQ8G",
+      "exchange": "Bybit",
+      "country": "United Arab Emirates",
+      "countryCode": "AE",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rMvCasZ9cohYrSZRNYPTZfoaaSUQMfgQ8G",
+      "note": "XRPScan-Verzeichnis: „Bybit (4)“, Domain bybit.com, verifiziertes Label; Hauptsitz Dubai, Gründung in Singapur"
+    },
+    {
+      "address": "rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK",
+      "exchange": "Bitso",
+      "country": "Mexico",
+      "countryCode": "MX",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rLSn6Z3T8uCxbcd1oxwfGQN1Fdn5CyGujK",
+      "note": "XRPScan-Verzeichnis: „Bitso (3)“, Domain bitso.com, verifiziertes Label; Destination Tag erforderlich"
+    },
+    {
+      "address": "rQ3BaZdPRbGa1p91sM8UKpwJ2rkUJDG9Ad",
+      "exchange": "Bithumb",
+      "country": "South Korea",
+      "countryCode": "KR",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rQ3BaZdPRbGa1p91sM8UKpwJ2rkUJDG9Ad",
+      "note": "XRPScan-Verzeichnis: „Bithumb (9)“, Domain bithumb.com; eine von mehreren nummerierten Betriebswallets"
+    },
+    {
+      "address": "rNQEMJA4PsoSrZRn9J6RajAYhcDzzhf8ok",
+      "exchange": "Coincheck",
+      "country": "Japan",
+      "countryCode": "JP",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rNQEMJA4PsoSrZRn9J6RajAYhcDzzhf8ok",
+      "note": "XRPScan-Verzeichnis: „Coincheck (1)“, Domain coincheck.com, Twitter coincheckjp; hat laut XRPScan über 17.000 Konten aktiviert"
+    },
+    {
+      "address": "r97KeayHuEsDwyU1yPBVtMLLoQr79QcRFe",
+      "exchange": "bitbank",
+      "country": "Japan",
+      "countryCode": "JP",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/r97KeayHuEsDwyU1yPBVtMLLoQr79QcRFe",
+      "note": "XRPScan-Verzeichnis: „bitbank (4)“, Domain bitbank.cc, Twitter bitbank_inc"
+    },
+    {
+      "address": "raSZXZApFg7Nj1B5G6BnhoL6HcTqVMopJ3",
+      "exchange": "SBI VC Trade",
+      "country": "Japan",
+      "countryCode": "JP",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/raSZXZApFg7Nj1B5G6BnhoL6HcTqVMopJ3",
+      "note": "XRPScan-Verzeichnis: „SBI VC Trade (5)“, Domain www.sbivc.co.jp, Twitter sbivc_official"
+    },
+    {
+      "address": "rDCgaaSBAWYfsxUYhCk1n26Na7x8PQGmkq",
+      "exchange": "Poloniex",
+      "country": "Seychelles",
+      "countryCode": "SC",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rDCgaaSBAWYfsxUYhCk1n26Na7x8PQGmkq",
+      "note": "XRPScan-Verzeichnis: „Poloniex (1)“, Domain poloniex.com; Betreiber Polo Digital Assets (Seychelles)"
+    },
+    {
+      "address": "rhotcWYdfn6qxhVMbPKGDF3XCKqwXar5J4",
+      "exchange": "GateHub",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "gateway",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rhotcWYdfn6qxhVMbPKGDF3XCKqwXar5J4",
+      "note": "Betriebs-/Hot-Wallet des GateHub-Gateways (XRPScan-Label „gatehub-hot“, Domain gatehub.net, Twitter GateHub; aktiv); XRPL-Wallet-/Gateway-Plattform mit Trading, keine klassische CEX — GateHub Ltd. (London), Wurzeln in Slowenien"
+    },
+    {
+      "address": "rhub8VRN55s94qWKDv6jmDy1pUykJzF3wq",
+      "exchange": "GateHub (GateHub Fifth)",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rhub8VRN55s94qWKDv6jmDy1pUykJzF3wq",
+      "note": "EUR- und USD-Issuer von GateHub; XRPScan-Accountname gatehub/gatehub.net; gatehub.net JSON-LD: GateHub Limited, Level 3 207 Regent Street, London; kein eigenes Domain-Feld im Ledger"
+    },
+    {
+      "address": "rchGBxcD1A1C2tdxF6papQYZ8kjRKMYcL",
+      "exchange": "GateHub BTC",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rchGBxcD1A1C2tdxF6papQYZ8kjRKMYcL",
+      "note": "BTC-IOU-Issuer; XRPScan-Label GateHub BTC, verifiziert, Domain gatehub.net"
+    },
+    {
+      "address": "rcxJwVnftZzXqyH9YheB8TgeiZUhNo1Eu",
+      "exchange": "GateHub FLR",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rcxJwVnftZzXqyH9YheB8TgeiZUhNo1Eu",
+      "note": "FLR-IOU-Issuer; XRPScan-Label GateHub FLR, verifiziert, Domain gatehub.net"
+    },
+    {
+      "address": "rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
+      "exchange": "Bitstamp (Issuer)",
+      "country": "United Kingdom",
+      "countryCode": "GB",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rvYAfWj5gh67oV6fW32ZzP3Aw4Eubs59B",
+      "note": "Klassischer USD/BTC-Gateway-Issuer (nicht die Hotwallets der Top-Liste); Ledger-Domain-Hex 6269747374616D702E6E6574 = bitstamp.net; bitstamp.net-Footer: Bitstamp Ltd., 5 New Street Square, London"
+    },
+    {
+      "address": "rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+      "exchange": "Ripple (RLUSD)",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De",
+      "note": "RLUSD-Stablecoin-Issuer; Ledger-Domain-Hex = https://ripple.com/; XRPScan-Label RLUSD/Issuer verifiziert; offizielle Adressliste: docs.ripple.com/products/stablecoin/overview/token-addresses"
+    },
+    {
+      "address": "rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE",
+      "exchange": "Circle (USDC)",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rGm7WCVp9gb4jZHWTEtGUr4dd74z2XuWhE",
+      "note": "Nativer USDC-Issuer auf XRPL seit 2025; Ledger-Domain-Hex = https://circle.com; circle.com: Circle Internet Group, Inc., addressCountry US"
+    },
+    {
+      "address": "rsoLo2S1kiGeCcn6hCUXVrCpGMWLrRrLZz",
+      "exchange": "Sologenic (SOLO)",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "issuer",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rsoLo2S1kiGeCcn6hCUXVrCpGMWLrRrLZz",
+      "note": "SOLO-Issuer; Ledger-Domain-Hex = sologenic.com; XRPScan-Label verifiziert; Betreiber heute TX-Ökosystem (TX Labs, LC, Wyoming), hervorgegangen aus CoinField; Sitz für die Issuer-Entität nicht einzeln amtlich belegt"
+    },
+    {
+      "address": "rcoreNywaoz2ZCQ8Lg2EbSLnGuRBmun6D",
+      "exchange": "Coreum (CORE)",
+      "country": "United States of America",
+      "countryCode": "US",
+      "kind": "issuer",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rcoreNywaoz2ZCQ8Lg2EbSLnGuRBmun6D",
+      "note": "CORE-Issuer; Ledger-Domain-Hex = coreum.com (leitet auf tx.org); tx.org-Terms: TX Labs, LC, Wyoming LLC, Recht des US-Bundesstaats Wyoming; Sitzangabe ohne Straßenadresse"
+    },
+    {
+      "address": "rCSCManTZ8ME9EoLrSHHYKW8PPwWMgkwr",
+      "exchange": "CasinoCoin (CSC)",
+      "country": "Isle of Man",
+      "countryCode": "IM",
+      "kind": "issuer",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rCSCManTZ8ME9EoLrSHHYKW8PPwWMgkwr",
+      "note": "CSC-Issuer; XRPScan-Label verifiziert, Domain casinocoin.im; casinocoin.im-Footer: Eminence Ltd., 1 Mount Pleasant, Douglas, IM1 2PU, Isle of Man, Company Number 134232C"
+    },
+    {
+      "address": "rKiCet8SdvWxPXnAgYarFUXMh1zCPz432Y",
+      "exchange": "RippleFox",
+      "country": "China",
+      "countryCode": "CN",
+      "kind": "gateway",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rKiCet8SdvWxPXnAgYarFUXMh1zCPz432Y",
+      "note": "CNY/USD-Gateway seit 2014; Ledger-Domain-Hex = ripplefox.com; chinesischsprachige Gateway-Website ohne Impressum; Sitz China wahrscheinlich, nicht offiziell dokumentiert"
+    },
+    {
+      "address": "razqQKzJRdB4UxFPWf5NEpEG3WMkmwgcXA",
+      "exchange": "RippleChina (CNY)",
+      "country": "China",
+      "countryCode": "CN",
+      "kind": "gateway",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/razqQKzJRdB4UxFPWf5NEpEG3WMkmwgcXA",
+      "note": "CNY-Issuer; nur XRPScan-Namenslabel RippleChina, kein Domain-Feld im Ledger; aktives Konto, Standort nicht amtlich belegt"
+    },
+    {
+      "address": "rB3gZey7VWHYRqJHLoHDEJXJ2pEPNieKiS",
+      "exchange": "Mr. Exchange (JPY)",
+      "country": "Japan",
+      "countryCode": "JP",
+      "kind": "gateway",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rB3gZey7VWHYRqJHLoHDEJXJ2pEPNieKiS",
+      "note": "JPY-Gateway; Ledger-Domain-Hex = mr.exchange; Achtung: globalFreeze aktiv (Legacy-Gateway), Standort Japan nicht offiziell dokumentiert"
+    },
+    {
+      "address": "rh5jzTCdMRCVjQ7LT6zucjezC47KATkuvv",
+      "exchange": "xSPECTAR",
+      "country": "Netherlands",
+      "countryCode": "NL",
+      "kind": "issuer",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rh5jzTCdMRCVjQ7LT6zucjezC47KATkuvv",
+      "note": "xSPECTAR-Token-Issuer; XRPScan-Label verifiziert, Domain xspectar.com; AGB der Website unterliegen Recht der Niederlande, keine Impressumsangabe"
+    },
+    {
+      "address": "rK7D3QnTrYdkp1fGKKzHFNXZpqN8dUCfaf",
+      "exchange": "CoinField",
+      "country": "Canada",
+      "countryCode": "CA",
+      "kind": "exchange",
+      "confidence": "likely",
+      "source": "https://xrpscan.com/account/rK7D3QnTrYdkp1fGKKzHFNXZpqN8dUCfaf",
+      "note": "Kanadisch-stämmige Börse, Startplatz von Sologenic; XRPScan-Label verifiziert, Domain coinfield.com; Website derzeit nur Landingpage, amtliche Registrierung nicht verifizierbar (Drittangaben auch VAE)"
+    },
+    {
+      "address": "rU2mEJSLqBRkYLVTv55rFTgQajkLTnT6mA",
+      "exchange": "Coins.ph",
+      "country": "Philippines",
+      "countryCode": "PH",
+      "kind": "exchange",
+      "confidence": "verified",
+      "source": "https://xrpscan.com/account/rU2mEJSLqBRkYLVTv55rFTgQajkLTnT6mA",
+      "note": "Philippinische Börse/Wallet; XRPScan-Label verifiziert, Domain coins.ph; coins.ph-Footer: Betur Inc und DCPay Philippines Inc, reguliert von der Bangko Sentral ng Pilipinas"
+    }
+  ]
+}
