@@ -13,6 +13,10 @@
 //                      ODER Kompromittierungs-Alarm: ein Köder-Konto hat
 //                      selbst eine Transaktion initiiert (Zieladresse wird
 //                      bewusst NICHT im Reason-Text genannt)
+//   CONFIRMED Drainer — externe Berührung, deren Gegenpartei anschließend
+//                      >= sweepRatio (0.9) ihrer Balance an ein Ziel
+//                      abgeräumt hat: drainer=true, sweepRatio=<gemessen>,
+//                      Reason mit Marker "Drainer-Sweep:" (Unit-Vertrag)
 //   risk "suspect"   — jede andere Transaktion, die ein Köder-Konto berührt
 //                      (u. a. DEX-Offer-Berührung, NFToken-Angebote)
 // Funding-Kette via account_tx rückverfolgt (Tiefe 2, paginiert); das
@@ -26,8 +30,9 @@
 // dieser Store ist der interne Wahrheitsbestand inkl. txHash-Evidenz.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "xrpl";
+import { analyzeLedger, DEFAULT_THRESHOLDS } from "../lib/detector.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -174,6 +179,135 @@ async function traceFunding(address, depth) {
     log(`account_tx für ${address} fehlgeschlagen: ${err.message}`);
   }
   return out.slice(0, 8);
+}
+
+// ---------- Drainer-Sweep-Prüfung (Unit A: Touch-to-Sweep-Loop) ----------
+// Schließt den Loop: nach einer externen Berührung des Köders (Fall B,
+// bestehender malicious-Pfad) wird die ausgehende Historie der Gegenpartei
+// geprüft. JSON-RPC account_tx über HTTPS — exakt das Muster von
+// lib/threats-service.mjs:38-91 (dependency-frei, kein neues WSS-Abonnement).
+// Die Bestätigung läuft über die BESTEHENDE Drainer-Sweep-Regel
+// (lib/detector.mjs) inkl. ihrer Präconditions; der gemessene Sweep-Anteil
+// landet als sweepRatio im Threat-Eintrag (Vertrag: drainer=true, Reason-
+// Marker "Drainer-Sweep:"). Frische-Signal (Hebel 3): firstSeenAt wird aus
+// der Berührungs-Zeit befüllt, damit die isFresh-Präcondition vom
+// Touch-Pfad erfüllbar ist.
+const RPC_URL = config.wss.replace(/^wss:/, "https:");
+
+async function rpc(command, params) {
+  const res = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ method: command, params: [{ ...params }] }),
+  });
+  if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
+  const data = await res.json();
+  if (data?.result?.error) {
+    const err = new Error(`RPC error: ${data.result.error}`);
+    err.data = data.result;
+    throw err;
+  }
+  return data.result;
+}
+
+// account_tx (paginiert, neueste zuerst) über HTTPS — Muster
+// lib/threats-service.mjs:74-91; maxEntries begrenzt das Fenster.
+async function fetchAccountTxsRpc(address, maxEntries) {
+  const entries = [];
+  let marker;
+  do {
+    const result = await rpc("account_tx", {
+      account: address,
+      ledger_index_min: -1,
+      ledger_index_max: -1,
+      binary: false,
+      forward: false,
+      limit: 20,
+      ...(marker ? { marker } : {}),
+    });
+    entries.push(...(result?.transactions ?? []));
+    marker = result?.marker;
+  } while (marker && entries.length < maxEntries);
+  return entries.slice(0, maxEntries);
+}
+
+// Balance-Vorwert aus meta (AccountRoot ModifiedNode) — identisch zu
+// lib/detector.mjs:181-191 (Sweep-Referenz der bestehenden Regel).
+function prevBalanceOf(meta) {
+  const nodes = Array.isArray(meta?.AffectedNodes) ? meta.AffectedNodes : [];
+  for (const n of nodes) {
+    const mod = n?.ModifiedNode;
+    if (mod?.LedgerEntryType === "AccountRoot" && mod.PreviousFields?.Balance != null) {
+      const b = Number(mod.PreviousFields.Balance);
+      if (Number.isFinite(b)) return b;
+    }
+  }
+  return null;
+}
+
+// Gemessener Sweep-Anteil der ausgehenden Zahlungen: max über ausgehende
+// Zahlungen von drops / (prevBal ?? inXrp) — dieselbe Formel wie die
+// Bestandsregel (lib/detector.mjs:461-467). null ohne ausgehende Zahlung.
+function measureSweepRatio(entries, toucher) {
+  let inXrp = 0;
+  const outs = [];
+  for (const entry of entries) {
+    if (entry?.validated === false) continue;
+    const tx = entry.tx_json ?? entry.tx ?? entry;
+    if (!tx || tx.TransactionType !== "Payment") continue;
+    const raw = tx.Amount ?? tx.DeliverMax;
+    if (typeof raw !== "string") continue;
+    const drops = Number(raw);
+    if (!Number.isFinite(drops)) continue;
+    if (tx.Destination === toucher && tx.Account !== toucher) {
+      inXrp += drops;
+    } else if (tx.Account === toucher && tx.Destination) {
+      outs.push({ drops, prevBal: prevBalanceOf(entry.meta) });
+    }
+  }
+  let maxRatio = null;
+  for (const o of outs) {
+    const ref = o.prevBal != null ? o.prevBal : inXrp;
+    if (ref > 0) {
+      const ratio = o.drops / ref;
+      if (maxRatio == null || ratio > maxRatio) maxRatio = ratio;
+    }
+  }
+  return maxRatio;
+}
+
+// Bestätigung des Sweeps über die bestehende Regel (lib/detector.mjs):
+// liefert den gemessenen Anteil bei bestätigtem Drainer, sonst null.
+const SWEEP_TX_LIMIT = 100; // Fenster pro Gegenpartei (Budget wie traceFunding)
+
+// Testnaht: Fixture-Ersatz für die account_tx-Abfrage (monitor.test.mjs).
+// Produktion nutzt den Default (HTTPS-RPC).
+let sweepFetchImpl = fetchAccountTxsRpc;
+export function setSweepFetch(fn) {
+  sweepFetchImpl = typeof fn === "function" ? fn : fetchAccountTxsRpc;
+}
+
+async function checkDrainerSweep(counterparty, touchTime, fetchTxs = sweepFetchImpl) {
+  let entries;
+  try {
+    entries = await fetchTxs(counterparty, SWEEP_TX_LIMIT);
+  } catch (err) {
+    log(`Sweep-Prüfung: account_tx fehlgeschlagen: ${err.message}`);
+    return null;
+  }
+  const ratio = measureSweepRatio(entries, counterparty);
+  if (ratio == null || ratio < DEFAULT_THRESHOLDS.sweepRatio) return null;
+  // Bestätigung über die bestehende Drainer-Sweep-Regel inkl. Präconditions
+  // (Frische-Signal Hebel 3: firstSeenAt aus der Berührungs-Zeit).
+  const seenAt = Date.parse(touchTime);
+  const ctx = Number.isFinite(seenAt)
+    ? { firstSeenAt: new Map([[counterparty, seenAt]]) }
+    : {};
+  const { findings } = analyzeLedger({ transactions: entries }, ctx);
+  const confirmed = findings.some(
+    (f) => f.ruleId === "drainer-sweep" && f.address === counterparty
+  );
+  return confirmed ? ratio : null;
 }
 
 // Meta-Scan: berührt ein Ledger-Objekt (Offer / NFTokenOffer) ein Köder-Konto?
@@ -340,6 +474,24 @@ async function handleTx(event) {
     }
   }
 
+  // ---------- Unit A: Touch-to-Sweep-Loop schließen ----------
+  // Nur der bestehende malicious-Pfad: die ausgehende Historie der
+  // Gegenpartei wird geprüft und die bestehende Drainer-Sweep-Regel läuft
+  // gegen sie. Bestätigter Sweep stuft das Threat auf CONFIRMED Drainer hoch
+  // (Vertrag: drainer=true, sweepRatio, Reason-Marker "Drainer-Sweep:").
+  if (risk === "malicious" && !(threats.get(counterparty)?.drainer)) {
+    const ratio = await checkDrainerSweep(counterparty, time);
+    if (ratio != null) {
+      const fresh = threats.get(counterparty);
+      if (fresh) {
+        fresh.risk = "malicious";
+        fresh.drainer = true;
+        fresh.sweepRatio = ratio;
+        fresh.reason = `Drainer-Sweep: frisch finanziert und ${Math.round(ratio * 100)} % der Balance an ein Ziel abgeräumt.`;
+      }
+    }
+  }
+
   saveThreats();
   log(`Ereignis: ${txType} · risk=${risk} · Gegenpartei=${counterparty} · honeypot=${hpLabel}${viaOrderbook ? " (Orderbuch)" : ""} · hash=${shortHash}`);
 }
@@ -375,7 +527,22 @@ process.on("SIGINT", () => {
   process.exit(0);
 });
 
-main().catch((err) => {
-  console.error(`[monitor] Start fehlgeschlagen: ${err.message}`);
-  process.exit(1);
-});
+// ---------- Exporte für monitor.test.mjs ----------
+// handleTx & Co. sind exportiert, damit Tests den Touch-to-Sweep-Loop mit
+// Fixtures üben können (setSweepFetch ersetzt die account_tx-Abfrage).
+export { handleTx, checkDrainerSweep, measureSweepRatio };
+export function getThreat(address) {
+  return threats.get(address) ?? null;
+}
+
+// main() läuft nur bei direkter Ausführung (node monitor/monitor.mjs);
+// Importe (Tests) bleiben nebenwirkungsfrei: kein WSS-Connect, kein
+// Subscribe.
+const invokedDirectly =
+  process.argv[1] != null && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error(`[monitor] Start fehlgeschlagen: ${err.message}`);
+    process.exit(1);
+  });
+}

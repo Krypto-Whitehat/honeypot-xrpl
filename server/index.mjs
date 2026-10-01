@@ -32,6 +32,7 @@ import {
 } from "../lib/sanitize.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
+import { checkDrainerSweepFromEntries } from "../lib/threats-service.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -249,9 +250,10 @@ app.get("/api/account-report", async (req, res) => {
 // Kontakte zu bekannten maliziösen/verdächtigen Adressen (Zahlungen,
 // Trustlines, DEX-Orders, Escrow/Check/Payment-Kanäle, generisch Absender/Ziel).
 //
-// PRIVATSPHARE: Die abgefragte Adresse wird NICHT geloggt und NICHT persistiert
-// (kein Eintrag in logs/ oder data/); der 60-Sekunden-Ergebnis-Cache ist rein
-// im Prozess-Speicher.
+// PRIVATSPHÄRE: Die abgefragte Adresse wird NICHT geloggt; der 60-Sekunden-
+// Ergebnis-Cache ist rein im Prozess-Speicher. Ausnahme (Unit B): bestätigte
+// Drainer werden in die öffentliche Historie (data/history.json) aufgenommen
+// — alle übrigen Checks bleiben nicht persistiert.
 //
 // KÖDERSCHUTZ: Adressen aus der Bait-Union werden mit derselben generischen
 // Fehlerantwort abgewiesen wie ungültige Adressen — die API gibt nicht preis,
@@ -356,6 +358,30 @@ app.get("/api/check/:address", async (req, res) => {
       }
     }
 
+    // ---------- Unit B: Besucher-Fang (Drainer) ----------
+    // Berührte die geprüfte Adresse einen Köder (ausgehende Zahlung an einen
+    // Köder der rotierenden UNION), läuft die bestehende Drainer-Sweep-
+    // Regel gegen die bereits abgefragte Historie — Bestätigung wie Unit A
+    // (monitor.mjs). Bestätigte Drainer werden zusätzlich in die öffentliche
+    // Historie (data/history.json) aufgenommen — bestehender Merge-/Save-
+    // Pfad, best-effort.
+    let touchTime = null;
+    for (const entry of entries) {
+      if (entry?.validated === false) continue;
+      const tx = entry.tx_json ?? entry.tx ?? entry;
+      if (!tx || tx.TransactionType !== "Payment") continue;
+      if (tx.Account !== addr || !baitLabels.has(tx.Destination)) continue;
+      const t =
+        entry.close_time_iso ??
+        (typeof tx.date === "number" && Number.isFinite(tx.date)
+          ? new Date((tx.date + 946684800) * 1000).toISOString()
+          : null);
+      if (t && (touchTime == null || t > touchTime)) touchTime = t;
+    }
+    const drainerHit = touchTime
+      ? checkDrainerSweepFromEntries(entries, addr, touchTime)
+      : null;
+
     const result = {
       address: addr,
       network: config.network,
@@ -371,6 +397,43 @@ app.get("/api/check/:address", async (req, res) => {
             ? "Prüfung läuft gegen das Testnet — echte Community-Adressen existieren meist nur im Mainnet."
             : null,
     };
+    if (drainerHit) {
+      // Vertrag (identisch zu Unit A): drainer=true, sweepRatio, risk,
+      // Reason-Marker "Drainer-Sweep:".
+      result.drainer = true;
+      result.sweepRatio = drainerHit.ratio;
+      result.risk = "malicious";
+      result.reason = `Drainer-Sweep: frisch finanziert und ${Math.round(drainerHit.ratio * 100)} % der Balance an ein Ziel abgeräumt.`;
+      // Best-effort-Append über den BESTEHENDEN lokalen Merge-/Save-Pfad
+      // (atomar via tmp+rename); Persistenzfehler kippen den Check nicht.
+      const touchMs = Date.parse(touchTime);
+      const seenMs = Number.isFinite(touchMs) ? touchMs : 0;
+      try {
+        const existing = await loadLocalHistory(HISTORY_FILE);
+        const merged = mergeHistory(
+          existing,
+          [
+            {
+              members: [addr],
+              label: "Drainer",
+              totalDrops: drainerHit.drops,
+              txCount: entries.length,
+              firstSeen: seenMs,
+              lastSeen: seenMs,
+              rules: ["drainer-sweep"],
+              severity: "malicious",
+              sightings: 1,
+              lastReportedAt: Date.now(),
+            },
+          ],
+          Date.now(),
+          baitLabels
+        );
+        if (merged.changed) await saveLocalHistory(HISTORY_FILE, merged.list);
+      } catch (err) {
+        console.error(`[history] Drainer-Meldung fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+      }
+    }
     checkCache.set(addr, { time: Date.now(), result });
     res.json(result);
   } catch (err) {
