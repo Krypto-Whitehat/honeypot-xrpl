@@ -141,6 +141,19 @@ export function maxBudgetForQuota(maxResolve, opts = {}) {
   return Math.max(0, Math.floor(ceiling / (1 + m)));
 }
 
+// Pure: Cursor-Seed für den ersten Tick. Der Walk startet NICHT bei Index 0
+// (Genesis) — der Catch-up von dort wäre unendlich, und der öffentliche
+// Validator liefert alte Blöcke nicht mehr (fetcher -> null, Cursor bleibt 0).
+// Stattdessen startet er im REZENTEN VERGANGENEN: validatedIndex minus
+// lookbackBlocks (~1 Monat), begrenzt auf >= 1. validatedIndex null/ungültig
+// -> null (kein Seed, Cursor bleibt). lookbackBlocks <= 0 -> validatedIndex.
+export function seedCursor(validatedIndex, lookbackBlocks) {
+  const v = Number(validatedIndex);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  const lb = Math.max(0, Math.floor(Number(lookbackBlocks) || 0));
+  return Math.max(1, Math.floor(v) - lb);
+}
+
 // Tick-Deadline (Wall-Clock-Guard): gesetzt vom Handler, cleared in finally.
 // rpc() wirft, wenn ein genanntes Quota-Fenster die Restlaufzeit übersteigt —
 // statt die Function über maxDuration zu hämmern (Muster
@@ -244,6 +257,28 @@ function budgetOf() {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BUDGET;
 }
 
+// ENV-konfigurierbarer Lookback (Default 0 = Live-Edge). Ein positiver Lookback
+// gibt dem Walk eine initiale Historie (Catch-up ~Stunden); Default 0 startet
+// sofort am Live-Edge und akkumuliert Historie natürlch über die Zeit. Ein
+// großer Lookback (~1 Monat) wäre quota-mäßig infeasibel (Budget ~1 Block/Tick
+// gegen ~3–5 s Blockzeit -> Catch-up über Wochen).
+function lookbackBlocks() {
+  const n = Number(process.env.ADVANCE_LOOKBACK);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
+
+// Cursor-Seeding-Entscheidung: ein frischer/leerer Cursor (<= 0) startet NICHT
+// bei Genesis (der öffentliche Validator liefert alte Blöcke nicht mehr —
+// Fetcher -> null, Cursor bleibt 0). Stattdessen wird er auf den aktuellen
+// Validated-Index minus Lookback gesetzt (ein zusätzlicher RPC-Call, nur beim
+// Seed). Bereits fortgeschrittene Cursor (> 0) bleiben unverändert.
+async function seedCursorIfFresh(cursor) {
+  if (Number(cursor) > 0) return cursor;
+  const led = await rpc("ledger", { ledger_index: "validated" });
+  const seed = seedCursor(Number(led?.ledger_index), lookbackBlocks());
+  return seed != null ? seed : cursor;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   if (!hasPersistence()) {
@@ -258,9 +293,12 @@ export default async function handler(req, res) {
     const { doc } = await readFlowStateGitHub();
     // (ii) Engine-Kontext EINMAL pro Tick (siehe buildCtx-Kommentar).
     const ctx = await buildCtx();
+    // (ii.5) Cursor-Seeding: ein frischer/leerer Cursor startet am Live-Edge
+    // (minus Lookback), nicht bei Genesis — sonst würde der Walk nie vorrücken.
+    const cursor = await seedCursorIfFresh(doc.cursor);
     // (iii) transport-agnostisches Advance über das ENV-Budget.
     const advanceResult = await advance({
-      cursor: doc.cursor,
+      cursor,
       budget,
       now,
       fetcher: (idx) => fetchBlock(idx, ctx),
