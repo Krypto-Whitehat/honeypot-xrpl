@@ -43,6 +43,11 @@ import {
   rateLimitHistory,
   clientKeyOf,
 } from "../lib/history.mjs";
+import {
+  parseFlowStateText,
+  projectFlowStateView,
+  emptyFlowStateDoc,
+} from "../lib/flow-state.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -225,6 +230,32 @@ app.get("/api/history", async (req, res) => {
   } catch (err) {
     console.error(`[history] GET /api/history fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
     res.status(500).json({ error: "Historie nicht verfügbar." });
+  }
+});
+
+// ---------- Flow-Host (GET /api/flow-state) ----------
+// Lokaler Spiegel der Vercel-Lesezweige api/flow-state.js: liest den
+// akkumulierten Flow-State aus data/flow-state.json (lokale Datei-Persistenz,
+// KEIN Netz-Call — die GitHub-Persistenz läuft nur in der Vercel-Function)
+// und liefert die NORMALISIERTE renderbare Projektion (projectFlowStateView,
+// lib/flow-state.mjs). Datei fehlt -> leeres Dokument (ehrlicher
+// Leerzustand); Parse-Fehler -> neutrale 500 (Muster /api/history oben).
+const FLOW_STATE_FILE = path.join(DATA_DIR, "flow-state.json");
+
+app.get("/api/flow-state", async (req, res) => {
+  try {
+    res.setHeader("cache-control", "no-store");
+    let doc;
+    try {
+      doc = parseFlowStateText(fs.readFileSync(FLOW_STATE_FILE, "utf8"));
+    } catch (err) {
+      if (err && err.code === "ENOENT") doc = emptyFlowStateDoc(); // Anlege-Fall
+      else throw err; // Korruption -> neutrale 500
+    }
+    res.json(projectFlowStateView(doc));
+  } catch (err) {
+    console.error(`[flow-state] GET /api/flow-state fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+    res.status(500).json({ error: "Flow-State nicht verfügbar." });
   }
 });
 
