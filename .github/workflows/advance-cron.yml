@@ -1,0 +1,30 @@
+# Trigger für den Live-Ledger-Walk: ruft POST /api/advance alle 5 Minuten auf.
+# Kein Secret nötig — der Endpunkt ist ein öffentlicher POST; die GitHub-Token
+# für das Datenrepo liegt ausschließlich als ENV GITHUB_HISTORY_TOKEN im
+# Vercel-Projekt (fail-closed 503 ohne Token, api/advance.js).
+#
+# Warum GitHub Actions und nicht vercel.json crons: der Hobby-Plan erlaubt laut
+# Vercel-Doku nur Cron-Expressions mit höchstens 1 Lauf pro Tag; häufigere
+# Expressions lassen den Deploy fehlschlagen (README, Abschnitt Cron-Trigger).
+# GitHub Actions funktioniert unabhängig vom Vercel-Plan; 5 min ist die
+# kleinste erlaubte Scheduling-Frequenz.
+name: Advance-Trigger (Live-Walk alle 5 Minuten)
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST /api/advance
+        run: |
+          code=$(curl -s -o response.json -w "%{http_code}" -X POST https://honeypot-xrpl.vercel.app/api/advance)
+          echo "HTTP $code"
+          cat response.json
+          # 200 = Tick gelaufen; 503 = fail-closed (Vercel-ENV GITHUB_HISTORY_TOKEN fehlt) —
+          # beides dokumentiert; der Workflow scheitert nur bei Transport-/5xx-Fehlern außer 503.
+          if [ "$code" != "200" ] && [ "$code" != "503" ]; then exit 1; fi
