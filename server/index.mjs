@@ -48,6 +48,12 @@ import {
   projectFlowStateView,
   emptyFlowStateDoc,
 } from "../lib/flow-state.mjs";
+import {
+  parseBlockWindowText,
+  projectBlockWindow,
+  dayOf,
+  emptyBlockWindow,
+} from "../lib/block-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -278,6 +284,54 @@ app.get("/api/flow-state", async (req, res) => {
   } catch (err) {
     console.error(`[flow-state] GET /api/flow-state fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
     res.status(500).json({ error: "Flow-State nicht verfügbar." });
+  }
+});
+
+// ---------- Block-Fenster (GET /api/block-window) ----------
+// Lokaler Spiegel der Vercel-Function api/block-window.js: liest die Tages-
+// Chunks aus data/block-window/<YYYY-MM-DD>.json (lokale Datei-Persistenz,
+// KEIN Netz-Call) und liefert dieselbe Projektion (projectBlockWindow:
+// Stunden-Rollups + Flag-Detail). Fehlende Chunks -> leerer Tag
+// (emptyBlockWindow, ehrlicher Leerzustand); Parse-Fehler -> neutrale 500.
+const BLOCK_WINDOW_LOCAL_DIR = path.join(DATA_DIR, "block-window");
+const BW_RANGES = { "24h": 24, "3d": 72, "7d": 168 }; // Stunden
+
+app.get("/api/block-window", async (req, res) => {
+  try {
+    res.setHeader("cache-control", "no-store");
+    const rawRange = String(req?.query?.range ?? "24h").trim();
+    const hours = BW_RANGES[rawRange];
+    if (!hours) {
+      return res.status(400).json({ error: "Ungültiger range (24h|3d|7d)." });
+    }
+    const now = Date.now();
+    const from = now - hours * 3600 * 1000;
+    const docs = [];
+    for (let back = 0; back <= Math.ceil(hours / 24); back++) {
+      const day = dayOf(now - back * 24 * 60 * 60 * 1000);
+      if (!day || docs.some((e) => e.day === day)) continue;
+      let doc;
+      try {
+        doc = parseBlockWindowText(fs.readFileSync(path.join(BLOCK_WINDOW_LOCAL_DIR, `${day}.json`), "utf8"));
+      } catch (err) {
+        if (err && err.code === "ENOENT") doc = emptyBlockWindow(day); // fehlender Tag -> leer
+        else throw err; // Korruption -> neutrale 500
+      }
+      docs.push({ day, doc });
+    }
+    const { buckets, flagged } = projectBlockWindow(docs.map((e) => e.doc), { fromMs: from, toMs: now });
+    const updatedAt = docs.reduce((m, e) => Math.max(m, Number(e.doc?.updatedAt) || 0), 0) || null;
+    let cursor = 0;
+    try {
+      cursor = parseFlowStateText(fs.readFileSync(FLOW_STATE_FILE, "utf8")).cursor ?? 0;
+    } catch {
+      /* fehlende Datei -> 0 (ehrlicher Leerzustand) */
+    }
+    const validatedIndex = await fetchFlowValidatedIndex();
+    res.json({ range: rawRange, from, to: now, updatedAt, buckets, flagged, cursor, validatedIndex });
+  } catch (err) {
+    console.error(`[block-window] GET /api/block-window fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+    res.status(500).json({ error: "Block-Fenster nicht verfügbar." });
   }
 });
 
@@ -653,7 +707,7 @@ app.get("/api/ledger", async (req, res) => {
 // künftige Server-Dateien wie lib/account-report.mjs bleiben lokal privat.
 // stride.mjs (2026-10-02): statischer Import von public/app.js:52 — fehlt er
 // hier, bricht die gesamte Modul-Evaluation des Live-Dashboards (404).
-const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs"]);
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs"]);
 app.get("/lib/:name", (req, res) => {
   if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
   res.sendFile(path.join(ROOT, "lib", req.params.name));
