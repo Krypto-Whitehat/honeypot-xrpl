@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeLedger } from "../lib/detector.mjs";
+import { strideHashes } from "../lib/stride.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
 import { sanitizeText } from "../lib/sanitize.mjs";
@@ -45,7 +46,11 @@ const baitLabels = new Map();
   .forEach((addr, i) => baitLabels.set(addr, `HP-${i + 1}`));
 
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-const MAX_RESOLVE = 40; // Hash-Auflösungsbudget pro Snapshot (Serverless-Budget)
+const MAX_RESOLVE = 6; // Hash-Auflösungsbudget pro Snapshot (Quota-Bilanz
+                       // 2026-10-02: 7 Commands × 700 Units = 4.900 Units pro
+                       // Snapshot; geteilt mit Cron-Tick 2.450/2 min und
+                       // flow-state ≤700/min -> 8.050 <= 10.000 pro 60-s-
+                       // Fenster. Operator-Alternative bei 1-min-Cron: 4.)
 const PARALLEL = 8; // max. 8 parallele tx-Calls (verifiziertes Muster)
 const CACHE_MS = 60000; // 60-s-Cache wie threats-service
 const ERROR_CACHE_MS = 5000; // kurzer Negativ-Cache: Wiederholte Anfragen im
@@ -79,9 +84,13 @@ async function rpc(method, params, tries = 3) {
 }
 
 // Hash-Strings -> volle tx-Objekte (tx liefert Felder + meta flach in result).
+// strideHashes statt slice(0, MAX_RESOLVE) (Kritiker-Befund 2026-10-02):
+// gleiche Budget-Kappe, aber gleichmäßige Stichprobe über den Block statt
+// systematischem Blockanfang-Bias (lib/stride.mjs) — derselbe Fix wie
+// public/app.js:1527 und api/advance.js.
 async function resolveHashes(hashes) {
   const entries = [];
-  const list = hashes.slice(0, MAX_RESOLVE);
+  const list = strideHashes(hashes, MAX_RESOLVE);
   for (let i = 0; i < list.length; i += PARALLEL) {
     const chunk = list.slice(i, i + PARALLEL);
     const results = await Promise.all(

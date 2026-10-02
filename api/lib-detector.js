@@ -11,7 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs"]);
+const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs"]);
 
 export default async function handler(req, res) {
   try {

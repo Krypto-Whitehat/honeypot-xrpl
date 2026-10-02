@@ -242,6 +242,27 @@ app.get("/api/history", async (req, res) => {
 // Leerzustand); Parse-Fehler -> neutrale 500 (Muster /api/history oben).
 const FLOW_STATE_FILE = path.join(DATA_DIR, "flow-state.json");
 
+// validatedIndex für die Rückstands-Anzeige (Kritiker-Befund 2026-10-02):
+// lokal identische Semantik wie api/flow-state.js:46-67 — EIN
+// ledger_index:'validated'-Call mit 60-s-Prozess-Cache; Fehler -> null
+// (ehrlicher Leerzustand im Client, ebenfalls kurz gecacht).
+let flowValidatedCache = null; // { time, index } — nur im Prozess-Speicher
+async function fetchFlowValidatedIndex() {
+  if (flowValidatedCache && Date.now() - flowValidatedCache.time < 60000) {
+    return flowValidatedCache.index;
+  }
+  let index = null;
+  try {
+    const result = await rpcFetch("ledger", { ledger_index: "validated" }, 1);
+    const n = Number(result?.ledger_index);
+    if (Number.isFinite(n) && n > 0) index = Math.floor(n);
+  } catch {
+    /* null -> ehrlicher Leerzustand im Client */
+  }
+  flowValidatedCache = { time: Date.now(), index };
+  return index;
+}
+
 app.get("/api/flow-state", async (req, res) => {
   try {
     res.setHeader("cache-control", "no-store");
@@ -252,7 +273,8 @@ app.get("/api/flow-state", async (req, res) => {
       if (err && err.code === "ENOENT") doc = emptyFlowStateDoc(); // Anlege-Fall
       else throw err; // Korruption -> neutrale 500
     }
-    res.json(projectFlowStateView(doc));
+    const validatedIndex = await fetchFlowValidatedIndex();
+    res.json({ ...projectFlowStateView(doc), validatedIndex });
   } catch (err) {
     console.error(`[flow-state] GET /api/flow-state fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
     res.status(500).json({ error: "Flow-State nicht verfügbar." });
@@ -626,10 +648,12 @@ app.get("/api/ledger", async (req, res) => {
 });
 
 // Engine für den Browser-Import: /lib/detector.mjs (single source of truth).
-// WHITELIST (identisch zu api/lib-detector.js:14): nur die drei Browser-
+// WHITELIST (identisch zu api/lib-detector.js:14): nur die vier Browser-
 // Engines werden ausgeliefert — lib/history.mjs (Köder-Filter-Engine) und
 // künftige Server-Dateien wie lib/account-report.mjs bleiben lokal privat.
-const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs"]);
+// stride.mjs (2026-10-02): statischer Import von public/app.js:52 — fehlt er
+// hier, bricht die gesamte Modul-Evaluation des Live-Dashboards (404).
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs"]);
 app.get("/lib/:name", (req, res) => {
   if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
   res.sendFile(path.join(ROOT, "lib", req.params.name));

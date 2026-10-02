@@ -8,14 +8,19 @@
  *     dieses Abo mit "ledgerClosed"-Events (ledger_index, ledger_time,
  *     txn_count, ledger_hash) OHNE transactions-Feld — die Spec-Annahme
  *     "Hash-Strings im Event" gilt für diesen Endpunkt nicht.
- *   - Deshalb: pro ledgerClosed wird derselbe WebSocket für EIN "ledger"-
- *     Kommando mit expand:true genutzt (verifiziert: liefert volle
- *     Tx-Objekte in result.ledger.transactions; Meta-Feld heißt dort
- *     "metaData" und wird zu {tx_json, meta} normalisiert, damit
- *     analyzeLedger es sieht). Falls ein Server trotzdem Hash-Strings
- *     liefert, greift die "tx"-Einzelauflösung (MAX_RESOLVE/PARALLEL).
- *     Unvollständig aufgelöste Ledger werden auf der Karte als "teilweise"
- *     gekennzeichnet, nie als stiller Totalausfall.
+ *   - Deshalb: pro analysiertem ledgerClosed wird derselbe WebSocket für EIN
+ *     "ledger"-Kommando (transactions:true, OHNE expand:true) genutzt —
+ *     expand:true war die dokumentierte Quota-Hauptlast (lib/live-gate.mjs:7-15)
+ *     und ist live verifiziert durch den Plain-Call ersetzt (2026-10-02:
+ *     ledger(transactions:true) liefert Hash-Strings, error=none). Die
+ *     Hash-Strings werden über die "tx"-Einzelauflösung mit Budget-Kappe
+ *     (MAX_RESOLVE, strideHashes — gleichmäßige Stichprobe statt
+ *     Blockanfang-Bias) aufgelöst; Blöcke werden mit ANALYZE_EVERY_N_BLOCKS
+ *     gesampelt, damit ledger- + tx-Kommandos zusammen unter dem kalibrierten
+ *     Deckel QUOTA_CALLS_PER_MIN bleiben. Unvollständig aufgelöste Ledger
+ *     werden auf der Karte als "teilweise" gekennzeichnet, nie als stiller
+ *     Totalausfall; nicht analysierte Blöcke tragen ein ehrliches Sampling-
+ *     Badge.
  *   - Analyse jedes Blocks mit analyzeLedger aus lib/detector.mjs —
  *     dieselbe Engine wie serverseitig (single source of truth).
  *   - Cluster-Schicht: rollendes Fenster der analysierten Tx-Records und
@@ -44,6 +49,7 @@
  */
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
+import { strideHashes } from '/lib/stride.mjs';
 
 /* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
  * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
@@ -164,14 +170,24 @@ import('./account-check.js')
   .catch(() => { /* Konto-Check offline (z. B. 404); View bleibt leer */ });
 
 const WSS_URL = 'wss://xrplcluster.com';
-const MAX_RESOLVE = 300;           // Tx-Budget pro Ledger (expand/Hash-Auflösung)
+const MAX_RESOLVE = 6;             // Tx-Budget pro analysiertem Ledger (Hash-Auflösung,
+                                   // analog api/advance.js:86 — Kappe, keine volle Auflösung)
 const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
-const QUOTA_CALLS_PER_MIN = 14;    // sliding window: max. ledger-Kommandos/60 s
+const QUOTA_CALLS_PER_MIN = 14;    // sliding window: max. ledger- UND tx-Kommandos/60 s
+                                   // (kalibrierter Deckel, api/advance.js:73-74)
+const ANALYZE_EVERY_N_BLOCKS = 7;  // Block-Sampling: 1 von N Blöcken wird analysiert.
+                                   // N=7, weil nur N>=7 Headroom lässt (node-Nachrechnung
+                                   // 2026-10-02: 12,63 Blöcke/min × (1 ledger + 6 tx)/N
+                                   // -> N=5: 17,68, N=6: 14,74, beide > 14; N=7: 12,63).
+                                   // Simulation (600 s, 4,75 s Takt): idx%7 trifft 19 von
+                                   // 126 Blöcken -> ~13,3 Kommandos/min, Headroom ~0,7;
+                                   // bei ≤4 s Takt greift der Guard (10,5–11,9/min).
 const QUOTA_COOLDOWN_FALLBACK_MS = 65000; // tooBusy ohne parsebares retry-Delta
 const QUOTA_COOLDOWN_MAX_MS = 120000;     // Cooldown-Deckel: sliding window gibt
                                          // Einheiten kontinuierlich frei — kein
                                          // striktes Warten auf die Server-Schätzung
-const PARALLEL = 6;                // max. parallele "tx"-Calls über den WSS
+const PARALLEL = 1;                // tx-Auflösung sequenziell (kein Burst) — Konvention
+                                   // wie api/advance.js:26; Schutz vor Burst-Throttling
 const TX_TIMEOUT_MS = 8000;        // Einzel-Timeout pro tx-Call
 const SUBSCRIBE_ID = 1;            // feste Request-Id des ledger-Abos (reqId
                                    // startet bei 1000 — keine Kollision)
@@ -182,7 +198,10 @@ const WS_PROBE_MAX_MS = 90000;     // Obergrenze (≤120 s laut Diagnose): Absta
                                    // selbst gesteuert statt am Server-Idle-Close
 const WS_STALL_MS = 90000;         // Liveness-Schwelle der EIGENEN WS-Uhr —
                                    // bewusst ÜBER dem beobachteten 60-s-Idle-Close
-const FEED_CARDS = 12;             // Block-Karten im Feed
+const FEED_CARDS = 24;             // Block-Karten im Feed (2026-10-02: 12 reichten
+                                   // bei ~12,6 Blöcken/min für nur ~57 s und bestanden
+                                   // zu 11/12 aus Stichproben-Badges — 24 zeigen ~110 s
+                                   // und ~3 analysierte Karten)
 const LOG_MAX = 400;               // Log-Einträge im Speicher
 const LOG_RENDER_MAX = 200;        // gerenderte Log-Zeilen
 const STALL_MS = 12000;            // ohne frischen Ledger -> Snapshot-Fallback
@@ -1149,12 +1168,24 @@ let liveMode = 'init';              // 'init' | 'wss' | 'poll'
 // "rate limit: units quota (10000 per 60s)"). Bei tooBusy pausiert die
 // Block-Analyse sichtbar statt Karten still leer zu lassen.
 let quotaCooldownUntil = 0;
-const quotaWindow = [];            // Zeitstempel der ledger-Kommandos (60-s-Fenster)
+let analysisInFlight = false;      // Serialisierungsguard: genau eine Block-
+                                   // Analyse gleichzeitig (siehe onLedgerEvent)
+const quotaWindow = [];            // Zeitstempel ALLER gesendeten ledger- UND tx-
+                                   // Kommandos (60-s-Fenster, push zum Sendezeitpunkt)
 
-function quotaBudgetOk() {
+// need = Anzahl Kommandos, die für die kommende Aktion noch gebraucht werden
+// (Standard 1). true heißt: im 60-s-Fenster ist noch Platz dafür.
+function quotaBudgetOk(need = 1) {
   const cutoff = Date.now() - 60000;
   while (quotaWindow.length && quotaWindow[0] < cutoff) quotaWindow.shift();
-  return quotaWindow.length < QUOTA_CALLS_PER_MIN;
+  return quotaWindow.length + need <= QUOTA_CALLS_PER_MIN;
+}
+
+// Ein Kommando wurde gesendet -> ins sliding window eintragen. Zählt jetzt
+// ledger- UND tx-Kommandos (Befund 2026-10-02: die tx-Kommandos waren der
+// blinde Fleck — ohne sie überstieg der Client die Units-Quota pro Block).
+function quotaSend() {
+  quotaWindow.push(Date.now());
 }
 
 let ws = null;
@@ -1426,9 +1457,13 @@ function updateLiveStats() {
 }
 
 /* ---------- Volles Ledger pro Block über denselben WebSocket ---------- */
-// expand:true ist live verifiziert: result.ledger.transactions enthält volle
-// Tx-Objekte (flache Felder + "metaData"). Normalisierung zu {tx_json, meta}
-// (lib/detector.mjs liest meta; lib/ wird nicht angetastet).
+// OHNE expand:true (Korrektur 2026-10-02): expand:true war die dokumentierte
+// Quota-Hauptlast (lib/live-gate.mjs:7-15) und ist live durch den Plain-Call
+// ersetzt — ledger(transactions:true) liefert Hash-Strings (live verifiziert:
+// error=none, alle Einträge Strings). Normalisierung zu {tx_json, meta} bleibt
+// als Defense-in-Depth für Server, die volle Objekte (Meta-Feld "metaData")
+// oder {tx_json, meta}-Form liefern (lib/detector.mjs liest meta; lib/ wird
+// nicht angetastet).
 function normalizeLedgerTxEntry(e) {
   if (!e || typeof e !== 'object') return null;
   if (e.tx_json || e.tx) return e;
@@ -1456,7 +1491,7 @@ function wsLedgerCommand(ledgerIndex) {
       settle(null);
     }, LEDGER_TIMEOUT_MS);
     try {
-      ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true, expand: true }));
+      ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true }));
     } catch {
       pendingTx.delete(id);
       settle(null);
@@ -1491,11 +1526,23 @@ function wsTxCommand(hash) {
  * erzeugt (Quota-Fallgrube: 0/N ist nur für echten Timeout legitim). */
 async function resolveHashes(hashes) {
   const entries = [];
-  const list = hashes.slice(0, MAX_RESOLVE);
+  // strideHashes statt slice(0, MAX_RESOLVE): gleichmäßige Stichprobe über den
+  // Block statt systematischem Blockanfang-Bias (lib/stride.mjs). Jedes tx-
+  // Kommando zählt ins quotaWindow (zum Sendezeitpunkt) — tx-Kommandos waren
+  // vorher der blinde Fleck des Budgets.
+  const list = strideHashes(hashes, MAX_RESOLVE);
   for (let i = 0; i < list.length; i += PARALLEL) {
     if (!ws || ws.readyState !== 1) break; // Verbindung verloren -> Rest bleibt ungelöst
     const chunk = list.slice(i, i + PARALLEL);
-    const results = await Promise.all(chunk.map(wsTxCommand));
+    // Harte Budget-Schranke pro tx-Kommando (gilt auch auf dem Event-Hash-
+    // Pfad, der ohne vorgelagerte ledger-Budgetprüfung aufruft): ist das
+    // 60-s-Fenster voll, bleibt der Rest ungelöst -> ehrliche N/M-Partial-
+    // Badge, kein Quota-Übertritt.
+    if (!quotaBudgetOk(chunk.length)) break;
+    const results = await Promise.all(chunk.map((h) => {
+      quotaSend();
+      return wsTxCommand(h);
+    }));
     for (const r of results) {
       if (r && typeof r === 'object' && (r.error === 'tooBusy' || r.error === 'slowDown')) {
         return { throttled: true, entries, error_message: r.error_message ?? null };
@@ -1549,27 +1596,61 @@ async function onLedgerEvent(msg) {
   const eventHashes = Array.isArray(msg.transactions) ? msg.transactions : [];
   const declaredCount = Number(msg.txn_count ?? eventHashes.length ?? 0);
   const closeIso = xrplIso(msg.ledger_time ?? msg.close_time, msg.close_time_iso);
-  const card = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
 
-  // Volles Ledger per expand:true holen (ein Kommando pro Block).
+  // Block-Sampling (Policy, keine Quota-Erschöpfung): nur 1 von
+  // ANALYZE_EVERY_N_BLOCKS Blöcken wird analysiert — sonst sprengen
+  // 1 ledger- + 6 tx-Kommandos pro Block das kalibrierte Fenster
+  // QUOTA_CALLS_PER_MIN (Nachrechnung: N=7 -> 12,63 Kommandos/min).
+  // Nicht analysierte Blöcke erscheinen als Karte aus dem Event-txn_count
+  // ohne jedes Kommando; seenLedgers-Dedup schließt eine Nachholung aus,
+  // das Badge nennt deshalb keine Zukunfts-Zusage. liveStats bleibt unver-
+  // ändert: die Kopfzeilen-Stats zählen nur analysierte Ledger.
+  if (idx % ANALYZE_EVERY_N_BLOCKS !== 0) {
+    const skippedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
+    skippedCard.querySelector('.block-badges').innerHTML =
+      '<span class="badge badge-partial">Block nicht analysiert (Stichproben-Kontingent)</span>';
+    return;
+  }
+
+  // Serialisierungsguard: sequenzielle tx-Auflösung (PARALLEL=1) braucht im
+  // Worst case 6 × TX_TIMEOUT_MS = 48 s pro analysiertem Block. Überlappende
+  // onLedgerEvent-Aufrufe (Blocktakt ~4-5 s) würden sonst Kommandos stapeln
+  // und das Fenster sprengen — die nächste Analyse startet erst nach der
+  // laufenden (ihre Karte bleibt bis dahin "Analysiere …").
+  if (analysisInFlight) {
+    const queuedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
+    queuedCard.querySelector('.block-badges').innerHTML =
+      '<span class="badge badge-partial">Analyse läuft bereits – dieser Block wird nicht aufgelöst</span>';
+    return;
+  }
+  const card = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
+  analysisInFlight = true;
+  try {
+    await analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, card);
+  } finally {
+    analysisInFlight = false;
+  }
+}
+
+// Analyse eines analysierten Blocks: 1 ledger-Kommando (ohne expand) + max.
+// MAX_RESOLVE tx-Kommandos — alle ins quotaWindow (Sendezeitpunkt).
+async function analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, card) {
   let entries = [];
   let ledgerTxCount = declaredCount;
   const inCooldown = Date.now() < quotaCooldownUntil;
-  const overBudget = !eventHashes.length && !inCooldown && !quotaBudgetOk();
+  // Budget-Prüfung jetzt VOR dem Senden (ledger- UND tx-Kommandos im Fenster):
+  // ein analysierter Block kostet bis zu 1 + MAX_RESOLVE Kommandos.
+  const overBudget = !eventHashes.length && !inCooldown &&
+    !quotaBudgetOk(MAX_RESOLVE + 1);
   if (overBudget) {
     card.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Quota-Budget erschöpft – Analyse übersprungen</span>';
+      '<span class="badge badge-partial">Kommandokontingent erschöpft – Analyse übersprungen</span>';
     return;
   }
-  // quotaWindow zählt NUR die ledger-Kommandos — und zwar zum SENDE-Zeitpunkt
-  // (früher wurde erst nach der Antwort gepusht, abgelehnte Kommandos fehlten).
-  // Die tx-Kommandos aus resolveHashes (bis ≈50 pro Ledger) dürfen NIEMALS
-  // hineingezählt werden, sonst bliebe das Budget permanent überschritten und
-  // der overBudget-Zweig überspränge jede Analyse.
   const needLedgerFetch = !eventHashes.length && !inCooldown;
   let led = null;
   if (needLedgerFetch) {
-    quotaWindow.push(Date.now());
+    quotaSend();
     led = await wsLedgerCommand(idx);
   }
   // Fehler-Antworten kommen seit der settle-Umstellung als {error, error_message}
@@ -1590,7 +1671,9 @@ async function onLedgerEvent(msg) {
     if (rawTxs.every((t) => typeof t === 'string')) {
       resolved = await resolveHashes(rawTxs); // Hash-Strings -> tx-Einzelauflösung
     } else {
-      entries = rawTxs.slice(0, MAX_RESOLVE).map(normalizeLedgerTxEntry).filter(Boolean);
+      // Defense-in-Depth: Server liefert volle Objekte (nach expand-Entfernung
+      // nicht mehr beobachtet; live belegt allStrings=true).
+      entries = strideHashes(rawTxs, MAX_RESOLVE).map(normalizeLedgerTxEntry).filter(Boolean);
     }
   } else if (eventHashes.length) {
     ledgerTxCount = eventHashes.length;
@@ -1621,8 +1704,9 @@ async function onLedgerEvent(msg) {
   // Cluster-Schicht: rollendes Fenster + Neuberechnung pro validiertem Ledger.
   if (txRecordFromEntry && buildClusterGraph) {
     for (const e of entries) {
-      // closeIso (Ledger-Ebene) als Fallback: expand:true-Entries tragen
-      // selbst kein close_time (live verifiziert, siehe Header-Kommentar).
+      // closeIso (Ledger-Ebene) als Fallback: Entries ohne eigenes close_time
+      // (z. B. volle Ledger-Objekte ohne expand — live verifiziert) erhalten
+      // die Ledger-Ebenen-Zeit.
       const rec = txRecordFromEntry(e, closeIso);
       if (!rec) continue;
       // Köder-Endpunkte (account ODER destination) erreichen das Fenster nie —

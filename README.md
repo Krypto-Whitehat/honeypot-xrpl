@@ -249,6 +249,104 @@ und liefert sie durch **dieselbe** Anonymitätsschicht (`lib/sanitize.mjs`).
   Echtzeit) lokal `npm run monitor` + `npm start` betreiben; Vercel ist die
   öffentliche Lese-Ansicht.
 
+## Live-Ledger-Analyse, Cron-Trigger und Kommandobudget (Befund 2026-10-02)
+
+**Warum Sampling:** xrplcluster drosselt pro Egress-IP per Units-Quota
+(„units quota (10000 per 60s)", live beobachtet; „(500000 per 3600s)",
+`lib/live-gate.mjs:7-10`). Der `ledgerClosed`-Event liefert **keine** Hashes
+(Header `public/app.js:7-10`), also kostet eine volle Blockanalyse 1
+`ledger`-Kommando (ohne `expand:true` — die dokumentierte Quota-Hauptlast ist
+entfernt) plus bis zu `MAX_RESOLVE = 6` `tx`-Kommandos. Bei ~4–5 s Blocktakt
+(12,63 Blöcke/min) wären das 88 Kommandos/min — weit über dem kalibrierten
+Deckel `QUOTA_CALLS_PER_MIN = 14`. Deshalb: **Block-Sampling**
+(`ANALYZE_EVERY_N_BLOCKS = 7`; Nachrechnung 12,63 Kommandos/min, Simulation
+2026-10-02 über 600 s bei 4,75 s Takt: 19 von 126 Blöcken analysiert →
+~13,3 Kommandos/min, Headroom ~0,7; bei ≤4 s Blockzeit greift der
+Serialisierungsguard → 10,5–11,9/min) mit
+**Tx-Kappe** (6 von 55–84 Txs pro analysiertem Block, gleichmäßig gestrichen
+via `lib/stride.mjs` statt Blockanfang-Bias). Nicht analysierte Blöcke
+erscheinen als Karte aus dem Event-`txn_count` mit Badge
+„Block nicht analysiert (Stichproben-Kontingent)" — seenLedgers-Dedup schließt
+eine Nachholung aus, das Badge verspricht keine.
+
+**Automatischer Advance-Trigger (Cron):** `vercel.json` enthält
+`"crons": [{ "path": "/api/advance", "schedule": "*/2 * * * *" }]`. Vercel
+triggert den Endpunkt per GET; `api/advance.js` hat kein Method-Gate, der Tick
+läuft. Ohne `GITHUB_HISTORY_TOKEN` bleibt er fail-closed (503) — der Cron ist
+ohne Token harmlos.
+
+**Harte Voraussetzung Plan-Tier (Operator-Entscheidung, nicht stillschweigend):**
+Der Hobby-Plan (dieses Projekt, siehe oben) erlaubt laut Vercel-Doku **nur
+einen Cron, der höchstens einmal pro Tag läuft** — „Expressions that run more
+frequently will fail deployment". `*/2 * * * *` setzt daher ein **Upgrade auf
+Pro/Team** voraus (kostenpflichtig). Alternativen ohne Upgrade: (a) `crons`-
+Block in `vercel.json` entfernen und `/api/advance` manuell/extern triggern
+(POST, z. B. alle 2 min per externem Scheduler — ohne neue Secrets im Repo),
+oder (b) GitHub Actions als Trigger (erfordert den Token als Actions-Secret —
+ein **neues** Secret, nicht im Repo). Der 2-min-Takt (statt 1 min) ist durch
+die unten ausgewiesene Egress-Bilanz erzwungen.
+
+**ENV-Liste (Vercel):**
+| Variable | Pflicht? | Zweck |
+|---|---|---|
+| `GITHUB_HISTORY_TOKEN` | **Pflicht** für Advance/Flow-State (fail-closed 503 sonst) | GitHub-Token fürs Datenrepo (`lib/history.mjs:76`, `api/advance.js:252`) |
+| `GITHUB_HISTORY_REPO` | optional (Default `Krypto-Whitehat/honeypot-xrpl-history`) | Datenrepo (`lib/history.mjs:395`) |
+| `GITHUB_HISTORY_BRANCH` | optional (Default `main`) | Branch (`lib/history.mjs:396`) |
+| `ADVANCE_BUDGET` | optional (Default quota-konform, `api/advance.js:91`) | Blöcke pro Tick |
+| `ADVANCE_LOOKBACK` | optional (Default 0 = Live-Edge) | initialer Catch-up (`api/advance.js:265`) |
+| `BAIT_ADDRESSES`, `RPC_URL`, `WSS_URL`, `NETWORK` | optional | wie oben |
+
+**Kalibrierungsfahrt (vor jeder Budget-Erhöhung):**
+`node scripts/calibrate-quota.mjs ledger` bzw. `... tx` misst real, wie viele
+plain-Kommandos pro 60-s-Fenster durchgehen, und leitet die Unit-Obergrenze ab
+(Import der exportierten Konstanten aus `api/advance.js`). **Ergebnis
+2026-10-02 (zwei Läufe, beide gedrosselt):** Fenster bereits vorbelastet
+(shared Egress-IP dieses Entwicklers; tooBusy nach 2 bzw. 0 Kommandos,
+retry ~38–45 s) — die **realen Unit-Kosten bleiben UNVERIFIED**. Alle Budgets
+bleiben deshalb auf der konservativen 700-Units-Obergrenze
+(`api/advance.js:73-78`); Kalibrierung auf frischem Fenster nachholen, bevor
+`ANALYZE_EVERY_N_BLOCKS`/`MAX_RESOLVE`/`QUOTA_CALLS_PER_MIN` erhöht werden.
+
+**Egress-Bilanz (geteiltes 10.000-Units-Fenster pro 60 s, Obergrenze 700/Command):**
+
+| Verbraucher | Kosten |
+|---|---|
+| Cron-Tick `/api/advance` (2-min-Takt, Budget 1 Block = 1 ledger + 6 tx) | 4.900 Units / 2 min = **2.450/min** |
+| `/api/ledger`-Snapshot (`MAX_RESOLVE=6`, 7 Commands × 700, 60-s-Cache) | ≤ **4.900/min** |
+| `/api/flow-state` validatedIndex (1 RPC, 60-s-Prozess-Cache) | ≤ **700/min** |
+| **Summe Server-Pfade (Function-Instanzen)** | **8.050 ≤ 10.000** |
+| Browser-Client (WSS, `QUOTA_CALLS_PER_MIN = 14` Deckel; Simulation ~13,3 Commands/min) | ≤ **9.800/min** (gemittelt ~9.310/min) |
+
+Auf Vercel teilen sich die Function-Instanzen das Fenster (8.050 ≤ 10.000);
+die Browser-Besucher drosseln sich pro eigener IP selbst auf ≤ 14
+Commands/min (9.800 ≤ 10.000). **Im Lokalbetrieb** (`npm start` + Browser,
+dieselbe Entwickler-IP) addieren sich beide: 8.050 + ~9.310 ≈ 17.400 >
+10.000 — das Fenster ist dort rechnerisch überschreitbar. Die
+tooBusy-Gravuren federn das ab (clientseitiger Cooldown `app.js:1558-1563`,
+serverseitiger Backoff `api/ledger.js:66-83`), dauerhaft bleibt der lokale
+Combined-Betrieb aber gedrosselt: wer den vollen Server-Pfad braucht, öffnet
+die Dashboard-Seite sparsam oder nutzt einen zweiten Ausgang.
+
+Operator-Alternative, falls ein 1-min-Cron gewünscht ist: `MAX_RESOLVE = 4` in
+`api/ledger.js` (5 × 700 = 3.500; 4.900 + 3.500 + 700 = 9.100 ≤ 10.000).
+Zu hohe Parallelität im geteilten Fenster erzeugt tooBusy (Partial-Persist im
+Walk, `lib/ledger-walk.mjs:40-45`).
+
+**Tradeoff Live-Frische vs. Kommandobudget (ehrlich):** Clientseitig werden
+~1,8–1,9 von 12,63 Blöcken/min analysiert (≈14–15 %), pro analysiertem Block 6 von
+55–84 Txs (≈7–11 %). Der Server-Walk (2-min-Cron, Budget 1 Block/Tick) hinkt
+~12 Blöcke/min hinter dem Live-Edge her — der Flow-State ist Akkumulator, kein
+Live-Graph; die Rückstands-Anzeige im Flow-Host (`validatedIndex − cursor`)
+macht das sichtbar. Sequenzielle tx-Auflösung (`PARALLEL=1`) kostet Latenz
+(Worst case 6 × 8 s pro analysiertem Block); ein Serialisierungsguard in
+`public/app.js` verhindert Kommando-Stapelung bei überlappenden Events.
+Cron-Concurrency-Grenze: Vercel kann überlappende Instanzen starten;
+`lib/history.mjs:486` erlaubt nur EINEN 409-Retry, `mergeFlowState` kann bei
+Parallel-Ticks den State des anderen Ticks überschreiben — durch 2-min-Intervall
++ `maxDuration 30 s` (`api/advance.js:64`) unwahrscheinlich, aber dokumentiert.
+Commit-Volumen: 2-min-Cron = bis zu 720 GitHub-Commits/Tag ins Datenrepo
+(Operator-Alternative: 5-min-Takt, 288/Tag, größerer Rückstand).
+
 ## Hinweise
 
 - `data/threats.json` wird atomar geschrieben (temp-Datei + `rename`), damit

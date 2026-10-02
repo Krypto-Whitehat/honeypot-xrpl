@@ -21,6 +21,10 @@
 //     (public/app.js:169: 14 ledger-Kommandos/60 s), pessimistisch auf jeden
 //     Command angewendet. expand:true (die dokumentierte Quota-Hauptlast,
 //     lib/live-gate.mjs:199) wird hier nicht verwendet.
+//   - Kalibrierungsfahrt 2026-10-02 (scripts/calibrate-quota.mjs, zwei Läufe):
+//     beide tooBusy (Fenster vorbelastet, shared Egress-IP; retry ~38-45 s) —
+//     reale Unit-Kosten plain ledger/tx bleiben UNVERIFIED, 700 bleibt als
+//     konservative Obergrenze stehen; vor jeder Erhöhung neu kalibrieren.
 //   - Budget-Default = maxBudgetForQuota(MAX_RESOLVE) (reine Funktion,
 //     getestet in lib/advance-batch.test.mjs); ADVANCE_BUDGET überschreibt.
 //   - tx-Auflösung sequenziell (kein Burst) und MAX_RESOLVE reduziert.
@@ -48,6 +52,7 @@ import {
   mergeFlowState,
 } from "../lib/flow-state.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
+import { strideHashes } from "../lib/stride.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -197,11 +202,14 @@ async function rpc(method, params, tries = 3) {
 
 // Hash-Strings -> volle tx-Objekte (Muster api/ledger.js:82-95). SEQUENZIELL
 // (kein Burst) gegen Burst-Throttling; MAX_RESOLVE begrenzt die Auflösung.
-// txRecordFrom-Entry braucht volle tx-Objekte (TransactionType) — Hashes
-// allein liefern null.
+// strideHashes statt slice(0, MAX_RESOLVE) (Kritiker-Befund 2026-10-02):
+// gleiche Budget-Kappe, aber gleichmäßige Stichprobe über den Block statt
+// systematischem Blockanfang-Bias (lib/stride.mjs) — derselbe Fix wie
+// public/app.js:1527. txRecordFrom-Entry braucht volle tx-Objekte
+// (TransactionType) — Hashes allein liefern null.
 async function resolveHashes(hashes) {
   const entries = [];
-  const list = hashes.slice(0, MAX_RESOLVE);
+  const list = strideHashes(hashes, MAX_RESOLVE);
   for (const h of list) {
     const r = await rpc("tx", { transaction: h }).catch(() => null);
     if (r && (r.TransactionType || r.tx_json || r.tx)) entries.push(r);

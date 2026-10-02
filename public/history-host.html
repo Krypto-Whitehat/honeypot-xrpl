@@ -33,6 +33,7 @@
 
       <div class="live-stats" aria-label="Walk-Status">
         <span class="livestat"><span class="livestat-value" id="fh-cursor">–</span> Cursor-Stand</span>
+        <span class="livestat"><span class="livestat-value" id="fh-lag">–</span> Rückstand</span>
         <span class="livestat"><span class="livestat-value" id="fh-updated">–</span> Stand</span>
       </div>
       <p class="empty" id="fh-status-msg" hidden></p>
@@ -277,6 +278,7 @@ function flowLegendHtml() {
 
 const els = {
   cursor: document.getElementById('fh-cursor'),
+  lag: document.getElementById('fh-lag'),
   updated: document.getElementById('fh-updated'),
   graph: document.getElementById('fh-graph'),
   graphEmpty: document.getElementById('fh-graph-empty'),
@@ -292,6 +294,19 @@ function renderView(data) {
   const cursorNum = Number(data.cursor);
   els.cursor.textContent = configured && Number.isFinite(cursorNum)
     ? cursorNum.toLocaleString('de-DE')
+    : '–';
+  // Rückstand = validatedIndex − Cursor: macht sichtbar, dass der Flow-State
+  // ein Akkumulator ist und der Walk hinter dem Live-Edge herläuft. Ohne
+  // validatedIndex in der Antwort ehrlicher Leerwert '–' (keine Schätzung).
+  // Cursor 0 (Walk noch nie gelaufen) ist kein Rückstand, sondern
+  // Nicht-Start — die volle Indexzahl wäre irreführend (Kritiker-Befund
+  // 2026-10-02), also ebenfalls '–'.
+  const validatedNum = Number(data.validatedIndex);
+  const lag = configured && Number.isFinite(validatedNum) && Number.isFinite(cursorNum) && cursorNum > 0
+    ? validatedNum - cursorNum
+    : null;
+  els.lag.textContent = lag != null && lag >= 0
+    ? lag.toLocaleString('de-DE')
     : '–';
   els.updated.textContent = configured ? fmtDateTime(data.updatedAt) : '–';
   if (data.reason) {
@@ -344,6 +359,7 @@ async function load() {
     els.status.textContent = 'Flow-State nicht erreichbar — bitte später erneut versuchen.';
     els.status.hidden = false;
     els.cursor.textContent = '–';
+    els.lag.textContent = '–';
     els.updated.textContent = '–';
     els.list.innerHTML = '';
     els.list.hidden = true;
@@ -356,6 +372,10 @@ async function load() {
 
 els.refresh.addEventListener('click', load);
 load();
+// Poll alle 60 s: der serverseitige 60-s-Cache des validatedIndex-Abrufs
+// (api/flow-state.js) deckelt die RPC-Kosten dieses Polls auf <= 1 Call/Minute
+// pro warmer Prozess — das Intervall ist bewusst an das Cache-Fenster gekoppelt.
+setInterval(load, 60000);
   </script>
 </body>
 </html>
