@@ -90,8 +90,32 @@
         </div>
       </div>
 
+      <!-- Modus-Auswahl (Standard: Historie = Server-Fenster via GET
+           /api/block-window + GET /api/flow-state, 60-s-Polling, kein
+           Besucher-WSS). Live ist Opt-in: direkter WSS zu honeycluster.io,
+           ein ledger-Kommando pro Block über den lib-Rate-Limiter, ohne
+           Stichproben-Sampling. -->
+      <div class="feed-controls">
+        <span class="filter-label" id="mode-label" data-i18n="mode.label">Data source</span>
+        <div class="graph-tabs feed-mode-tabs" role="tablist" aria-labelledby="mode-label">
+          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-history" aria-selected="true" data-i18n="mode.history" data-i18n-title="mode.historyAria" title="Show the persisted block window (24 h / 3 d / 7 d) from the server">History</button>
+          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-live" aria-selected="false" data-i18n="mode.live" data-i18n-title="mode.liveAria" title="Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling">Live</button>
+        </div>
+        <label class="filter-label" for="feed-range" data-i18n="range.label">Window</label>
+        <select id="feed-range" class="filter-select">
+          <option value="24h" data-i18n="range.24h">24 h</option>
+          <option value="3d" data-i18n="range.3d">3 d</option>
+          <option value="7d" data-i18n="range.7d">7 d</option>
+        </select>
+      </div>
+
       <ol class="block-feed" id="block-feed" data-i18n-aria="feed.aria"></ol>
       <p class="empty" id="feed-empty" data-i18n="feed.empty">Waiting for the first validated ledger …</p>
+      <div class="feed-more-row">
+        <button type="button" id="feed-more" class="download-btn feed-more-btn" data-i18n="feed.loadMore" data-i18n-aria="feed.loadMoreAria" aria-label="Load more block entries" hidden>Mehr laden</button>
+      </div>
+      <p class="graph-note" id="feed-note" role="status" aria-live="polite" hidden></p>
+      <div id="feed-chart" hidden></div>
 
       <div class="log-head">
         <h3 id="log-title" data-i18n="log.title">Analysis Log</h3>

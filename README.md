@@ -63,7 +63,7 @@ honeypot-xrpl/
 ```json
 {
   "network": "mainnet",
-  "wss": "wss://xrplcluster.com",
+  "wss": "wss://honeycluster.io",
   "port": 3000,
   "faucet_addresses": [],
   "operator_addresses": []
@@ -137,6 +137,8 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/threats?q=<text>` | wie oben, gefiltert nach Adresse/Grund (Case-insensitive Substring) |
 | `GET /api/check/:address` | `{ address, network, checkedTxCount, truncated, selfListed, verdict: "clean"\|"contact"\|"unknown", contacts: [{ txType, time, direction, note, counterparty, risk }], hint }` |
 | `GET /api/graph`   | `{ nodes: [{ id: "attacker:r…" \| "honeypot:1", label, type }], edges: [{ from, to, type }] }` |
+| `GET /api/flow-state` | `{ cursor, updatedAt, validatedIndex, clusters: [{ id, label, roles, rolesByAddress, edges, totalDrops, txCount, distinctAccounts, firstSeen, lastSeen }] }` — normalisierte Projektion des persistierten Flow-States (serverseitig baitLabels-gefiltert, Top-200, 7-Tage-Fenster); ohne Token `200 + reason` (fail-closed) |
+| `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed) |
 | `GET /…`           | statische Files aus `public/` |
 
 ## Suche und Selbst-Check
@@ -199,8 +201,10 @@ Monitor-Logik:
 
 ## Mainnet-Betrieb (aktiv seit 2026-09-28)
 
-1. **`config.json`:** bereits umgestellt auf `mainnet` / `wss://xrplcluster.com`
-   (alternativ eigener Node `wss://s1.ripple.com:51233`). Auf Mainnet
+1. **`config.json`:** bereits umgestellt auf `mainnet` / `wss://honeycluster.io`
+   (Umstellung 2026-10-02: offiziell auf xrpl.org gelisteter Full-History-
+   Server mit Clio; alternativ `wss://xrplcluster.com` oder eigener Node
+   `wss://s1.ripple.com:51233` via `WSS_URL`/`RPC_URL`). Auf Mainnet
    **zwingend** `operator_addresses` setzen (Sweep-/Cold-Wallets), sonst
    erzeugt jede eigene Sammelzahlung einen Kompromittierungs-Alarm.
 2. **Köder-Konten finanzieren:** `npm run provision` funktioniert auf Mainnet
@@ -249,34 +253,71 @@ und liefert sie durch **dieselbe** Anonymitätsschicht (`lib/sanitize.mjs`).
   Echtzeit) lokal `npm run monitor` + `npm start` betreiben; Vercel ist die
   öffentliche Lese-Ansicht.
 
-## Live-Ledger-Analyse, Cron-Trigger und Kommandobudget (Befund 2026-10-02)
+## Live-Ledger-Analyse, Cron-Trigger und Request-Budget (honeycluster, Stand 2026-10-02)
 
-**Warum Sampling:** xrplcluster drosselt pro Egress-IP per Units-Quota
-(„units quota (10000 per 60s)", live beobachtet; „(500000 per 3600s)",
-`lib/live-gate.mjs:7-10`). Der `ledgerClosed`-Event liefert **keine** Hashes
-(Header `public/app.js:7-10`), also kostet eine volle Blockanalyse 1
-`ledger`-Kommando (ohne `expand:true` — die dokumentierte Quota-Hauptlast ist
-entfernt) plus bis zu `MAX_RESOLVE = 6` `tx`-Kommandos. Bei ~4–5 s Blocktakt
-(12,63 Blöcke/min) wären das 88 Kommandos/min — weit über dem kalibrierten
-Deckel `QUOTA_CALLS_PER_MIN = 14`. Deshalb: **Block-Sampling**
-(`ANALYZE_EVERY_N_BLOCKS = 7`; Nachrechnung 12,63 Kommandos/min, Simulation
-2026-10-02 über 600 s bei 4,75 s Takt: 19 von 126 Blöcken analysiert →
-~13,3 Kommandos/min, Headroom ~0,7; bei ≤4 s Blockzeit greift der
-Serialisierungsguard → 10,5–11,9/min) mit
-**Tx-Kappe** (6 von 55–84 Txs pro analysiertem Block, gleichmäßig gestrichen
-via `lib/stride.mjs` statt Blockanfang-Bias). Nicht analysierte Blöcke
-erscheinen als Karte aus dem Event-`txn_count` mit Badge
-„Block nicht analysiert (Stichproben-Kontingent)" — seenLedgers-Dedup schließt
-eine Nachholung aus, das Badge verspricht keine.
+**Server-Walk (Standard-Datenquelle):** Der Server-Walk (`api/advance.js`)
+läuft gegen **honeycluster.io** (offiziell auf xrpl.org/docs/tutorials/
+public-servers gelisteter Mainnet-Full-History-Server mit Clio, complete_
+ledgers ab Genesis-Nähe — live geprobt 2026-10-02). Pro Block GENAU EIN
+Request `{method:'ledger', params:[{ledger_index, transactions:true,
+expand:true}]}` — expand:true liefert alle Tx-Objekte mit metaData (live
+belegt: ohne expand 0 volle Objekte, mit expand vollständig inkl.
+PreviousFields.Balance; Adapter stempelt meta/ledger_index/close_time_iso).
+Die Hash-Auflösung über separate tx-Kommandos (Units-Modell mit
+`MAX_RESOLVE`/`strideHashes`) entfällt im Walk; sie bleibt defensiver
+Fallback in `api/ledger.js`/`lib/live-gate.mjs` für Endpunkte ohne
+expand-Support.
 
-**Automatischer Advance-Trigger (GitHub Actions, 5-min-Takt):**
-`.github/workflows/advance-cron.yml` ruft alle 5 Minuten
+**Request-Budget statt Units-Quota:** honeycluster-Raten (Nutzer-Angabe
+2026-10-02): 10 req/s steady, 20 Requests beim Start, Burst 50 req/5-s-
+Fenster, Resett nach 30 s Inaktivität. `api/advance.js`: `REQUESTS_PER_SEC
+= 10`, `TICK_REQUEST_BUDGET = 250` (25 s nutzbare Tick-Zeit × 10/s,
+konservativ unter der simulierten Obergrenze 270 — Simulation in
+`lib/rate-gate.test.mjs`: 70 req/5 s, 270 req/25 s, 320 req/30 s),
+`DEFAULT_BUDGET = 100` Blöcke/Tick. `FETCH_PARALLEL = 4` (expand:true-
+Latenz gemessen Ø ~0,7 s → ~5,7 req/s < 10/s steady); der Token-Bucket
+`lib/rate-gate.mjs` kappt **pro Request**, nicht pro Tick. 429/5xx werden
+behandelt wie slowDown/tooBusy (retry-after-Header, Deadline-Guard).
+Throttle-Semantik bei echtem Überschreiten ist UNVERIFIED (bewusst nicht
+bis zur Grenze belastet).
+
+**Vollabdeckung und Catch-up:** 1 Request/Block → 12,6–15,3 req/min
+(0,21–0,25 req/s, ~2,5 % des steady-Limits). 5-min-Bedarf 63–77 Blöcke;
+ein Tick Budget 100 → Headroom 1,3–1,6×. Catch-up 1 h Rückstand
+(758–915 Blöcke): ~8–10 Ticks; mit drei versetzten Crons (Tick alle
+~100 s, 300 Blöcke/5 min) ≈ 13–15 min. Blockrate gemessen 15,25/min
+(60-s-Probe), dokumentiert 12,63/min — NICHT 181k Blöcke/Tag (das wäre
+0,5-s-Takt); real 18.187–21.960 Blöcke/Tag.
+
+**Historie (Block-Fenster):** `GET /api/block-window?range=24h|3d|7d`
+liefert Stunden-Rollups (≤ 168 Zeilen/7 d) + geflaggte Blockdetails im
+Volltext; ungeflaggte Txs nur zählbar. Persistenz als Tages-Chunks
+`data/block-window/<YYYY-MM-DD>.json` (gemessen Ø 64,2 B/Block →
+1,1–2,3 MB/Tag, 7,8–16,2 MB/7 d; GitHub-Limit 100 MB/Datei), Retention
+7 Tage (Delete im Advance-Tick). Köder-Endpunkte werden vor Persistenz
+UND Auslieferung gefiltert (`lib/block-window.mjs`).
+
+**Warum Sampling (historisch, xrplcluster-Pfad 2026-10-01/02):** xrplcluster
+drosselte pro Egress-IP per Units-Quota („units quota (10000 per 60s)",
+live beobachtet; „(500000 per 3600s)"). Der `ledgerClosed`-Event liefert
+keine Hashes, eine volle Blockanalyse kostete 1 `ledger`- plus bis zu 6
+`tx`-Kommandos → 88 Kommandos/min gegen den kalibrierten Deckel 14 —
+deshalb Sampling `ANALYZE_EVERY_N_BLOCKS = 7` mit Tx-Kappe. Für den
+Server-Walk ist das durch honeycluster + expand:true obsolet (1 Request/
+Block); die clientseitige Sampling-Schicht wird mit dem Opt-in-LIVE-Modus
+abgelöst (public/*, separater Umbau).
+
+**Automatischer Advance-Trigger (GitHub Actions, versetzt, ~100-s-Takt):**
+`.github/workflows/advance-cron.yml` (Offset 0), `advance-cron-b.yml`
+(Offset 2) und `advance-cron-c.yml` (Offset 4) rufen zusammen alle ~100 s
 `POST https://honeypot-xrpl.vercel.app/api/advance` auf (GitHub Actions
-`schedule`, kleinste erlaubte Frequenz 5 min; `workflow_dispatch` für
-manuelle Ticks). Kein Actions-Secret nötig — der Endpunkt ist ein öffentlicher
-POST; die GitHub-Token für das Datenrepo liegt ausschließlich als ENV
-`GITHUB_HISTORY_TOKEN` im Vercel-Projekt. Ohne Token antwortet der Endpunkt
-fail-closed mit 503; der Tick bleibt dann harmlos.
+`schedule`, kleinste erlaubte Frequenz 5 min pro Workflow; `workflow_
+dispatch` für manuelle Ticks). Gemeinsamer `concurrency: advance-tick` mit
+`cancel-in-progress: false` — nie zwei parallele Walks. Kein Actions-Secret
+nötig — der Endpunkt ist ein öffentlicher POST; die GitHub-Token für das
+Datenrepo liegt ausschließlich als ENV `GITHUB_HISTORY_TOKEN` im
+Vercel-Projekt. Ohne Token antwortet der Endpunkt fail-closed mit 503;
+der Tick bleibt dann harmlos.
 
 **Warum kein `vercel.json`-Cron (Befund 2026-10-02):** Ein `*/2 * * * *`-Cron
 in `vercel.json` wurde versucht und **ließ den Vercel-Deploy fehlschlagen** —
@@ -290,63 +331,56 @@ neue Secrets im Repo.
 **ENV-Liste (Vercel):**
 | Variable | Pflicht? | Zweck |
 |---|---|---|
-| `GITHUB_HISTORY_TOKEN` | **Pflicht** für Advance/Flow-State (fail-closed 503 sonst) | GitHub-Token fürs Datenrepo (`lib/history.mjs:76`, `api/advance.js:252`) |
-| `GITHUB_HISTORY_REPO` | optional (Default `Krypto-Whitehat/honeypot-xrpl-history`) | Datenrepo (`lib/history.mjs:395`) |
-| `GITHUB_HISTORY_BRANCH` | optional (Default `main`) | Branch (`lib/history.mjs:396`) |
-| `ADVANCE_BUDGET` | optional (Default quota-konform, `api/advance.js:91`) | Blöcke pro Tick |
-| `ADVANCE_LOOKBACK` | optional (Default 0 = Live-Edge) | initialer Catch-up (`api/advance.js:265`) |
-| `BAIT_ADDRESSES`, `RPC_URL`, `WSS_URL`, `NETWORK` | optional | wie oben |
+| `GITHUB_HISTORY_TOKEN` | **Pflicht** für Advance/Flow-State/Block-Fenster (fail-closed 503 sonst) | GitHub-Token fürs Datenrepo (`lib/history.mjs`) |
+| `GITHUB_HISTORY_REPO` | optional (Default `Krypto-Whitehat/honeypot-xrpl-history`) | Datenrepo (`lib/history.mjs`) |
+| `GITHUB_HISTORY_BRANCH` | optional (Default `main`) | Branch (`lib/history.mjs`) |
+| `ADVANCE_BUDGET` | optional (Default 100, `api/advance.js` `DEFAULT_BUDGET`) | Blöcke pro Tick |
+| `ADVANCE_LOOKBACK` | optional (Default 0 = Live-Edge) | initialer Catch-up (`api/advance.js`) |
+| `RPC_URL` | optional (Default aus `config.json` → honeycluster.io) | HTTP-JSON-RPC-Endpunkt aller Server-Pfade |
+| `BAIT_ADDRESSES`, `WSS_URL`, `NETWORK` | optional | wie oben |
 
 **Kalibrierungsfahrt (vor jeder Budget-Erhöhung):**
 `node scripts/calibrate-quota.mjs ledger` bzw. `... tx` misst real, wie viele
-plain-Kommandos pro 60-s-Fenster durchgehen, und leitet die Unit-Obergrenze ab
-(Import der exportierten Konstanten aus `api/advance.js`). **Ergebnis
-2026-10-02 (zwei Läufe, beide gedrosselt):** Fenster bereits vorbelastet
-(shared Egress-IP dieses Entwicklers; tooBusy nach 2 bzw. 0 Kommandos,
-retry ~38–45 s) — die **realen Unit-Kosten bleiben UNVERIFIED**. Alle Budgets
-bleiben deshalb auf der konservativen 700-Units-Obergrenze
-(`api/advance.js:73-78`); Kalibrierung auf frischem Fenster nachholen, bevor
-`ANALYZE_EVERY_N_BLOCKS`/`MAX_RESOLVE`/`QUOTA_CALLS_PER_MIN` erhöht werden.
+Requests pro 60-s-Fenster durchgehen, bevor HTTP 429/tooBusy/slowDown kommt
+(429-aware, retry-after-Header wird protokolliert; Import der Request-Budget-
+Konstanten aus `api/advance.js`). **Ergebnis 2026-10-02 (honeycluster):**
+60 Requests in 1,5 s (Parallelität 12) gingen alle als 200 durch, kein
+429/tooBusy ausgelöst — bewusst nicht weiter belastet; die **Throttle-
+Semantik bei echtem Überschreiten bleibt UNVERIFIED**. Budgets bleiben
+deshalb auf dem konservativen Request-Modell (10 req/s steady, Burst 50/5 s
+nach Nutzer-Angabe); Kalibrierung nachholen, bevor `TICK_REQUEST_BUDGET`/
+`ADVANCE_BUDGET` erhöht werden.
 
-**Egress-Bilanz (geteiltes 10.000-Units-Fenster pro 60 s, Obergrenze 700/Command):**
+**Egress-Bilanz (honeycluster: 10 req/s steady pro Egress-IP, Burst 50/5 s):**
 
-| Verbraucher | Kosten |
+| Verbraucher | Requests |
 |---|---|
-| Actions-Tick `/api/advance` (5-min-Takt, Budget 1 Block = 1 ledger + 6 tx) | 4.900 Units / 5 min = **980/min** |
-| `/api/ledger`-Snapshot (`MAX_RESOLVE=6`, 7 Commands × 700, 60-s-Cache) | ≤ **4.900/min** |
-| `/api/flow-state` validatedIndex (1 RPC, 60-s-Prozess-Cache) | ≤ **700/min** |
-| **Summe Server-Pfade (Function-Instanzen)** | **6.580 ≤ 10.000** |
-| Browser-Client (WSS, `QUOTA_CALLS_PER_MIN = 14` Deckel; Simulation ~13,3 Commands/min) | ≤ **9.800/min** (gemittelt ~9.310/min) |
+| Actions-Tick `/api/advance` (3 versetzte Workflows ≈ Tick alle 100 s, Budget 100 Blöcke = 100 Requests, Parallelität 4 → ~5,7 req/s, pro Request gated) | ≤ **100 req/100 s = 60/min-Spitze**, mittig unter 10/s |
+| `/api/ledger`-Snapshot (expand:true, 1 Request, 60-s-Cache) | ≤ **1/min** pro Instanz |
+| `/api/flow-state` validatedIndex (1 RPC, 60-s-Prozess-Cache) | ≤ **1/min** pro Instanz |
+| `/api/block-window` (0 RPC — liest nur GitHub-Contents, 60-s-Cache) | **0** |
+| **Summe Server-Egress gegen honeycluster** | **deutlich unter 10 req/s** (Walk dominiert: 100 req in ≤ 30 s Function-Zeit, durch Gate ≤ 10/s) |
+| Browser-Opt-in-LIVE (pro Besucher-IP, WSS + 1 ledger-Kommando/Block, clientseitiger rate-gate) | ≤ **0,25 req/s pro Tab** |
 
-Auf Vercel teilen sich die Function-Instanzen das Fenster (8.050 ≤ 10.000);
-die Browser-Besucher drosseln sich pro eigener IP selbst auf ≤ 14
-Commands/min (9.800 ≤ 10.000). **Im Lokalbetrieb** (`npm start` + Browser,
-dieselbe Entwickler-IP) addieren sich beide: 6.580 + ~9.310 ≈ 15.900 >
-10.000 — das Fenster ist dort rechnerisch überschreitbar. Die
-tooBusy-Gravuren federn das ab (clientseitiger Cooldown `app.js:1558-1563`,
-serverseitiger Backoff `api/ledger.js:66-83`), dauerhaft bleibt der lokale
-Combined-Betrieb aber gedrosselt: wer den vollen Server-Pfad braucht, öffnet
-die Dashboard-Seite sparsam oder nutzt einen zweiten Ausgang.
+Der Server-Walk teilt die honeycluster-Rate nur mit sich selbst (concurrency-
+group `advance-tick` verhindert parallele Walks; Rate-Gate pro Request).
+Browser-Besucher gehen pro eigener IP und sind damit kein Server-Egress.
+**Im Lokalbetrieb** (`npm run monitor` + `npm start` + Browser, dieselbe
+Entwickler-IP) addieren sich Monitor-account_tx und Browser-LIVE — der
+clientseitige rate-gate und der serverseitige 429-Backoff federn das ab.
 
-Operator-Alternative, falls ein 1-min-Cron gewünscht ist: `MAX_RESOLVE = 4` in
-`api/ledger.js` (5 × 700 = 3.500; 4.900 + 3.500 + 700 = 9.100 ≤ 10.000).
-Zu hohe Parallelität im geteilten Fenster erzeugt tooBusy (Partial-Persist im
-Walk, `lib/ledger-walk.mjs:40-45`).
-
-**Tradeoff Live-Frische vs. Kommandobudget (ehrlich):** Clientseitig werden
-~1,8–1,9 von 12,63 Blöcken/min analysiert (≈14–15 %), pro analysiertem Block 6 von
-55–84 Txs (≈7–11 %). Der Server-Walk (5-min-Actions-Tick, Budget 1 Block/Tick)
-hinkt ~12,4 Blöcke/min hinter dem Live-Edge her — der Flow-State ist Akkumulator, kein
+**Tradeoff Live-Frische vs. Request-Budget (ehrlich):** Der Server-Walk
+(3 versetzte Crons, Budget 100 Blöcke/Tick) hält die Blockrate
+(12,6–15,3 Blöcke/min) mit Headroom 1,3–1,6× und holt 1 h Rückstand in
+~13–15 min auf — der Flow-State ist Akkumulator mit Vollabdeckung, kein
 Live-Graph; die Rückstands-Anzeige im Flow-Host (`validatedIndex − cursor`)
-macht das sichtbar. Sequenzielle tx-Auflösung (`PARALLEL=1`) kostet Latenz
-(Worst case 6 × 8 s pro analysiertem Block); ein Serialisierungsguard in
-`public/app.js` verhindert Kommando-Stapelung bei überlappenden Events.
-Cron-Concurrency-Grenze: Vercel kann überlappende Instanzen starten;
-`lib/history.mjs:486` erlaubt nur EINEN 409-Retry, `mergeFlowState` kann bei
-Parallel-Ticks den State des anderen Ticks überschreiben — durch 5-min-Intervall
-+ `maxDuration 30 s` (`api/advance.js:64`) unwahrscheinlich, aber dokumentiert.
-Commit-Volumen: 5-min-Actions-Tick = bis zu 288 GitHub-Commits/Tag ins Datenrepo
-(bei Pro-Cron `*/2`: bis zu 720/Tag, kleinerer Rückstand).
+macht den Stand sichtbar. Ungeflaggte Txs sind im 24h/3d/7d-Fenster nur
+zählbar, nie im Detail (7 Volltext-Tage à ~18 Mio. Tx-Objekte wären > 6 GB
+und werden bewusst NICHT persistiert). Cron-Concurrency: die drei Workflows
+teilen `concurrency: advance-tick` (`cancel-in-progress: false`); zusätzlich
+erlaubt `lib/history.mjs` nur EINEN 409-Retry pro Write. Commit-Volumen:
+Tick alle ~100 s = bis zu ~864 Flow-State-Commits/Tag plus 1 Block-Fenster-
+Commit pro Tick (Tages-Chunks, ≤ ~2,4 MB/Datei).
 
 ## Hinweise
 

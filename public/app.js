@@ -2,38 +2,41 @@
 
 /* Honeypot XRPL – Frontend (ESM-Modul)
  *
- * Hauptansicht: LIVE-BLOCK-FEED + AKTEUR-CLUSTERING.
- *   - WebSocket auf wss://xrplcluster.com, Abo "ledger" mit transactions:true.
- *     Real gemessen (chrome-devtools, 2026-09-28): xrplcluster antwortet auf
- *     dieses Abo mit "ledgerClosed"-Events (ledger_index, ledger_time,
- *     txn_count, ledger_hash) OHNE transactions-Feld — die Spec-Annahme
- *     "Hash-Strings im Event" gilt für diesen Endpunkt nicht.
- *   - Deshalb: pro analysiertem ledgerClosed wird derselbe WebSocket für EIN
- *     "ledger"-Kommando (transactions:true, OHNE expand:true) genutzt —
- *     expand:true war die dokumentierte Quota-Hauptlast (lib/live-gate.mjs:7-15)
- *     und ist live verifiziert durch den Plain-Call ersetzt (2026-10-02:
- *     ledger(transactions:true) liefert Hash-Strings, error=none). Die
- *     Hash-Strings werden über die "tx"-Einzelauflösung mit Budget-Kappe
- *     (MAX_RESOLVE, strideHashes — gleichmäßige Stichprobe statt
- *     Blockanfang-Bias) aufgelöst; Blöcke werden mit ANALYZE_EVERY_N_BLOCKS
- *     gesampelt, damit ledger- + tx-Kommandos zusammen unter dem kalibrierten
- *     Deckel QUOTA_CALLS_PER_MIN bleiben. Unvollständig aufgelöste Ledger
- *     werden auf der Karte als "teilweise" gekennzeichnet, nie als stiller
- *     Totalausfall; nicht analysierte Blöcke tragen ein ehrliches Sampling-
- *     Badge.
+ * Hauptansicht: BLOCK-FEED + AKTEUR-CLUSTERING, zweimodig (API-Vertrag v2,
+ * 2026-10-02):
+ *   - STANDARD 'history' (Serverdaten, KEIN automatischer Besucher-WSS):
+ *     GET /api/block-window?range=24h|3d|7d liefert Stunden-Rollups
+ *     (buckets) + geflaggte Blockdetails im Volltext (flagged) — der Feed
+ *     zeigt die geflaggten Blöcke des Fensters, der Stundenchart die
+ *     Vollständigkeit; ungeflaggte Blöcke sind nur zählbar (ehrliche Tiefe,
+ *     lib/block-window.mjs). GET /api/flow-state liefert die serverseitig
+ *     bait-gefilterte, gekappte Cluster-View (Cursor + validatedIndex).
+ *     Polling 60 s, sichtbarkeits-gated; Fail-closed-200 ohne Persistenz
+ *     wird als ehrlicher Leerzustand dargestellt (reason-Vergleich bleibt
+ *     roh — Protokollwert, Muster public/history.js:361).
+ *   - OPT-IN 'live' (Modus-Auswahl im Live-Panel): direkter WSS auf
+ *     wss://honeycluster.io (offiziell gelisteter Full-History-Server,
+ *     config.json:3). Abo streams:['ledger'] liefert nur Header; pro Block
+ *     wird GENAU EIN "ledger"-Kommando (transactions:true, expand:true)
+ *     gesendet — expand:true bringt alle Tx-Objekte (hash + metaData) in
+ *     einem Request, die a.D. Hash-Auflösung (MAX_RESOLVE/strideHashes) und
+ *     das Sampling (ANALYZE_EVERY_N_BLOCKS) entfallen. Jeder Request läuft
+ *     über den Token-Bucket aus lib/rate-gate.mjs (10/s, Burst 50, 20
+ *     Start-Tokens — honeycluster-Limits); tooBusy/slowDown behandelt der
+ *     Client wie HTTP 429 (retry-Delta + Cooldown, defensiv — echte
+ *     Throttle-Semantik ist UNVERIFIED).
  *   - Analyse jedes Blocks mit analyzeLedger aus lib/detector.mjs —
  *     dieselbe Engine wie serverseitig (single source of truth).
  *   - Cluster-Schicht: rollendes Fenster der analysierten Tx-Records und
  *     Findings wird pro Ledger an buildClusterGraph()/txRecordFromEntry()
  *     aus lib/cluster.mjs übergeben (dynamischer Import mit Null-Guard;
- *     bei Import-Fehlschlag läuft der Live-Feed unverändert weiter).
- *     Graph-Panel mit Tabs "Live-Netz" (inkrementell, Echtzeit) und
- *     "Cluster" (vis-network-Clustering mit aufklappbaren Bubbles) plus
- *     Cluster-Zusammenfassungs-Karten (Rollen, Drainer→Kollektor-Kette).
- *   - Fallback: bleibt der WSS ohne Ledger-Events (in der Vercel-Sandbox
- *     nie beobachtbar), pollt der Client alle WATCHDOG_MS den verifizierten
- *     Serverpfad GET /api/ledger (JSON-RPC-Snapshot, serverseitig analysiert
- *     und sanitisiert).
+ *     bei Import-Fehlschlag läuft der Feed unverändert weiter). Im
+ *     Server-Modus ersetzt die /api/flow-State-View den clientseitigen
+ *     Neubau (serverseitiger baitFilter + Pruning). Graph-Panel mit Tabs
+ *     "Live-Netz" (inkrementell), "Cluster" (vis-network-Clustering mit
+ *     aufklappbaren Bubbles) plus Cluster-Zusammenfassungs-Karten.
+ *   - Feed-Standard: letzte 5 Einträge sichtbar, 'Mehr laden' blendet je 10
+ *     weitere ein (44-px-Button, i18n-Keys).
  *   - Analyse-Log aller Regel-Treffer: filterbar nach Schweregrad und Regel
  *     (Regelkatalog aus ruleCatalog()), downloadbar als JSON per Blob.
  *
@@ -49,14 +52,23 @@
  */
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
-import { strideHashes } from '/lib/stride.mjs';
+/* Rate-Gate (lib/rate-gate.mjs via /lib-Whitelist api/lib-detector.js:16):
+ * DOM-freier Token-Bucket für den Opt-in-LIVE-Modus. Dynamischer Import mit
+ * Null-Guard — ohne Gate startet der Live-Modus NICHT (fail-closed,
+ * Konsole-Meldung), der Server-Standardbetrieb bleibt unberührt. */
+let rateGateFactory = null;
+import('/lib/rate-gate.mjs')
+  .then((m) => {
+    rateGateFactory = typeof m.createRateGate === 'function' ? m.createRateGate : null;
+  })
+  .catch(() => { /* Gate offline (z. B. 404): Live-Modus bleibt gesperrt */ });
 /* i18n: statischer Import (durch vercel.json-Rewrite /i18n.mjs gedeckt).
  * EN/DE ist damit vor dem ersten Render garantiert initialisiert; ein 404
  * von /i18n.mjs würde das ganze Modul stoppen — bewusst die konsistentere
  * Alternative zum fehlertoleranten dynamischen Import (Muster globe.js). */
 import {
   t, ruleName, noteText, sevText, serverPhrase,
-  fmtNum, fmtXrp, fmtClock,
+  fmtNum, fmtXrp, fmtClock, fmtDateTime,
   applyStatic, applyLang, initLangSwitcher,
 } from './i18n.mjs';
 
@@ -178,26 +190,27 @@ import('./account-check.js')
   })
   .catch(() => { /* Konto-Check offline (z. B. 404); View bleibt leer */ });
 
-const WSS_URL = 'wss://xrplcluster.com';
-const MAX_RESOLVE = 6;             // Tx-Budget pro analysiertem Ledger (Hash-Auflösung,
-                                   // analog api/advance.js:86 — Kappe, keine volle Auflösung)
+/* Datenquellen-Modi (API-Vertrag v2, 2026-10-02):
+ *   'history' (Standard): Server-Fenster GET /api/block-window?range=… +
+ *   Cluster GET /api/flow-state — Polling 60 s, sichtbarkeits-gated, KEIN
+ *   automatischer Besucher-WSS.
+ *   'live' (Opt-in): WSS honeycluster.io, Abo Header-only, pro Block GENAU
+ *   EIN ledger-Kommando (expand:true) über den lib-Rate-Limiter — ohne
+ *   Sampling, ohne Hash-Auflösung. Die a.D. Kalibrierung
+ *   (ANALYZE_EVERY_N_BLOCKS/MAX_RESOLVE/QUOTA_CALLS_PER_MIN, xrplcluster-
+ *   Units-Quota) entfällt mit dem honeycluster-Vertrag: 1 Request/Block
+ *   ≈ 2,5 req/s bei ~4 s Blocktakt, unter dem 10-req/s-steady-Limit. */
+const WSS_URL = 'wss://honeycluster.io';
 const LEDGER_TIMEOUT_MS = 10000;   // Timeout pro "ledger"-Kommando
-const QUOTA_CALLS_PER_MIN = 14;    // sliding window: max. ledger- UND tx-Kommandos/60 s
-                                   // (kalibrierter Deckel, api/advance.js:73-74)
-const ANALYZE_EVERY_N_BLOCKS = 7;  // Block-Sampling: 1 von N Blöcken wird analysiert.
-                                   // N=7, weil nur N>=7 Headroom lässt (node-Nachrechnung
-                                   // 2026-10-02: 12,63 Blöcke/min × (1 ledger + 6 tx)/N
-                                   // -> N=5: 17,68, N=6: 14,74, beide > 14; N=7: 12,63).
-                                   // Simulation (600 s, 4,75 s Takt): idx%7 trifft 19 von
-                                   // 126 Blöcken -> ~13,3 Kommandos/min, Headroom ~0,7;
-                                   // bei ≤4 s Takt greift der Guard (10,5–11,9/min).
+const RATE_GATE_OPTS = { ratePerSec: 10, burstCapacity: 50, initialTokens: 20 };
+                                   // honeycluster-Limits (Nutzer-Angabe
+                                   // 2026-10-02; lib/rate-gate.mjs modelliert
+                                   // sie konservativ: refill 10/s, Kap 50, Start 20)
+const GATE_WAIT_MAX_MS = 20000;    // Gate-Warte-Deckel pro Block: länger als
+                                   // 20 s zu warten heißt, der Blocktakt übersteigt
+                                   // die Rate — ehrliches Skip-Badge statt Rückstau
 const QUOTA_COOLDOWN_FALLBACK_MS = 65000; // tooBusy ohne parsebares retry-Delta
-const QUOTA_COOLDOWN_MAX_MS = 120000;     // Cooldown-Deckel: sliding window gibt
-                                         // Einheiten kontinuierlich frei — kein
-                                         // striktes Warten auf die Server-Schätzung
-const PARALLEL = 1;                // tx-Auflösung sequenziell (kein Burst) — Konvention
-                                   // wie api/advance.js:26; Schutz vor Burst-Throttling
-const TX_TIMEOUT_MS = 8000;        // Einzel-Timeout pro tx-Call
+const QUOTA_COOLDOWN_MAX_MS = 120000;     // Cooldown-Deckel
 const SUBSCRIBE_ID = 1;            // feste Request-Id des ledger-Abos (reqId
                                    // startet bei 1000 — keine Kollision)
 const WS_PROBE_MIN_MS = 15000;     // Untergrenze des Sonden-Abstands (billig,
@@ -207,19 +220,17 @@ const WS_PROBE_MAX_MS = 90000;     // Obergrenze (≤120 s laut Diagnose): Absta
                                    // selbst gesteuert statt am Server-Idle-Close
 const WS_STALL_MS = 90000;         // Liveness-Schwelle der EIGENEN WS-Uhr —
                                    // bewusst ÜBER dem beobachteten 60-s-Idle-Close
-const FEED_CARDS = 24;             // Block-Karten im Feed (2026-10-02: 12 reichten
-                                   // bei ~12,6 Blöcken/min für nur ~57 s und bestanden
-                                   // zu 11/12 aus Stichproben-Badges — 24 zeigen ~110 s
-                                   // und ~3 analysierte Karten)
+const FEED_CARDS = 24;             // Block-Karten im Feed (Live-Modus)
+const FEED_INITIAL = 5;            // sichtbare Feed-Einträge (Standard, beide Modi)
+const FEED_STEP = 10;              // 'Mehr laden' blendet je 10 weitere ein
 const LOG_MAX = 400;               // Log-Einträge im Speicher
 const LOG_RENDER_MAX = 200;        // gerenderte Log-Zeilen
-const STALL_MS = 12000;            // ohne frischen Ledger -> Snapshot-Fallback
-const WATCHDOG_MS = 5000;          // Fallback-Prüfintervall
-const POLL_BACKOFF_BASE_MS = 5000; // Snapshot-Poll: Backoff-Start nach Fehlversuch
+const WATCHDOG_MS = 5000;          // Live-Zombie-Prüfintervall (nur im Live-Modus)
+const SERVER_POLL_MS = 60000;      // 60-s-Polling flow-state + block-window (Vertrag)
+const POLL_BACKOFF_BASE_MS = 5000; // Server-Poll: Backoff-Start nach Fehlversuch
 const POLL_BACKOFF_MAX_MS = 60000; // Backoff-Deckel — ein dauerhaft fehlschlagender
-                                   // oder gedrosselter Endpunkt wird entlastet,
-                                   // statt im 5-s-Takt weiter belastet zu werden
-                                   // (Befund 2026-09-30; Pendant zu wsBackoff)
+                                   // Endpunkt wird entlastet, statt im Minutentakt
+                                   // weiter belastet zu werden (Befund 2026-09-30)
 const FIRST_SEEN_MAX = 20000;      // Frische-Fenster: Konten-Obergrenze
 const TX_WINDOW_CAP = 4000;        // rollendes Tx-Fenster für das Clustering
 const FINDINGS_WINDOW_CAP = 1000;  // rollendes Finding-Fenster für das Clustering
@@ -1123,7 +1134,7 @@ function bindViews() {
 }
 
 /* ------------------------------------------------------------------ */
-/* LIVE-BLOCK-FEED: WebSocket-Engine + Snapshot-Fallback              */
+/* BLOCK-FEED: Server-Fenster (Standard) + Opt-in-LIVE-WSS            */
 /* ------------------------------------------------------------------ */
 
 const RULE_CATALOG = ruleCatalog();
@@ -1176,30 +1187,26 @@ async function rebuildClusterGraph() {
 }
 
 let lastLedgerAt = 0;
-let liveMode = 'init';              // 'init' | 'wss' | 'poll'
-// xrplcluster drosselt JSON-Kommandos per IP-Quota (live beobachtet:
-// "rate limit: units quota (10000 per 60s)"). Bei tooBusy pausiert die
-// Block-Analyse sichtbar statt Karten still leer zu lassen.
+let feedMode = 'history';           // 'history' (Standard: Serverdaten) | 'live' (Opt-in WSS)
+let feedRange = '24h';              // Fenster des Server-Modus (24h|3d|7d)
+let liveMode = 'init';              // Live-Modus intern: 'init' | 'wss'
+// honeycluster drosselt JSON-Kommandos (Nutzer-Angabe: 10 req/s steady,
+// Burst 50/5 s, 20 Start-Tokens). Bei tooBusy/slowDown pausiert die
+// Block-Analyse sichtbar statt Karten still leer zu lassen. Die echte
+// Throttle-Semantik des Endpunkts ist UNVERIFIED — alle Behandlung ist
+// defensiv (retry-Delta + Cooldown, wie a.D. gegen xrplcluster tooBusy).
 let quotaCooldownUntil = 0;
 let analysisInFlight = false;      // Serialisierungsguard: genau eine Block-
                                    // Analyse gleichzeitig (siehe onLedgerEvent)
-const quotaWindow = [];            // Zeitstempel ALLER gesendeten ledger- UND tx-
-                                   // Kommandos (60-s-Fenster, push zum Sendezeitpunkt)
+let rateGate = null;               // Token-Bucket-Instanz (lib/rate-gate.mjs) für den Live-Modus
 
-// need = Anzahl Kommandos, die für die kommende Aktion noch gebraucht werden
-// (Standard 1). true heißt: im 60-s-Fenster ist noch Platz dafür.
-function quotaBudgetOk(need = 1) {
-  const cutoff = Date.now() - 60000;
-  while (quotaWindow.length && quotaWindow[0] < cutoff) quotaWindow.shift();
-  return quotaWindow.length + need <= QUOTA_CALLS_PER_MIN;
-}
-
-// Ein Kommando wurde gesendet -> ins sliding window eintragen. Zählt jetzt
-// ledger- UND tx-Kommandos (Befund 2026-10-02: die tx-Kommandos waren der
-// blinde Fleck — ohne sie überstieg der Client die Units-Quota pro Block).
-function quotaSend() {
-  quotaWindow.push(Date.now());
-}
+/* ---------- Server-Fenster-Zustand (Standard-Modus) ---------- */
+let windowData = null;             // letzte /api/block-window-Antwort
+let flowData = null;               // letzte /api/flow-state-Antwort
+let serverPollFailCount = 0;       // aufeinanderfolgende fehlgeschlagene Polls
+let serverPollBackoffUntil = 0;    // bis dahin bleiben beide Polls ausgesetzt
+let serverPollTimer = null;        // 60-s-Timer, sichtbarkeits-gated
+let windowRenderSig = null;        // Render-Dedup gegen identische Fensterdaten
 
 let ws = null;
 let wsBackoff = 2000;
@@ -1264,8 +1271,14 @@ function setConn(ok, text) {
 }
 
 function connLabel() {
-  if (liveMode === 'wss') return t('conn.wss');
-  if (liveMode === 'poll') {
+  if (feedMode === 'history') {
+    // Server-Standard: Status folgt dem Fenster-Poll, nicht einem Socket.
+    if (windowData && windowData.reason) return t('feed.persistOff');
+    if (windowData && Array.isArray(windowData.buckets) && windowData.buckets.length) return t('conn.server');
+    if (windowData) return t('conn.serverNoData');
+    return t('conn.serverLoading');
+  }
+  if (liveMode === 'wss') {
     if (wssSubscribeError) {
       // Volle Server-Schätzung (retry-Delta) NUR hier im Text — der
       // Sonden-Rhythmus bleibt auf min(Delta, 90 s) geklemmt.
@@ -1274,20 +1287,20 @@ function connLabel() {
         : 0;
       const est = rest > 0 ? t('conn.estSuffix', { dur: fmtDur(rest) }) : '';
       if (wssSubscribeError.throttled) {
-        return t('conn.throttled', { est });
+        return t('conn.liveThrottled', { est });
       }
       // Server-Fehlerwert (error) bleibt roh interpoliert — Protokollwert.
-      return t('conn.rejected', { error: wssSubscribeError.error, est });
+      return t('conn.liveRejected', { error: wssSubscribeError.error, est });
     }
-    // Abo frisch angenommen: 'WSS verbunden' schon mit dem ersten erfolgreichen
+    // Abo frisch angenommen: 'verbunden' schon mit dem ersten erfolgreichen
     // subscribe-Versuch (Events folgen in ~4 s). Bleiben Events dauerhaft aus,
-    // fällt die Anzeige danach ehrlich auf den generischen Fallback-Text.
+    // fällt die Anzeige danach ehrlich auf den wartenden Text.
     if (wssSubscribeOk && Date.now() - wssSubscribeOkAt < WSS_SUBSCRIBE_OK_WINDOW_MS) {
       return t('conn.wss');
     }
-    return t('conn.noEvents');
+    return t('conn.liveNoEvents');
   }
-  return t('conn.init');
+  return t('conn.liveInit');
 }
 
 function buildCtx() {
@@ -1316,6 +1329,22 @@ function recordFirstSeen(entries) {
   }
 }
 
+/* ---------- Feed-Sichtbarkeit (Standard: letzte 5 Einträge) ---------- */
+/* Der Feed zeigt standardmäßig nur die letzten FEED_INITIAL Einträge;
+   'Mehr laden' (44 px, i18n) blendet je FEED_STEP weitere ein. Die Karten
+   bleiben im DOM (Analyse-Badges bleiben erhalten), nur die Sichtbarkeit
+   wechselt — ein Reload des Feeds ist dafür nie nötig. */
+let feedVisibleCount = FEED_INITIAL;
+
+function updateFeedVisibility() {
+  const feed = document.getElementById('block-feed');
+  const moreBtn = document.getElementById('feed-more');
+  const cards = feed.children;
+  for (let i = 0; i < cards.length; i++) cards[i].hidden = i >= feedVisibleCount;
+  moreBtn.hidden = cards.length <= feedVisibleCount;
+  document.getElementById('feed-empty').hidden = cards.length > 0;
+}
+
 /* ---------- Block-Karten ---------- */
 function addBlockCard(ledgerIndex, closeIso, txCount, state) {
   const li = document.createElement('li');
@@ -1330,7 +1359,7 @@ function addBlockCard(ledgerIndex, closeIso, txCount, state) {
   const feed = document.getElementById('block-feed');
   feed.prepend(li);
   while (feed.children.length > FEED_CARDS) feed.lastElementChild.remove();
-  document.getElementById('feed-empty').hidden = true;
+  updateFeedVisibility();
   return li;
 }
 
@@ -1486,14 +1515,298 @@ function updateLiveStats() {
   if (kpiTxs) kpiTxs.textContent = fmtNum(liveStats.txs);
 }
 
+/* ================================================================== */
+/* SERVER-FENSTER (Standard-Modus): GET /api/block-window + flow-state */
+/* ================================================================== */
+/* Polling 60 s, sichtbarkeits-gated (Muster public/history.js:391-396):
+ * unsichtbare Tabs erzeugen keinen Netz-Traffic. Fehler-Backoff wie a.D.
+ * (5 s → 60 s Deckel): ein fehlschlagender Endpunkt wird entlastet statt
+ * weiter belastet. Fail-closed-200 ohne Persistenz (reason-Feld) ist KEIN
+ * Fehler: ehrlicher Leerzustand mit Persistenz-Hinweis. Der reason-
+ * Vergleich bleibt ROH — Server-Protokollwert (Muster public/history.js:361,
+ * api/block-window.js:78); nur die Anzeige folgt der aktuellen Sprache. */
+
+function windowTotals(buckets) {
+  let blocks = 0, txns = 0, flaggedBlocks = 0;
+  for (const b of Array.isArray(buckets) ? buckets : []) {
+    blocks += Number(b?.blocks) || 0;
+    txns += Number(b?.txns) || 0;
+    flaggedBlocks += Number(b?.flaggedBlocks) || 0;
+  }
+  return { blocks, txns, flaggedBlocks };
+}
+
+function renderWindowNote() {
+  const el = document.getElementById('feed-note');
+  if (feedMode !== 'history' || !windowData) { el.hidden = true; return; }
+  if (windowData.reason === 'Persistenz nicht konfiguriert') {
+    el.textContent = t('feed.persistOff');
+    el.hidden = false;
+    return;
+  }
+  const totals = windowTotals(windowData.buckets);
+  el.textContent = t('feed.windowNote', {
+    range: t('range.' + (windowData.range || feedRange)),
+    blocks: fmtNum(totals.blocks),
+    txns: fmtNum(totals.txns),
+    flagged: fmtNum(totals.flaggedBlocks),
+    time: fmtDateTime(windowData.updatedAt ?? windowData.to),
+  });
+  el.hidden = false;
+}
+
+/* Stunden-Rollup als SVG-Balken (Muster history-host.html: selbstständig,
+ * keine externe Abhängigkeit, Farben ausschließlich aus bestehenden Tokens:
+ * tonale Blöcke, geflaggte Stunden in der bestehenden --a6-error-Tinte).
+ * x-Achse: Zeitachse des Fensters (Lücken sichtbar — ehrliche Vollständigkeit);
+ * Höhe: Txs/h; Titel je Balken: Blöcke/Txs/Flags. */
+function renderWindowChart() {
+  const box = document.getElementById('feed-chart');
+  if (feedMode !== 'history' || !windowData || !Array.isArray(windowData.buckets) || !windowData.buckets.length) {
+    box.innerHTML = '';
+    box.hidden = true;
+    return;
+  }
+  const buckets = windowData.buckets;
+  const HOUR_MS = 3600 * 1000;
+  const from = Number(windowData.from);
+  const to = Number(windowData.to);
+  const span = Number.isFinite(from) && Number.isFinite(to) && to > from ? to - from : buckets.length * HOUR_MS;
+  const W = 760, H = 120, PAD = 6;
+  const maxTxns = Math.max(1, ...buckets.map((b) => Number(b?.txns) || 0));
+  const barW = Math.max(2, Math.min(14, (W - 2 * PAD) / (span / HOUR_MS) - 2));
+  const parts = [];
+  parts.push('<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(t('chart.aria')) + '">');
+  for (const b of buckets) {
+    const tMs = Number(b?.t);
+    if (!Number.isFinite(tMs)) continue;
+    const x = PAD + ((tMs - from) / span) * (W - 2 * PAD);
+    const txns = Number(b?.txns) || 0;
+    const blocks = Number(b?.blocks) || 0;
+    const flagged = Number(b?.flaggedBlocks) || 0;
+    const h = Math.max(2, Math.round((txns / maxTxns) * (H - 2 * PAD)));
+    const fill = flagged > 0 ? 'var(--a6-error)' : 'var(--a6-control-line)';
+    const title = esc(fmtDateTime(tMs)) + ' · ' + fmtNum(blocks) + ' blocks · ' + fmtNum(txns) + ' txs'
+      + (flagged > 0 ? ' · ' + fmtNum(flagged) + ' flagged' : '');
+    parts.push('<rect x="' + Math.round(x * 100) / 100 + '" y="' + (H - PAD - h) + '" width="' + barW + '" height="' + h + '" rx="2" fill="' + fill + '" opacity="0.75"><title>' + title + '</title></rect>');
+  }
+  parts.push('</svg>');
+  const flaggedHours = buckets.filter((b) => (Number(b?.flaggedBlocks) || 0) > 0).length;
+  if (flaggedHours > 0) {
+    parts.push('<p class="feed-chart-meta">' + esc(t('chart.flagged', { n: fmtNum(flaggedHours) })) + '</p>');
+  }
+  box.innerHTML = parts.join('');
+  box.hidden = false;
+}
+
+/* Feed-Karte aus dem persistierten Fenster: geflaggte Blöcke im Volltext
+ * (f = geflaggte Txs, serverseitig bait-gefiltert VOR Persistenz —
+ * lib/block-window.mjs). Ungeflaggte Blöcke sind nur in Rollup/Chart
+ * zählbar — ehrliche Tiefe, keine erfundenen Detailkarten. */
+function renderWindowFeed() {
+  const feed = document.getElementById('block-feed');
+  if (feedMode !== 'history') return;
+  const flagged = windowData && Array.isArray(windowData.flagged) ? windowData.flagged : [];
+  feed.innerHTML = '';
+  // Leer-Text des Feeds folgt dem Modus (data-i18n wird mitgeschrieben, damit
+  // applyStatic bei Sprachwechsel den passenden Key erwischt).
+  const emptyEl = document.getElementById('feed-empty');
+  const emptyKey = windowData && windowData.reason === 'Persistenz nicht konfiguriert'
+    ? 'feed.persistOff' : 'feed.serverEmpty';
+  emptyEl.setAttribute('data-i18n', emptyKey);
+  emptyEl.textContent = t(emptyKey);
+  for (const blk of flagged) {
+    const li = document.createElement('li');
+    li.className = 'block-card has-malicious';
+    const n = Number(blk?.n) || 0;
+    const fCount = Array.isArray(blk?.f) ? blk.f.length : 0;
+    li.innerHTML = `
+      <div class="block-head">
+        <span class="block-height">#${esc(blk?.i)}</span>
+        <span class="block-time">${esc(fmtClock(blk?.t))}</span>
+        <span class="block-txs">${fmtNum(n)} ${esc(t('block.txs'))}</span>
+      </div>
+      <div class="block-badges"><span class="badge badge-malicious">${esc(t('block.flagged', { n: fmtNum(fCount) }))}</span></div>`;
+    feed.appendChild(li);
+  }
+  updateFeedVisibility();
+  renderWindowNote();
+  renderWindowChart();
+}
+
+/* Cluster-View aus dem persistierten Flow-State (serverseitig bait-gefiltert
+ * + Pruning lastSeen>7 d, Top-200 — lib/flow-state.mjs). Die View trägt
+ * rolesByAddress statt memberAddresses; memberAddresses wird für die
+ * bestehenden Konsumenten (renderClusterList, drilldown, globe) deterministisch
+ * aus rolesByAddress abgeleitet. */
+function applyFlowStateView(view) {
+  const clusters = (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {
+    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
+    // lib/flow-state.mjs:228) und rolesByAddress als Adresse->Rolle.
+    // clusterCardHtml (lib/cluster-Markup des Hosts) erwartet die
+    // Adresse->Rolle-Form — sie wird aus rolesByAddress abgeleitet, die
+    // Rollen-Zählung ergibt sich dort wieder automatisch.
+    const rolesByAddress = c?.rolesByAddress && typeof c?.rolesByAddress === 'object' ? c.rolesByAddress : {};
+    return {
+      id: String(c?.id ?? ''),
+      label: c?.label ?? null,
+      roles: rolesByAddress,
+      rolesByAddress,
+      memberAddresses: Object.keys(rolesByAddress),
+      edges: Array.isArray(c?.edges) ? c.edges : [],
+      totalDrops: Number(c?.totalDrops) || 0,
+      txCount: Number(c?.txCount) || 0,
+      distinctAccounts: Number(c?.distinctAccounts) || 0,
+      firstSeen: c?.firstSeen ?? null,
+      lastSeen: c?.lastSeen ?? null,
+    };
+  });
+  const nodes = [];
+  for (const c of clusters) {
+    for (const [addr, role] of Object.entries(c.rolesByAddress)) {
+      nodes.push({ id: addr, role: ROLE_COLORS[role] ? role : 'unknown', clusterId: c.id, severity: 'info' });
+    }
+  }
+  const edges = [];
+  for (const c of clusters) {
+    for (const e of c.edges) {
+      if (!e || !e.from || !e.to) continue;
+      edges.push({
+        from: String(e.from), to: String(e.to), type: String(e.type || 'Sonstige'),
+        txHash: e.txHash ? String(e.txHash) : undefined,
+      });
+    }
+  }
+  lastClusterGraph = { nodes, edges, clusters };
+  renderLiveGraph(lastClusterGraph);
+  renderClusterList(clusters);
+  if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
+  if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh();
+}
+
+async function pollBlockWindow() {
+  const res = await fetch('/api/block-window?range=' + encodeURIComponent(feedRange), { cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const body = await res.json();
+  windowData = body;
+  // Render-Dedup: identische Fenster (60-s-Server-Cache) nicht neu bauen —
+  // der Feed verliert sonst bei jedem Poll seinen 'Mehr laden'-Stand.
+  const sig = JSON.stringify([body?.range, body?.to, body?.updatedAt, (body?.flagged || []).length, (body?.buckets || []).length]);
+  if (sig !== windowRenderSig) {
+    windowRenderSig = sig;
+    renderWindowFeed();
+  } else {
+    renderWindowNote();
+  }
+}
+
+async function pollFlowState() {
+  const res = await fetch('/api/flow-state', { cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const body = await res.json();
+  flowData = body;
+  if (feedMode === 'history') applyFlowStateView(body);
+}
+
+async function serverPollTick() {
+  if (typeof document !== 'undefined' && document && document.visibilityState !== 'visible') return;
+  if (Date.now() < serverPollBackoffUntil) return;
+  let failed = false;
+  try {
+    await pollBlockWindow();
+  } catch (err) {
+    failed = true;
+    if (feedMode === 'history') {
+      const msg = err && err.message ? String(err.message) : t('conn.unknownError');
+      setConn(false, t('feed.windowError', { msg }));
+    }
+  }
+  try {
+    await pollFlowState();
+  } catch {
+    failed = true;
+  }
+  if (failed) {
+    serverPollFailCount += 1;
+    serverPollBackoffUntil = Date.now() + Math.min(
+      POLL_BACKOFF_BASE_MS * 2 ** Math.min(serverPollFailCount - 1, 5),
+      POLL_BACKOFF_MAX_MS,
+    );
+    return;
+  }
+  serverPollFailCount = 0;
+  serverPollBackoffUntil = 0;
+  if (feedMode === 'history') setConn(true, connLabel());
+}
+
+function startServerPolling() {
+  if (serverPollTimer !== null) return;
+  serverPollTimer = setInterval(() => { void serverPollTick(); }, SERVER_POLL_MS);
+}
+
+/* ---------- Modus-Umschaltung (Historie-Standard / Live-Opt-in) ---------- */
+function setFeedMode(mode) {
+  const target = mode === 'live' ? 'live' : 'history';
+  if (target === feedMode) return;
+  feedMode = target;
+  document.getElementById('feed-mode-history').setAttribute('aria-selected', String(target === 'history'));
+  document.getElementById('feed-mode-live').setAttribute('aria-selected', String(target === 'live'));
+  const rangeSel = document.getElementById('feed-range');
+  rangeSel.disabled = target !== 'history';
+  if (target === 'history') {
+    stopLiveMode();
+    feedVisibleCount = FEED_INITIAL;
+    document.getElementById('block-feed').innerHTML = '';
+    windowRenderSig = null;
+    renderWindowFeed();
+    if (flowData) applyFlowStateView(flowData);
+    setConn(true, connLabel());
+    void serverPollTick(); // sofort frisches Fenster statt erst nach dem Timer-Takt
+  } else {
+    // Live ist Opt-in: ohne Rate-Gate (lib/rate-gate.mjs nicht erreichbar)
+    // startet der Modus nicht — fail-closed, Server-Modus bleibt.
+    if (!rateGateFactory) {
+      console.warn(t('log.consoleLiveUnavailable'));
+      setFeedMode('history');
+      return;
+    }
+    if (!rateGate) rateGate = rateGateFactory(RATE_GATE_OPTS);
+    document.getElementById('feed-note').hidden = true;
+    document.getElementById('feed-chart').innerHTML = '';
+    document.getElementById('feed-chart').hidden = true;
+    document.getElementById('block-feed').innerHTML = '';
+    feedVisibleCount = FEED_INITIAL;
+    document.getElementById('feed-empty').hidden = false;
+    setConn(false, t('conn.liveInit'));
+    connectLive();
+  }
+}
+
+function stopLiveMode() {
+  if (wsProbeTimer) { clearTimeout(wsProbeTimer); wsProbeTimer = null; }
+  if (wsAttemptTimer) { clearTimeout(wsAttemptTimer); wsAttemptTimer = null; }
+  if (ws) {
+    try { ws.close(); } catch { /* onclose kann ausbleiben; Zustand unten bereinigen */ }
+  }
+  ws = null;
+  liveMode = 'init';
+  wssSubscribeOk = false;
+  wssSubscribeError = null;
+  analysisInFlight = false;
+  quotaCooldownUntil = 0;
+}
+
+/* ================================================================== */
+/* OPT-IN-LIVE: WSS honeycluster.io, 1 ledger-Kommando/Block, kein Sampling */
+/* ================================================================== */
+
 /* ---------- Volles Ledger pro Block über denselben WebSocket ---------- */
-// OHNE expand:true (Korrektur 2026-10-02): expand:true war die dokumentierte
-// Quota-Hauptlast (lib/live-gate.mjs:7-15) und ist live durch den Plain-Call
-// ersetzt — ledger(transactions:true) liefert Hash-Strings (live verifiziert:
-// error=none, alle Einträge Strings). Normalisierung zu {tx_json, meta} bleibt
-// als Defense-in-Depth für Server, die volle Objekte (Meta-Feld "metaData")
-// oder {tx_json, meta}-Form liefern (lib/detector.mjs liest meta; lib/ wird
-// nicht angetastet).
+// honeycluster-Vertrag (2026-10-02, live probiert): expand:true liefert das
+// vollständige Ledger-Objekt mit allen Tx-Objekten (hash + metaData) in
+// GENAU EINEM Request — keine separaten tx-Kommandos, kein Sampling.
+// Normalisierung zu {tx_json, meta} bleibt als Defense-in-Depth für Server,
+// die volle Objekte (Meta-Feld "metaData") oder {tx_json, meta}-Form liefern
+// (lib/detector.mjs liest meta; lib/ wird nicht angetastet).
 function normalizeLedgerTxEntry(e) {
   if (!e || typeof e !== 'object') return null;
   if (e.tx_json || e.tx) return e;
@@ -1504,13 +1817,25 @@ function normalizeLedgerTxEntry(e) {
   return null;
 }
 
+// Adapter wie api/advance.js / api/ledger.js stampExpandEntry: expand-
+// Einträge tragen kein meta/ledger_index/close_time_iso — die Ledger-Ebenen-
+// Werte werden pro Entry gestempelt, damit txRecordFromEntry/analyzeLedger
+// dieselben Felder sehen wie serverseitig.
+function stampExpandEntry(e, ledgerIndex, closeIso) {
+  if (!e || typeof e !== 'object') return e;
+  if (e.meta == null && e.metaData != null) e.meta = e.metaData;
+  if (e.ledger_index == null) e.ledger_index = ledgerIndex;
+  if (e.close_time_iso == null && closeIso) e.close_time_iso = closeIso;
+  return e;
+}
+
 function wsLedgerCommand(ledgerIndex) {
   return new Promise((resolve) => {
     if (!ws || ws.readyState !== 1) { resolve(null); return; }
     const id = ++reqId;
     let timer = null;
-    // settle-Wrapper mit clearTimeout (Muster wsTxCommand): Der Timeout-Timer
-    // lief bisher auch nach rechtzeitiger Antwort weiter auf.
+    // settle-Wrapper mit clearTimeout (Muster a.D. wsTxCommand): der
+    // Timeout-Timer darf nach rechtzeitiger Antwort nicht weiterlaufen.
     const settle = (result) => {
       if (timer) { clearTimeout(timer); timer = null; }
       resolve(result);
@@ -1521,68 +1846,12 @@ function wsLedgerCommand(ledgerIndex) {
       settle(null);
     }, LEDGER_TIMEOUT_MS);
     try {
-      ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true }));
+      ws.send(JSON.stringify({ command: 'ledger', id, ledger_index: ledgerIndex, transactions: true, expand: true }));
     } catch {
       pendingTx.delete(id);
       settle(null);
     }
   });
-}
-
-/* ---------- Hash-Auflösung über denselben WebSocket (Fallback) ---------- */
-function wsTxCommand(hash) {
-  return new Promise((resolve) => {
-    if (!ws || ws.readyState !== 1) { resolve(null); return; }
-    const id = ++reqId;
-    pendingTx.set(id, resolve);
-    const timer = setTimeout(() => {
-      if (pendingTx.has(id)) { pendingTx.delete(id); resolve(null); }
-    }, TX_TIMEOUT_MS);
-    pendingTx.set(id, (result) => { clearTimeout(timer); resolve(result); });
-    try {
-      ws.send(JSON.stringify({ command: 'tx', id, transaction: hash }));
-    } catch {
-      pendingTx.delete(id);
-      clearTimeout(timer);
-      resolve(null);
-    }
-  });
-}
-
-/* Rückgabe: { throttled, entries, error_message }. throttled=true bricht die
- * Chunk-Schleife beim ERSTEN tooBusy/slowDown einer tx-Antwort ab — der
- * Aufrufer (onLedgerEvent) setzt dann Cooldown + Drossel-Badge und verlässt
- * die Blockkarte früh, damit finishBlockCard keine zusätzliche 0/N-Badge
- * erzeugt (Quota-Fallgrube: 0/N ist nur für echten Timeout legitim). */
-async function resolveHashes(hashes) {
-  const entries = [];
-  // strideHashes statt slice(0, MAX_RESOLVE): gleichmäßige Stichprobe über den
-  // Block statt systematischem Blockanfang-Bias (lib/stride.mjs). Jedes tx-
-  // Kommando zählt ins quotaWindow (zum Sendezeitpunkt) — tx-Kommandos waren
-  // vorher der blinde Fleck des Budgets.
-  const list = strideHashes(hashes, MAX_RESOLVE);
-  for (let i = 0; i < list.length; i += PARALLEL) {
-    if (!ws || ws.readyState !== 1) break; // Verbindung verloren -> Rest bleibt ungelöst
-    const chunk = list.slice(i, i + PARALLEL);
-    // Harte Budget-Schranke pro tx-Kommando (gilt auch auf dem Event-Hash-
-    // Pfad, der ohne vorgelagerte ledger-Budgetprüfung aufruft): ist das
-    // 60-s-Fenster voll, bleibt der Rest ungelöst -> ehrliche N/M-Partial-
-    // Badge, kein Quota-Übertritt.
-    if (!quotaBudgetOk(chunk.length)) break;
-    const results = await Promise.all(chunk.map((h) => {
-      quotaSend();
-      return wsTxCommand(h);
-    }));
-    for (const r of results) {
-      if (r && typeof r === 'object' && (r.error === 'tooBusy' || r.error === 'slowDown')) {
-        return { throttled: true, entries, error_message: r.error_message ?? null };
-      }
-      // tx liefert die vollen Tx-Felder plus meta (flach oder als result.tx/result.meta).
-      const norm = normalizeLedgerTxEntry(r);
-      if (norm) entries.push(norm);
-    }
-  }
-  return { throttled: false, entries, error_message: null };
 }
 
 /* ---------- Ledger-Event ("ledgerClosed" bzw. "ledger" vom Abo) ---------- */
@@ -1608,13 +1877,6 @@ async function onLedgerEvent(msg) {
   }
   lastLedgerAt = Date.now();
   liveMode = 'wss';
-  // Ledger-Events fließen → der Endpunkt ist wieder gesund: Den Snapshot-Poll-
-  // Backoff zurücksetzen, damit der Fallback im Störungsfall sofort wieder
-  // bereitsteht (Befund 2026-09-30).
-  if (pollFailCount || pollBackoffUntil) {
-    pollFailCount = 0;
-    pollBackoffUntil = 0;
-  }
   // Ledger-Events fließen → eine frühere Abo-Ablehnung ist überwunden.
   if (wssSubscribeError || wsProbeTimer) {
     wssSubscribeError = null;
@@ -1623,30 +1885,19 @@ async function onLedgerEvent(msg) {
   wssSubscribeOk = true;
   wssSubscribeOkAt = Date.now();
 
-  const eventHashes = Array.isArray(msg.transactions) ? msg.transactions : [];
-  const declaredCount = Number(msg.txn_count ?? eventHashes.length ?? 0);
+  // honeycluster-Abo streams:['ledger'] liefert NUR Header (ledger_index,
+  // ledger_time, txn_count, validated_ledgers) ohne transactions — verifiziert
+  // 2026-10-02. Txs braucht der Client pro Block über das ledger-Kommando.
+  const declaredCount = Number(msg.txn_count ?? 0);
   const closeIso = xrplIso(msg.ledger_time ?? msg.close_time, msg.close_time_iso);
 
-  // Block-Sampling (Policy, keine Quota-Erschöpfung): nur 1 von
-  // ANALYZE_EVERY_N_BLOCKS Blöcken wird analysiert — sonst sprengen
-  // 1 ledger- + 6 tx-Kommandos pro Block das kalibrierte Fenster
-  // QUOTA_CALLS_PER_MIN (Nachrechnung: N=7 -> 12,63 Kommandos/min).
-  // Nicht analysierte Blöcke erscheinen als Karte aus dem Event-txn_count
-  // ohne jedes Kommando; seenLedgers-Dedup schließt eine Nachholung aus,
-  // das Badge nennt deshalb keine Zukunfts-Zusage. liveStats bleibt unver-
-  // ändert: die Kopfzeilen-Stats zählen nur analysierte Ledger.
-  if (idx % ANALYZE_EVERY_N_BLOCKS !== 0) {
-    const skippedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
-    skippedCard.querySelector('.block-badges').innerHTML =
-      `<span class="badge badge-partial">${esc(t('block.sampled'))}</span>`;
-    return;
-  }
-
-  // Serialisierungsguard: sequenzielle tx-Auflösung (PARALLEL=1) braucht im
-  // Worst case 6 × TX_TIMEOUT_MS = 48 s pro analysiertem Block. Überlappende
-  // onLedgerEvent-Aufrufe (Blocktakt ~4-5 s) würden sonst Kommandos stapeln
-  // und das Fenster sprengen — die nächste Analyse startet erst nach der
-  // laufenden (ihre Karte bleibt bis dahin "Analysiere …").
+  // KEIN Sampling (Vertrag v2): jeder validierte Block wird analysiert —
+  // 1 ledger-Kommando (expand:true) pro Block, pro Request durch den
+  // Rate-Gate (10/s steady; ~4 s Blocktakt -> ~2,5 req/s, deutlich unter
+  // dem Limit; der Gate fängt auch Burst-Spitzen ab).
+  // Serialisierungsguard: eine Analyse gleichzeitig — überlappende Events
+  // (Blocktakt ~4 s, Antwort-Latenz kann darüber liegen) würden Kommandos
+  // stapeln; die Karte des überbrückten Blocks bleibt bis dahin "Analysiere …".
   if (analysisInFlight) {
     const queuedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
     queuedCard.querySelector('.block-badges').innerHTML =
@@ -1656,75 +1907,75 @@ async function onLedgerEvent(msg) {
   const card = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
   analysisInFlight = true;
   try {
-    await analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, card);
+    await analyzeLedgerBlock(idx, declaredCount, closeIso, card);
   } finally {
     analysisInFlight = false;
   }
 }
 
-// Analyse eines analysierten Blocks: 1 ledger-Kommando (ohne expand) + max.
-// MAX_RESOLVE tx-Kommandos — alle ins quotaWindow (Sendezeitpunkt).
-async function analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, card) {
+// Analyse eines Blocks: GENAU EIN ledger-Kommando (expand:true) — der
+// Request wird vor dem Senden über den lib-Rate-Gate erworben (Token-Bucket
+// 10/s, Burst 50, 20 Start-Tokens). WSS-tooBusy/slowDown behandelt der
+// Client wie HTTP 429: retry-Delta + Cooldown (defensiv — die echte
+// honeycluster-Throttle-Semantik ist UNVERIFIED).
+async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
   let entries = [];
   let ledgerTxCount = declaredCount;
   const inCooldown = Date.now() < quotaCooldownUntil;
-  // Budget-Prüfung jetzt VOR dem Senden (ledger- UND tx-Kommandos im Fenster):
-  // ein analysierter Block kostet bis zu 1 + MAX_RESOLVE Kommandos.
-  const overBudget = !eventHashes.length && !inCooldown &&
-    !quotaBudgetOk(MAX_RESOLVE + 1);
-  if (overBudget) {
-    card.querySelector('.block-badges').innerHTML =
-      `<span class="badge badge-partial">${esc(t('block.budgetSkipped'))}</span>`;
-    return;
-  }
-  const needLedgerFetch = !eventHashes.length && !inCooldown;
-  let led = null;
-  if (needLedgerFetch) {
-    quotaSend();
-    led = await wsLedgerCommand(idx);
-  }
-  // Fehler-Antworten kommen seit der settle-Umstellung als {error, error_message}
-  // statt null durch — der tooBusy-Zweig greift jetzt tatsächlich.
-  if (led && typeof led === 'object' && (led.error === 'tooBusy' || led.error === 'slowDown')) {
-    markQuotaThrottled(card, led.error_message ?? null);
-    return; // Early-Return: finishBlockCard würde sonst zusätzlich 0/N erzeugen
-  }
   if (inCooldown) {
     card.querySelector('.block-badges').innerHTML =
       `<span class="badge badge-partial">${esc(t('block.quotaSkipped'))}</span>`;
     return;
   }
-  const rawTxs = led?.ledger?.transactions;
-  let resolved = null; // Ergebnis von resolveHashes (Hash-Auflösung)
-  if (Array.isArray(rawTxs) && rawTxs.length) {
-    ledgerTxCount = rawTxs.length;
-    if (rawTxs.every((t) => typeof t === 'string')) {
-      resolved = await resolveHashes(rawTxs); // Hash-Strings -> tx-Einzelauflösung
-    } else {
-      // Defense-in-Depth: Server liefert volle Objekte (nach expand-Entfernung
-      // nicht mehr beobachtet; live belegt allStrings=true).
-      entries = strideHashes(rawTxs, MAX_RESOLVE).map(normalizeLedgerTxEntry).filter(Boolean);
-    }
-  } else if (eventHashes.length) {
-    ledgerTxCount = eventHashes.length;
-    resolved = await resolveHashes(eventHashes);
-  }
-  if (resolved && resolved.throttled) {
-    // tooBusy auf dem tx-Pfad: Early-Return-Muster wie der ledger-Pfad —
-    // Cooldown setzen, Drossel-Badge zeigen, Blockkarte früh verlassen.
-    markQuotaThrottled(card, resolved.error_message);
+  if (!rateGate) {
+    // Fail-closed: ohne Gate kein Request (der Modusstart prüft das bereits;
+    // dieser Zweig fängt einen späteren Import-Ausfall ab).
+    card.querySelector('.block-badges').innerHTML =
+      `<span class="badge badge-partial">${esc(t('block.budgetSkipped'))}</span>`;
     return;
   }
-  if (resolved) entries = resolved.entries;
+  const gate = rateGate.tryAcquire(1);
+  if (!gate.ok) {
+    if (!Number.isFinite(gate.waitMs) || gate.waitMs > GATE_WAIT_MAX_MS) {
+      // Der Blocktakt übersteigt die Rate (oder die Kapazität ist erschöpft):
+      // ehrliches Skip-Badge statt Rückstau — der Block bleibt ungeklärt.
+      card.querySelector('.block-badges').innerHTML =
+        `<span class="badge badge-partial">${esc(t('block.budgetSkipped'))}</span>`;
+      return;
+    }
+    await new Promise((res) => setTimeout(res, gate.waitMs));
+  }
+  if (!ws || ws.readyState !== 1) return; // Verbindung verloren — Karte ohne Analyse
+  const led = await wsLedgerCommand(idx);
+  // Fehler-Antworten kommen als {error, error_message} statt null durch —
+  // der tooBusy-Zweig greift damit tatsächlich (a.D.-Muster, settleValue).
+  if (led && typeof led === 'object' && (led.error === 'tooBusy' || led.error === 'slowDown')) {
+    markQuotaThrottled(card, led.error_message ?? null);
+    console.warn(t('log.consoleLiveThrottled', {
+      error: led.error,
+      msg: led.error_message ? ': ' + led.error_message : '',
+    }));
+    return; // Early-Return: finishBlockCard würde sonst zusätzlich 0/N erzeugen
+  }
+  const rawTxs = led?.ledger?.transactions;
+  if (Array.isArray(rawTxs) && rawTxs.length) {
+    ledgerTxCount = rawTxs.length;
+    const ledgerIndexActual = Number(led?.ledger?.ledger_index ?? idx) || idx;
+    const closeIsoActual = xrplIso(led?.ledger?.close_time, led?.ledger?.close_time_iso) ?? closeIso;
+    entries = rawTxs
+      .map((e) => stampExpandEntry(e, ledgerIndexActual, closeIsoActual))
+      .map(normalizeLedgerTxEntry)
+      .filter(Boolean);
+  }
 
   recordFirstSeen(entries);
   const result = analyzeLedger({ transactions: entries }, buildCtx());
 
   // Köder-Filter (WSS-Pfad): Funde auf Köder-Adressen werden vor jeder
   // Weiterverwendung entfernt — dieselbe Regel wie im Serverpfad
-  // (server/index.mjs /api/ledger: findings.filter(!baitLabels.has)), hier
-  // hash-gestützt über die Bait-Hash-Allowlist. Damit erscheinen Köder nie
-  // im Live-Log, im Export (downloadLog) oder im Cluster-Graphen.
+  // (api/ledger.js: findings.filter(!baitLabels.has)), hier hash-gestützt
+  // über die Bait-Hash-Allowlist. Damit erscheinen Köder nie im Live-Log,
+  // im Export (downloadLog) oder im Cluster-Graphen.
   const visibleFindings = [];
   for (const f of result.findings) {
     if (await isDeniedAddrAsync(f.address)) continue;
@@ -1735,8 +1986,7 @@ async function analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, car
   if (txRecordFromEntry && buildClusterGraph) {
     for (const e of entries) {
       // closeIso (Ledger-Ebene) als Fallback: Entries ohne eigenes close_time
-      // (z. B. volle Ledger-Objekte ohne expand — live verifiziert) erhalten
-      // die Ledger-Ebenen-Zeit.
+      // erhalten die Ledger-Ebenen-Zeit (stampExpandEntry stempelt sie bereits).
       const rec = txRecordFromEntry(e, closeIso);
       if (!rec) continue;
       // Köder-Endpunkte (account ODER destination) erreichen das Fenster nie —
@@ -1795,15 +2045,14 @@ function handleSubscribeResponse(msg) {
   const throttled = error === 'tooBusy' || error === 'slowDown' || /rate\s*limit/i.test(message);
   wssSubscribeError = { error, message, retryMs, at: Date.now(), throttled };
   wssSubscribeOk = false;
-  // Ein abgelehntes Abo liefert nie Events — liveMode 'wss' wäre gelogen
-  // (sticky bis zum nächsten Snapshot); der Snapshot-Fallback ist ab jetzt
-  // die Datenquelle. onLedgerEvent stellt 'wss' beim ersten Event wieder her.
-  if (liveMode === 'wss') liveMode = 'poll';
+  // Ein abgelehntes Abo liefert nie Events — liveMode 'wss' wäre gelogen.
+  // onLedgerEvent stellt 'wss' beim ersten Event wieder her; bis dahin
+  // bleibt der Live-Modus sichtbar im Ablehnungszustand (Sonden-Rhythmus).
   const est = retryMs ? t('conn.estWarn', { dur: fmtDur(retryMs) }) : '';
   const msgSuffix = message ? `: ${message}` : '';
   console.warn(t('log.consoleSubscribeRejected', { error, msg: msgSuffix, est }));
   scheduleWssProbe(retryMs);
-  setConn(liveMode !== 'init', connLabel());
+  setConn(false, connLabel());
 }
 
 // Sonden-Rhythmus nach abgelehntem Abo: Abstand = min(retry-Delta, 90 s)
@@ -1836,10 +2085,13 @@ function connectLive() {
   ws.onopen = () => {
     wsBackoff = 2000;
     lastWsMsgAt = Date.now();
+    // Header-only-Abo (honeycluster-Vertrag 2026-10-02): streams:['ledger']
+    // liefert ledgerClosed-Header OHNE transactions — die Txs holt pro Block
+    // das eine ledger-Kommando (expand:true) über den Rate-Gate.
     try {
-      ws.send(JSON.stringify({ command: 'subscribe', id: SUBSCRIBE_ID, streams: ['ledger'], transactions: true }));
+      ws.send(JSON.stringify({ command: 'subscribe', id: SUBSCRIBE_ID, streams: ['ledger'] }));
     } catch { /* onclose behandelt es */ }
-    if (liveMode !== 'poll') setConn(true, t('conn.wssConnecting'));
+    setConn(true, t('conn.wssConnecting'));
   };
 
   ws.onmessage = (ev) => {
@@ -1864,11 +2116,9 @@ function connectLive() {
 
   ws.onclose = () => {
     wssSubscribeOk = false; // ab hier kann kein Abo dieses Sockets mehr liefern
-    // Socket-Tod im WSS-Live-Betrieb: 'wss' ist sticky und würde weiter
-    // 'Live – WSS verbunden' zeigen, obwohl die Datenquelle ab jetzt der
-    // Snapshot-Fallback ist (onLedgerEvent stellt 'wss' wieder her).
-    if (liveMode === 'wss') liveMode = 'poll';
-    if (liveMode !== 'poll') setConn(false, t('conn.closed', { s: Math.round(wsBackoff / 1000) }));
+    if (feedMode !== 'live') return; // stopLiveMode hat den Socket bewusst geschlossen
+    liveMode = 'init'; // ohne Socket kein Live-Bild — ehrlicher Zwischenzustand
+    setConn(false, t('conn.liveClosed', { s: Math.round(wsBackoff / 1000) }));
     scheduleReconnect();
   };
 
@@ -1876,119 +2126,52 @@ function connectLive() {
 }
 
 function scheduleReconnect() {
+  if (feedMode !== 'live') return; // Live ist Opt-in: ohne Modus kein Auto-Reconnect
   if (wsAttemptTimer) return;
   const delay = wsBackoff;
   wsBackoff = Math.min(wsBackoff * 2, 30000);
   wsAttemptTimer = setTimeout(() => {
     wsAttemptTimer = null;
-    connectLive();
+    if (feedMode === 'live') connectLive();
   }, delay);
 }
 
-/* ---------- Snapshot-Fallback (verifizierter Serverpfad /api/ledger) ---------- */
-/* Fehler-Backoff (Befund 2026-09-30): Der Watchdog rief pollSnapshotFallback
- * bei dauerhaftem Fehler unverändert alle 5 s auf — der Server wiederholt je
- * Anfrage 3 RPC-Versuche, ein gedrosselter Endpunkt wurde also mit bis zu 36
- * Versuchen/min weiter belastet statt entlastet. Wie beim WSS-Reconnect
- * (wsBackoff) verdoppelt sich der Abstand je Fehlversuch (5 s → 60 s Deckel);
- * ein erfolgreicher Poll und wieder fließende WSS-Events setzen ihn zurück. */
-let pollFailCount = 0;      // aufeinanderfolgende fehlgeschlagene Snapshot-Polls
-let pollBackoffUntil = 0;   // bis zu diesem Zeitpunkt bleibt /api/ledger ausgesetzt
-
-async function pollSnapshotFallback() {
-  // Snapshot-Zyklus zieht die Bait-Hash-Allowlist mit (Mindestabstand beachten).
-  refetchBaitHashes(false);
-  try {
-    const body = await fetchJson('/api/ledger');
-    // Endpunkt erreichbar: Backoff zurücksetzen (auch ohne neuen Ledger-Index).
-    pollFailCount = 0;
-    pollBackoffUntil = 0;
-    const idx = body?.ledgerIndex;
-    if (idx == null) return;
-    if (!seenLedgers.has(idx)) {
-      seenLedgers.add(idx);
-      lastLedgerAt = Date.now();
-      liveMode = 'poll';
-      const txCount = Number(body.stats?.txs ?? 0);
-      const resolved = Number(body.resolvedTxCount ?? 0);
-      // Köder-Filter (Snapshot-Pfad, Befund 2026-09-30): Der Server filtert
-      // bereits über baitLabels (server/index.mjs /api/ledger, api/ledger.js),
-      // aber bei leerem BAIT_ADDRESSES-ENV wäre der Server-Filter inaktiv —
-      // derselbe clientseitige Hash-Deny-Recheck wie im WSS-Pfad (Köder-Filter
-      // in onLedgerEvent) hält Köder-Funde aus Live-Log und JSON-Export fern.
-      const findings = [];
-      for (const f of Array.isArray(body.findings) ? body.findings : []) {
-        if (!(await isDeniedAddrAsync(f?.address))) findings.push(f);
-      }
-      const card = addBlockCard(idx, body.closeTime ?? null, txCount, 'done');
-      finishBlockCard(card, findings, txCount, resolved);
-      registerFindings(findings, idx);
-      liveStats.ledgers += 1;
-      liveStats.txs += txCount;
-      updateLiveStats();
-      // Cluster-Schicht auch im poll-Modus: Server liefert txRecords mit
-      // (bereits serverseitig köder-gefiltert); rebuildClusterGraph zieht den
-      // clientseitigen Hash-Filter als Defense-in-Depth nochmals drüber.
-      if (txRecordFromEntry && buildClusterGraph) {
-        for (const r of Array.isArray(body.txRecords) ? body.txRecords : []) {
-          if (!r || typeof r !== 'object') continue;
-          txWindow.push(r);
-          if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
-        }
-        for (const f of findings) {
-          findingsWindow.push(f);
-          if (findingsWindow.length > FINDINGS_WINDOW_CAP) findingsWindow.splice(0, findingsWindow.length - FINDINGS_WINDOW_CAP);
-        }
-        await rebuildClusterGraph();
-      }
-    }
+/* ---------- Live-Watchdog (nur im Opt-in-LIVE-Modus) ---------- */
+/* Liveness mit der EIGENEN WS-Uhr lastWsMsgAt (onopen + jede Message).
+ * WS_STALL_MS (90 s) liegt über dem beobachteten 60-s-Server-Idle-Close und
+ * weit über dem ~4-s-Event-Takt: Ein Socket, der 90 s komplett stumm ist
+ * (NAT-Timeout, Suspend/Resume ohne close-Frame, Endpunkt-Stall), ist ein
+ * Zombie — auch wenn liveMode sticky 'wss' ist (live-observiert: Offline-
+ * Emulation ließ die Statuszeile 'WSS verbunden' zeigen, obwohl 0 Events
+ * ankamen). Aktiver close; onclose trägt den Reconnect nach (Backoff aktiv).
+ * Der a.D. Snapshot-Fallback (GET /api/ledger im 5-s-Watchdog-Takt) entfällt:
+ * Serverdaten werden im Standard-Modus über den 60-s-Poll geholt, im Live-
+ * Modus gar nicht — ein Live-Tab belastet honeycluster ausschließlich über
+ * sein eigenes Block-Kommando (Gate-geprüft). */
+function watchdogLive() {
+  if (feedMode !== 'live') return;
+  if (ws && ws.readyState === 1 && Date.now() - lastWsMsgAt > WS_STALL_MS) {
+    liveMode = 'init'; // Quelle ab jetzt: kein Socket — Statuszeile ehrlich
+    try { ws.close(); } catch { /* egal — onclose fehlt dann, nächster Zyklus */ }
+  }
+  if (liveMode === 'wss' && Date.now() - lastLedgerAt < WS_STALL_MS) {
     setConn(true, connLabel());
-  } catch (err) {
-    // Fehler-Backoff fortschreiben (5 s → 10 s → 20 s → 40 s → 60 s Deckel).
-    pollFailCount += 1;
-    pollBackoffUntil = Date.now() + Math.min(
-      POLL_BACKOFF_BASE_MS * 2 ** Math.min(pollFailCount - 1, 5),
-      POLL_BACKOFF_MAX_MS,
-    );
-    if (liveMode !== 'wss') {
-      // Drosselungs-Kontext bleibt sichtbar (Befund 2026-09-30): Lehnt das
-      // WSS-Abo bereits mit tooBusy/rate limit ab, wäre der generische
-      // Fehltext ein Informationsverlust — connLabel() nennt die Endpunkt-
-      // Drosselung samt Schätzung, der Snapshot-Fehler wird angehängt.
-      const msg = err && err.message ? String(err.message) : t('conn.unknownError');
-      if (liveMode === 'poll' && wssSubscribeError && wssSubscribeError.throttled) {
-        setConn(false, t('conn.snapshotUnreachable', { label: connLabel(), msg }));
-      } else {
-        setConn(false, t('conn.noData', { msg }));
-      }
-    }
   }
 }
 
-async function watchdog() {
-  // Liveness mit der EIGENEN WS-Uhr lastWsMsgAt (onopen + jede Message) —
-  // bewusst NICHT lastLedgerAt: pollSnapshotFallback setzt das ebenfalls bei
-  // jedem NEUEN Snapshot-Index (~alle 60 s), eine Kopplung an STALL_MS (12 s)
-  // würde im gesunden Poll-Betrieb Dauerfeuern/Reconnect-Stürme auslösen.
-  // WS_STALL_MS (90 s) liegt über dem beobachteten 60-s-Server-Idle-Close und
-  // weit über dem ~4-s-Event-Takt: Ein Socket, der 90 s komplett stumm ist
-  // (NAT-Timeout, Suspend/Resume ohne close-Frame, Endpunkt-Stall), ist ein
-  // Zombie — auch wenn liveMode sticky 'wss' ist (live-observiert: Offline-
-  // Emulation ließ die Statuszeile 'WSS verbunden' zeigen, obwohl 0 Events
-  // ankamen). Aktiver close; onclose trägt den Reconnect nach (Backoff aktiv).
-  if (ws && ws.readyState === 1 && Date.now() - lastWsMsgAt > WS_STALL_MS) {
-    if (liveMode === 'wss') liveMode = 'poll'; // Quelle ab jetzt: Snapshot-Fallback
-    try { ws.close(); } catch { /* egal — onclose fehlt dann, nächster Zyklus */ }
-  }
-  if (Date.now() - lastLedgerAt < STALL_MS) {
-    if (liveMode === 'wss' || liveMode === 'poll') setConn(true, connLabel());
-    return;
-  }
-  // Fehler-Backoff (Befund 2026-09-30): Während des Backoff-Fensters bleibt
-  // /api/ledger ausgesetzt — der Watchdog-Takt allein darf den gedrosselten
-  // Endpunkt nicht weiter im 5-s-Takt belasten.
-  if (Date.now() < pollBackoffUntil) return;
-  await pollSnapshotFallback();
+function bindFeed() {
+  document.getElementById('feed-mode-history').addEventListener('click', () => setFeedMode('history'));
+  document.getElementById('feed-mode-live').addEventListener('click', () => setFeedMode('live'));
+  document.getElementById('feed-range').addEventListener('change', (e) => {
+    const v = String(e.target.value ?? '24h');
+    feedRange = ['24h', '3d', '7d'].includes(v) ? v : '24h';
+    windowRenderSig = null; // Range-Wechsel: immer neu rendern
+    if (feedMode === 'history') void serverPollTick();
+  });
+  document.getElementById('feed-more').addEventListener('click', () => {
+    feedVisibleCount += FEED_STEP;
+    updateFeedVisibility();
+  });
 }
 
 function bindLive() {
@@ -2007,11 +2190,17 @@ bindGraph();
 bindViews();
 setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
 bindLive();
+bindFeed();
 bindAddrActions();
 document.getElementById('stat-network').textContent = t('net.mainnet');
-connectLive();
-setInterval(watchdog, WATCHDOG_MS);
-// Bait-Hash-Allowlist: beim Start, alle 60 s und bei jedem Snapshot-Zyklus.
+// Standard-Dashboard: Serverdaten (60-s-Poll flow-state + block-window),
+// KEIN automatischer Besucher-WSS. Der Live-Watchdog läuft nur, wenn der
+// Opt-in-LIVE-Modus aktiv ist.
+setConn(true, connLabel());
+void serverPollTick();
+startServerPolling();
+setInterval(watchdogLive, WATCHDOG_MS);
+// Bait-Hash-Allowlist: beim Start und alle 60 s (unabhängig vom Modus).
 refetchBaitHashes(true);
 setInterval(() => { refetchBaitHashes(true); }, BAIT_HASH_REFETCH_MS);
 
@@ -2030,7 +2219,13 @@ document.addEventListener('hx:langchange', () => {
   renderLog();
   updateLiveStats();
   document.getElementById('stat-network').textContent = t('net.mainnet');
-  setConn(liveMode !== 'init', connLabel());
+  setConn(true, connLabel());
+  // Fenster-Flächen in der neuen Sprache neu bauen (Notiz/Chart/Fenster-Karten
+  // tragen t()-Texte; der ROHE reason-Vergleich bleibt sprachunabhängig).
+  if (feedMode === 'history') {
+    windowRenderSig = null;
+    renderWindowFeed();
+  }
   if (lastClusterGraph) {
     renderLiveGraph(lastClusterGraph);
     renderClusterList(lastClusterGraph.clusters);

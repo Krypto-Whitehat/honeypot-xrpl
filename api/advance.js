@@ -2,43 +2,63 @@
 //
 // Rückt den persistierten Ledger-Cursor um ein ENV-konfigurierbares Budget vor
 // (lib/ledger-walk.mjs advance()), persistiert das Ergebnis als Flow-State-
-// Dokument (lib/flow-state.mjs) und liefert neuen Cursor + Summary. Der
-// Block-Fetcher ist die Transport-Naht: er injiziert pro Ledger-Index einen
-// Block {transactions, findings} oder null am Live-Edge (RPC-Muster wie
-// api/ledger.js). advance() selbst ist transport-agnostisch (Fetcher
+// Dokument (lib/flow-state.mjs) UND als rollender Block-Fenster-Bestand
+// (lib/block-window.mjs, data/block-window/<YYYY-MM-DD>.json) und liefert
+// neuen Cursor + Summary. Der Block-Fetcher ist die Transport-Naht: er
+// injiziert pro Ledger-Index einen Block {transactions, findings} oder null
+// am Live-Edge. advance() selbst ist transport-agnostisch (Fetcher
 // injizierbar) — hier wird nur die RPC-Implementierung der Naht angebunden.
 //
-// QUOTA (Befund 2026-10-01, live verifiziert gegen xrplcluster.com):
-//   - JSON-RPC-Batches werden vom Endpunkt deterministisch abgelehnt
-//     (JSON-Array: "invalidParams"/31 "batched requests are not supported";
-//     NDJSON: "jsonInvalid"/31) — KEIN batched RPC, ein Command pro POST.
-//   - Units-Quota pro IP (Infrastruktur-Ebene, NICHT rippled — rippled-Source
-//     geprüft: kein Rate-Limiter): beobachtet "rate limit: units quota
-//     (10000 per 60s)" (public/app.js:1148-1149) und "(500000 per 3600s)"
-//     (lib/live-gate.mjs:7-22). Unit-Kosten pro Methode sind NICHT
-//     dokumentiert — die Defaults unten sind konservativ abgeleitet aus dem
-//     beobachteten Fenster und der clientseitigen Kalibrierung
-//     (public/app.js:169: 14 ledger-Kommandos/60 s), pessimistisch auf jeden
-//     Command angewendet. expand:true (die dokumentierte Quota-Hauptlast,
-//     lib/live-gate.mjs:199) wird hier nicht verwendet.
-//   - Kalibrierungsfahrt 2026-10-02 (scripts/calibrate-quota.mjs, zwei Läufe):
-//     beide tooBusy (Fenster vorbelastet, shared Egress-IP; retry ~38-45 s) —
-//     reale Unit-Kosten plain ledger/tx bleiben UNVERIFIED, 700 bleibt als
-//     konservative Obergrenze stehen; vor jeder Erhöhung neu kalibrieren.
-//   - Budget-Default = maxBudgetForQuota(MAX_RESOLVE) (reine Funktion,
-//     getestet in lib/advance-batch.test.mjs); ADVANCE_BUDGET überschreibt.
-//   - tx-Auflösung sequenziell (kein Burst) und MAX_RESOLVE reduziert.
-//   - Findings pro Block via analyzeLedger (lib/detector.mjs) mit tick-
-//     globalem ctx (buildCtx, Muster api/ledger.js:102-118); ein kalter
-//     Threats-Cache ist ein zusätzlicher, vom Tick-Deadline-Guard begrenzter
-//     Kostenposten (gleicher Kostenprofil wie der Snapshot-Pfad).
+// DATENQUELLE (Umstellung 2026-10-02): honeycluster.io — offiziell auf
+// xrpl.org/docs/tutorials/public-servers gelisteter Mainnet-Server mit voller
+// Historie (Clio, complete_ledgers ab Genesis-Nähe, live geprobt). HTTP-
+// JSON-RPC-Pfad: POST {method:'ledger', params:[{ledger_index, transactions:
+// true, expand:true}]}.
+//
+// QUOTA (honeycluster-Modell, Nutzer-Angabe 2026-10-02): 10 req/s steady,
+// 20 Requests sofort beim Start, Burst 50 req pro 5-s-Fenster, Resett nach
+// 30 s Inaktivität. Das Units-Modell von xrplcluster (10.000 Units/60 s,
+// Kosten-Obergrenze 700/Command) ist ERSETZT durch Request-Zählung:
+//   - REQUESTS_PER_SEC = 10 (steady-Limit),
+//   - TICK_REQUEST_BUDGET = 250 (25 s nutzbar × 10/s, konservativ unter der
+//     simulierten Obergrenze 270 — lib/rate-gate.test.mjs Simulation),
+//   - 1 Request pro Block (expand:true liefert alle Tx-Objekte; kein
+//     separates tx-Kommando mehr) -> worstCaseTickRequests(budget) = budget,
+//   - DEFAULT_BUDGET = 100 Blöcke/Tick (ENV ADVANCE_BUDGET überschreibt).
+//   Latenzgebundenes Optimum: expand:true-Latenz gemessen Ø ~0,7 s;
+//   FETCH_PARALLEL = 4 -> ~5,7 req/s < 10/s steady; ohne Gate wären über
+//   30-s-Ticks alle ~100 s ~16 req/s — deshalb Rate-Gate PRO REQUEST
+//   (lib/rate-gate.mjs), nicht pro Tick.
+//   Throttle-Semantik bei echtem Überschreiten ist UNVERIFIED (live nicht
+//   bis zur Grenze belastet); 429/5xx werden behandelt wie slowDown/tooBusy.
+//
+// ADAPTER (expand:true-Einträge, live belegt 2026-10-02): expand-Einträge
+// tragen KEIN meta, KEIN ledger_index, KEIN close_time_iso. Sie werden pro
+// Entry gestempelt: e.meta = e.metaData (normalizeTxEntry liest entry.meta,
+// lib/detector.mjs:174), e.ledger_index = Ledger-Ebenen-Index,
+// e.close_time_iso = Ledger-Ebenen-close_time_iso — sonst degradieren
+// ledgerSeq (edgeIdentity/Top-K, lib/ledger-walk.mjs) und closeTime
+// (firstSeen/lastSeen, lib/cluster.mjs:322-340; 7-Tage-Pruning kann
+// null-Cluster nicht einordnen). Stempel-Muster wie lib/live-gate.mjs.
+//
+// FETCHER-VERTRAG (live geprobt): Zukunft-Index -> HTTP 200 +
+// result.error 'lgrNotFound' -> null (Walk-Ende). Gültiger Index mit 0 Txs
+// -> LEERBLOCK {transactions:[], findings:[]} (truthy, Cursor rückt vor —
+// Blockage-Fix: früher stoppte 0-Txs dauerhaft den Walk).
+//
+// KÖDERSCHUTZ (B2): Die Detector-Regeln flaggen Köder-Endpunkte, also landen
+// Köder-Adressen in from/to der geflagten Txs. Vor mergeBlock und vor
+// Persistenz des Block-Fensters filtert dieser Endpunkt: Entries mit
+// Köder-Endpunkt (account/destination) und Findings mit Köder-Adresse fallen
+// still raus; baitLabels nur aus ENV BAIT_ADDRESSES (Muster api/ledger.js),
+// nie in Dateien. Der Block-Fenster-Codec filtert zusätzlich (lib/
+// block-window.mjs).
 //
 // SICHERHEIT:
 //   - FAIL-CLOSED ohne Token: ohne GITHUB_HISTORY_TOKEN wird weder gelesen
 //     noch vorgeschoben noch persistiert (503) — keine Cursor-Regression ohne
 //     Persistenz-Berechtigung. Token NUR aus process.env, nie geloggt.
-//   - Budget aus ENV ADVANCE_BUDGET (Default quota-konform klein) —
-//     Serverless-Budget.
+//   - Budget aus ENV ADVANCE_BUDGET (Default 100) — Serverless-Budget.
 //
 // POST -> { cursor: newCursor, summary } (nur Zahl + Summary, kein State-Leak)
 //         Read-/Write-Fehler -> 502/503 (kein Erfolg ohne Persistenz).
@@ -52,14 +72,25 @@ import {
   mergeFlowState,
 } from "../lib/flow-state.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
-import { strideHashes } from "../lib/stride.mjs";
+import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
+import { createRateGate, parseRetryAfterMs } from "../lib/rate-gate.mjs";
+import {
+  appendBlockWindow,
+  blockRecord,
+  dayOf,
+  flaggedEdgesFrom,
+  pruneBlockWindowDocs,
+  readBlockWindowGitHub,
+  writeBlockWindowGitHub,
+  deleteBlockWindowGitHub,
+} from "../lib/block-window.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 // Whitelists optional aus config.json (Muster api/ledger.js:30-35).
-let config = { network: "mainnet", wss: "wss://xrplcluster.com" };
+let config = { network: "mainnet", wss: "wss://honeycluster.io" };
 try {
   config = { ...config, ...JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8")) };
 } catch {
@@ -70,32 +101,36 @@ export const maxDuration = 30;
 
 const RPC_URL =
   process.env.RPC_URL ||
-  (process.env.WSS_URL || "wss://xrplcluster.com").replace(/^wss:/, "https:");
+  (process.env.WSS_URL || config.wss || "wss://honeycluster.io").replace(/^wss:/, "https:");
 
-// ---------- Quota-Parameter (Befund 2026-10-01; siehe Header) ----------
-// Beobachtetes 60-s-Units-Fenster (public/app.js:1148-1149).
-const QUOTA_60S_UNITS = 10000;
-// Command-Kosten-Obergrenze: clientseitige Kalibrierung public/app.js:169
-// (14 ledger-Kommandos/60 s gegen das beobachtete Fenster) -> 10000/14 ≈ 714,
-// abgerundet auf 700. Pessimistisch auf jeden Command angewendet — die
-// tatsächlichen Unit-Kosten pro Methode sind nicht dokumentiert (Quota liegt
-// auf Infrastruktur-Ebene, nicht in rippled).
-export const COMMAND_COST_CEILING = 700;
-// Geteilter-IP-Margin: ein Tick beansprucht höchstens die HÄLFTE des kleinsten
-// Fensters — Browser-Client und andere Functions teilen das Egress-IP-Quota.
-export const TICK_UNIT_BUDGET = QUOTA_60S_UNITS / 2;
+// Bait-Labels für die serverseitige Filterschicht — Adressen nur aus ENV
+// (Vercel), niemals Seeds. Identisches Muster wie api/ledger.js:41-46.
+const baitLabels = new Map();
+(process.env.BAIT_ADDRESSES || "")
+  .split(",")
+  .map((a) => a.trim())
+  .filter(Boolean)
+  .forEach((addr, i) => baitLabels.set(addr, `HP-${i + 1}`));
 
-// Hash-Auflösungsbudget pro Block: reduziert von 40 auf 6 (Quota). Die
-// Findings-Aggregationsregeln brauchen mehrere Tx pro Block; 6 hält den
-// Worst-Case-Tick (1 ledger + 6 tx = 7 Commands) innerhalb der Quota-Grenze.
-export const MAX_RESOLVE = 6;
+// ---------- Request-Budget-Modell (honeycluster; siehe Header) ----------
+export const REQUESTS_PER_SEC = 10; // honeycluster steady-Limit
+export const TICK_REQUEST_BUDGET = 250; // 25 s nutzbar × 10/s (konservativ)
+export const FETCH_PARALLEL = 4; // 4/0,708 s ≈ 5,7 req/s < 10/s steady
+// Budget-Default: 100 Blöcke/Tick — erreichbar unter min(TICK_REQUEST_BUDGET,
+// Latenzgrenze ~140 Blöcke/Tick) und mit Headroom über dem 5-min-Bedarf
+// (63–77 Blöcke bei 12,6–15,3 Blöcke/min). ENV ADVANCE_BUDGET überschreibt.
+export const DEFAULT_BUDGET = 100;
 
-// Budget-Default: größtes Budget, dessen Worst-Case-Tick die Quota respektiert
-// (reine Funktion, getestet in lib/advance-batch.test.mjs). ENV ADVANCE_BUDGET
-// überschreibt explizit — ein Operator, der mehr headroom kennt, darf mehr.
-export const DEFAULT_BUDGET = maxBudgetForQuota(MAX_RESOLVE);
+// Pure: Worst-Case-Request-Anzahl eines Advance-Ticks. expand:true liefert
+// alle Tx-Objekte im ledger-Kommando -> GENAU 1 Request pro Block (kein
+// tx-Kommando mehr). Garbage-Inputs -> 0.
+export function worstCaseTickRequests(budget) {
+  const b = Number(budget);
+  if (!Number.isFinite(b)) return 0;
+  return Math.max(0, Math.floor(b));
+}
 
-// ---------- Backoff-Parameter (Muster lib/live-gate.mjs:110-137) ----------
+// ---------- Backoff-Parameter (Muster lib/live-gate.mjs) ----------
 const RETRY_SLACK_MS = 2000; // Guard-Slack über dem genannten Fenster
 const BASE_BACKOFF_MS = 2000; // exponentieller Start (ohne genanntes Fenster)
 const BACKOFF_CAP_MS = 30000; // exponentielle Kappe
@@ -103,7 +138,7 @@ const MAX_DURATION_MS = maxDuration * 1000;
 const GUARD_MARGIN_MS = 5000; // Restlaufzeit für Persistenz-Write + Antwort
 
 // Pure: genanntes Retry-Fenster (ms) aus einem RPC-Fehler-Result parsen.
-// Präzedenz wie lib/live-gate.mjs:121-123: retry_after-Feld (Sekunden) vor
+// Präzedenz wie lib/live-gate.mjs: retry_after-Feld (Sekunden) vor
 // "retry in ~Nms" in error_message. Kein Fenster -> null.
 export function parseRetryWindowMs(result) {
   if (!result || typeof result !== "object") return null;
@@ -118,32 +153,13 @@ export function parseRetryWindowMs(result) {
 
 // Pure: Backoff-Dauer (ms) für Versuch i (0-basiert) bei gegebenem genanntem
 // Fenster (oder null): genanntes Fenster voll aussetzen + Slack; sonst
-// exponentiell BASE*2^i mit Kappe (Muster lib/live-gate.mjs:134-135).
+// exponentiell BASE*2^i mit Kappe (Muster lib/live-gate.mjs).
 export function backoffDelayMs(attempt, statedMs) {
   if (statedMs != null && Number.isFinite(statedMs) && statedMs > 0) {
     return Math.floor(statedMs) + RETRY_SLACK_MS;
   }
   const i = Math.max(0, Math.floor(Number(attempt) || 0));
   return Math.min(BASE_BACKOFF_MS * 2 ** i, BACKOFF_CAP_MS);
-}
-
-// Pure: Worst-Case-Command-Anzahl eines Advance-Ticks (Budget × (1 ledger +
-// maxResolve tx)). Garbage-Inputs -> 0.
-export function worstCaseTickCommands(budget, maxResolve) {
-  const b = Math.max(0, Math.floor(Number(budget) || 0));
-  const m = Math.max(0, Math.floor(Number(maxResolve) || 0));
-  return b * (1 + m);
-}
-
-// Pure: größtes Budget, dessen Worst-Case-Tick die Quota respektiert:
-// Commands/Tick × Kosten-Obergrenze <= TICK_UNIT_BUDGET. opts überschreibt die
-// Quota-Parameter (Tests).
-export function maxBudgetForQuota(maxResolve, opts = {}) {
-  const quotaUnits = Number.isFinite(opts?.quotaUnits) ? opts.quotaUnits : TICK_UNIT_BUDGET;
-  const costCeiling = Number.isFinite(opts?.costCeiling) ? opts.costCeiling : COMMAND_COST_CEILING;
-  const ceiling = Math.max(0, Math.floor(quotaUnits / costCeiling));
-  const m = Math.max(0, Math.floor(Number(maxResolve) || 0));
-  return Math.max(0, Math.floor(ceiling / (1 + m)));
 }
 
 // Pure: Cursor-Seed für den ersten Tick. Der Walk startet NICHT bei Index 0
@@ -162,24 +178,46 @@ export function seedCursor(validatedIndex, lookbackBlocks) {
 // Tick-Deadline (Wall-Clock-Guard): gesetzt vom Handler, cleared in finally.
 // rpc() wirft, wenn ein genanntes Quota-Fenster die Restlaufzeit übersteigt —
 // statt die Function über maxDuration zu hämmern (Muster
-// lib/live-gate.mjs:124-130). advance() behandelt einen Fetcher-Fehler als
-// Ende des Walks und persistiert den Partial-Fortschritt (ledger-walk.mjs:40-44).
+// lib/live-gate.mjs). advance() behandelt einen Fetcher-Fehler als Ende des
+// Walks und persistiert den Partial-Fortschritt (ledger-walk.mjs).
 let tickDeadline = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// slowDown/tooBusy-Backoff (verstärtes Muster lib/live-gate.mjs:110-137):
-// genanntes Retry-Fenster (retry_after / "retry in ~Nms") wird voll ausgesetzt
-// (+Slack); ohne genanntes Fenster exponentiell mit Kappe. Ein Fenster, das
-// die Restlaufzeit übersteigt, wirft sofort (Fail-Fast -> Partial-Persist).
+// Rate-Gate pro Request (honeycluster 10/s, Burst 50, Start 20): jeder
+// rpc()-Call erwirbt vor dem fetch. Parallelität im Block-Fetch wird dadurch
+// pro Request gekappt, nicht pro Tick.
+const rateGate = createRateGate({ ratePerSec: REQUESTS_PER_SEC });
+
+// slowDown/tooBusy/429/5xx-Backoff (429-aware, B4): ein HTTP-429 oder 5xx
+// wird behandelt wie ein genanntes Quota-Fenster — retry-after-Header
+// (Sekunden oder HTTP-Datum) wird voll ausgesetzt (+Slack); ohne genanntes
+// Fenster exponentiell mit Kappe. Ein Fenster, das die Restlaufzeit übersteigt,
+// wirft sofort (Fail-Fast -> Partial-Persist). Quota-Fenster innerhalb der
+// Restlaufzeit werden AUSGESISSEN — der Tick verliert nicht still sein
+// Restbudget (a.D. warf !res.ok sofort und advance() deutete den Wurf als
+// Walk-Ende).
 async function rpc(method, params, tries = 3) {
   let lastHint = null;
   for (let i = 0; i < tries; i++) {
+    await rateGate.acquire(1);
     const res = await fetch(RPC_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ method, params: [{ ...params }] }),
     });
+    if (res.status === 429 || res.status >= 500) {
+      // Drosselung/Upstream-Fehler wie slowDown/tooBusy: Fenster aus retry-
+      // after-Header (oder exponentiell) aussetzen, Deadline-Guard beachten.
+      const msg = `HTTP ${res.status}`;
+      lastHint = msg;
+      const delay = backoffDelayMs(i, parseRetryAfterMs(res.headers.get("retry-after")));
+      if (tickDeadline != null && Date.now() + delay > tickDeadline) {
+        throw new Error(`RPC ${msg} — Quota-Fenster übersteigt Restlaufzeit.`);
+      }
+      await sleep(delay);
+      continue;
+    }
     if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
     const data = await res.json();
     if (data?.result?.error === "slowDown" || data?.result?.error === "tooBusy") {
@@ -197,34 +235,15 @@ async function rpc(method, params, tries = 3) {
     if (data?.result?.error) throw new Error(`RPC error: ${data.result.error}`);
     return data.result;
   }
-  throw new Error(`RPC error: slowDown${lastHint ? ` (${lastHint})` : ""}`);
-}
-
-// Hash-Strings -> volle tx-Objekte (Muster api/ledger.js:82-95). SEQUENZIELL
-// (kein Burst) gegen Burst-Throttling; MAX_RESOLVE begrenzt die Auflösung.
-// strideHashes statt slice(0, MAX_RESOLVE) (Kritiker-Befund 2026-10-02):
-// gleiche Budget-Kappe, aber gleichmäßige Stichprobe über den Block statt
-// systematischem Blockanfang-Bias (lib/stride.mjs) — derselbe Fix wie
-// public/app.js:1527. txRecordFrom-Entry braucht volle tx-Objekte
-// (TransactionType) — Hashes allein liefern null.
-async function resolveHashes(hashes) {
-  const entries = [];
-  const list = strideHashes(hashes, MAX_RESOLVE);
-  for (const h of list) {
-    const r = await rpc("tx", { transaction: h }).catch(() => null);
-    if (r && (r.TransactionType || r.tx_json || r.tx)) entries.push(r);
-  }
-  return entries;
+  throw new Error(`RPC error: throttled${lastHint ? ` (${lastHint})` : ""}`);
 }
 
 // ctx für die Engine: knownBad aus der Honeypot-Präzisionsschicht, Whitelists
-// optional aus config.json (Muster api/ledger.js:102-118). firstSeenAt ist
+// optional aus config.json (Muster api/ledger.js). firstSeenAt ist
 // serverlos leer (kein Stream-Fenster) — Frische-Regeln feuern daher primär
 // clientseitig; dokumentierte Grenze. buildCtx() läuft EINMAL pro Tick (nicht
 // pro Block): ein kalter Threats-Cache (lib/threats-service.mjs, 60-s-TTL)
-// würde sonst pro Block account_tx-Calls feuern — zusätzliche Quota-Last, die
-// der Tick-Deadline-Guard begrenzt (dokumentierte Grenze, gleicher
-// Kostenprofil wie der Snapshot-Pfad api/ledger.js).
+// würde sonst pro Block account_tx-Calls feuern — zusätzliche Request-Last.
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 async function buildCtx() {
   const knownBad = new Set();
@@ -244,32 +263,77 @@ async function buildCtx() {
   };
 }
 
+// Adapter: expand:true-Einträge tragen kein meta/ledger_index/close_time_iso
+// (live belegt) — Stempeln der Ledger-Ebenen-Werte pro Entry, damit
+// normalizeTxEntry (detector.mjs) die meta-Form sieht und txRecordFromEntry
+// ledgerSeq/closeTime liefert (Muster lib/live-gate.mjs:248-257 plus
+// close_time_iso).
+function stampExpandEntry(e, ledgerIndex, closeIso) {
+  if (!e || typeof e !== "object") return e;
+  if (e.meta == null && e.metaData != null) e.meta = e.metaData;
+  if (e.ledger_index == null) e.ledger_index = ledgerIndex;
+  if (e.close_time_iso == null && closeIso) e.close_time_iso = closeIso;
+  return e;
+}
+
 // Transport-Naht: ein Ledger-Block {transactions, findings} oder null am
-// Edge. Findings PRO BLOCK via analyzeLedger (lib/detector.mjs) mit dem
-// tick-globalen ctx (Muster api/ledger.js:150).
+// Edge. GENAU EIN Request pro Block (expand:true, alle Tx-Objekte).
+// Findings PRO BLOCK via analyzeLedger (lib/detector.mjs) mit dem
+// tick-globalen ctx. Köder-Filter vor mergeBlock: Entries mit Köder-
+// Endpunkt und Findings mit Köder-Adresse fallen still raus (B2).
 async function fetchBlock(ledgerIndex, ctx) {
-  const led = await rpc("ledger", { ledger_index: ledgerIndex, transactions: true });
-  const hashes = Array.isArray(led?.ledger?.transactions) ? led.ledger.transactions : [];
-  if (hashes.length === 0) return null;
-  const entries = await resolveHashes(hashes);
-  const result = analyzeLedger({ transactions: entries }, ctx);
-  return { transactions: entries, findings: result.findings };
+  let led;
+  try {
+    led = await rpc("ledger", {
+      ledger_index: ledgerIndex,
+      transactions: true,
+      expand: true,
+    });
+  } catch (err) {
+    // lgrNotFound am (zukünftigen) Index: Live-Edge -> null (Walk-Ende).
+    if (String(err?.message).includes("lgrNotFound")) return null;
+    throw err; // Netzwerk-/RPC-Fehler: advance() behandelt ihn als Walk-Ende
+  }
+  const ledger = led?.ledger ?? {};
+  const ledgerIndexActual = Number(ledger.ledger_index ?? led?.ledger_index ?? ledgerIndex);
+  const closeIso =
+    ledger.close_time_iso ??
+    (typeof ledger.close_time === "number"
+      ? new Date((ledger.close_time + 946684800) * 1000).toISOString()
+      : null);
+  const raw = Array.isArray(ledger.transactions) ? ledger.transactions : [];
+  const entries = raw
+    .map((e) => stampExpandEntry(e, ledgerIndexActual, closeIso))
+    .filter((e) => e && typeof e === "object" && (e.TransactionType || e.tx_json || e.tx));
+  // Bait-Filter (serverseitig, still — kein Oracle): tx mit Köder-Endpunkt.
+  const cleanEntries = entries.filter((e) => {
+    const rec = txRecordFromEntry(e, closeIso);
+    if (!rec) return false;
+    if (rec.account && baitLabels.has(rec.account)) return false;
+    if (rec.destination && baitLabels.has(rec.destination)) return false;
+    return true;
+  });
+  const result = analyzeLedger({ transactions: cleanEntries }, ctx);
+  const findings = result.findings.filter((f) => !baitLabels.has(f.address));
+  // LEERBLOCK (0 Txs, kein Fehler) ist truthy: {transactions:[], findings:[]}
+  // — der Cursor rückt vor (Fetcher-Vertrag, Blockage-Fix).
+  return { transactions: cleanEntries, findings, txCount: raw.length, closeIso };
 }
 
 // Fail-closed: Advance/Persistenz erfordert den Token (nur aus ENV).
 const hasPersistence = () => Boolean(process.env.GITHUB_HISTORY_TOKEN);
 
-// ENV-konfigurierbares Budget (Default klein, Serverless-freundlich).
+// ENV-konfigurierbares Budget (Default 100 Blöcke/Tick).
 function budgetOf() {
   const n = Number(process.env.ADVANCE_BUDGET);
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BUDGET;
 }
 
-// ENV-konfigurierbarer Lookback (Default 0 = Live-Edge). Ein positiver Lookback
-// gibt dem Walk eine initiale Historie (Catch-up ~Stunden); Default 0 startet
-// sofort am Live-Edge und akkumuliert Historie natürlch über die Zeit. Ein
-// großer Lookback (~1 Monat) wäre quota-mäßig infeasibel (Budget ~1 Block/Tick
-// gegen ~3–5 s Blockzeit -> Catch-up über Wochen).
+// ENV-konfigurierbarer Lookback (Default 0 = Live-Edge). Ein positiver
+// Lookback gibt dem Walk eine initiale Historie; mit Budget 100/Tick und
+// ~100 s Tick-Abstand (3 versetzte Cron-Workflows) fängt der Walk am
+// Live-Edge an und hält ihn — Catch-up von weiter zurück dauert
+// (Rückstand-Blöcke / 100 pro Tick).
 function lookbackBlocks() {
   const n = Number(process.env.ADVANCE_LOOKBACK);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
@@ -304,21 +368,83 @@ export default async function handler(req, res) {
     // (ii.5) Cursor-Seeding: ein frischer/leerer Cursor startet am Live-Edge
     // (minus Lookback), nicht bei Genesis — sonst würde der Walk nie vorrücken.
     const cursor = await seedCursorIfFresh(doc.cursor);
-    // (iii) transport-agnostisches Advance über das ENV-Budget.
+    // (iii) Advance über das ENV-Budget; Fetcher mit Parallelität
+    // FETCH_PARALLEL (4/0,7 s ≈ 5,7 req/s < 10/s steady, pro Request durch
+    // den Rate-Gate gekappt). Der Wrapper sammelt die Block-Fenster-Zeilen
+    // pro UTC-Tag (Persistenz-Schicht des Block-Fensters).
+    const windowByDay = new Map(); // day -> records[]
     const advanceResult = await advance({
       cursor,
       budget,
       now,
-      fetcher: (idx) => fetchBlock(idx, ctx),
+      fetcher: async (idx) => {
+        const block = await fetchBlock(idx, ctx);
+        if (block) {
+          const tMs = Date.parse(String(block.closeIso ?? ""));
+          const day = dayOf(Number.isFinite(tMs) ? tMs : now) ?? dayOf(now);
+          const flagged = flaggedEdgesFrom(
+            block.transactions.map((e) => txRecordFromEntry(e, block.closeIso)).filter(Boolean),
+            block.findings,
+            baitLabels
+          );
+          const rec = blockRecord(
+            {
+              index: idx,
+              closeTimeIso: block.closeIso,
+              txCount: block.txCount ?? block.transactions.length,
+              flagged,
+            },
+            baitLabels
+          );
+          if (rec) {
+            if (!windowByDay.has(day)) windowByDay.set(day, []);
+            windowByDay.get(day).push(rec);
+          }
+        }
+        return block;
+      },
       flowState: doc.state,
+      opts: { parallel: FETCH_PARALLEL },
     });
-    // (iv) Persistenz des Ergebnisses (Merge ausschließlich im apply).
+    // (iv) Persistenz des Flow-State-Ergebnisses (Merge ausschließlich im
+    // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs).
     const finalDoc = await writeFlowStateGitHub((fresh) =>
       mergeFlowState(fresh, advanceResult, now)
     );
+    // (v) Block-Fenster-Tages-Chunks anhängen (Index-Dedup im Codec macht
+    // Retry-Ticks idempotent).
+    for (const [day, records] of windowByDay) {
+      await writeBlockWindowGitHub(day, (fresh) =>
+        appendBlockWindow({ ...fresh, updatedAt: now }, records)
+      );
+    }
+    // (vi) Retention: der Tag, der seit dem letzten Tick neu aus dem 7-Tage-
+    // Fenster gefallen ist (8 Tage zurück), wird gelöscht — deleteGitHubFile
+    // ist 404-sicher (1 GET + ggf. 1 DELETE pro Tick). Ältere Reste holt der
+    // Nachholpfad (max. 3 Löschungen), wenn Ticks ausgefallen waren; die
+    // Lese-Route liest ohnehin nur Tage im angefragten Fenster.
+    const staleDay = dayOf(now - 8 * 24 * 60 * 60 * 1000);
+    if (staleDay) {
+      await deleteBlockWindowGitHub(staleDay);
+      const { staleDays } = pruneBlockWindowDocs(
+        await Promise.all(
+          [7, 8, 9].map((back) => {
+            const d = dayOf(now - back * 24 * 60 * 60 * 1000);
+            return readBlockWindowGitHub(d).then(({ doc: dd }) => ({ day: d, doc: dd }));
+          })
+        ),
+        now
+      );
+      for (const d of staleDays) {
+        if (d !== staleDay) await deleteBlockWindowGitHub(d);
+      }
+    }
+    const flaggedTxTotal = [...windowByDay.values()]
+      .flat()
+      .reduce((s, r) => s + (Array.isArray(r.f) ? r.f.length : 0), 0);
     return res.status(200).json({
       cursor: finalDoc.cursor,
-      summary: advanceResult.summary,
+      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}`,
     });
   } catch (err) {
     // Read-/Write-Fehler (409-Retry scheitert, 403/429, Netzwerk) -> kein

@@ -225,6 +225,17 @@ html, body {
   scroll-margin-block-start: 84px;
 }
 
+/* Dashboard-View: die beiden Panels (Live-Feed, Aktivitäts-Graph) sind Kinder
+   eines neutralen Containers — ohne eigene Rhythmus-Regel klebten ihre
+   1px-Ink-Borders aneinander (Astra-6 lab_graphite: Borders dürfen nicht
+   verschmelzen). Der View übernimmt denselben Achsabstand wie main (22 px),
+   also denselben Token-Abstand, den main ohnehin nutzt. */
+#view-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
 /* ---------------- Panels ---------------- */
 
 main {
@@ -348,6 +359,52 @@ main {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 9px;
+}
+
+/* ---------------- Feed-Modus-Auswahl + Fenster-Steuerung ----------------
+   Modus-Tabs (Historie/Live) und Fensterwahl (24 h/3 d/7 d) direkt über dem
+   Feed; alle interaktiven Elemente auf 44 px Zielhöhe (Astra-6-Contract,
+   .graph-tab/.filter-select erben). */
+.feed-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.feed-mode-tabs { margin-bottom: 0; }
+
+.feed-more-row {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 0;
+}
+
+/* 'Mehr laden': 44 px Zielhöhe erbt die .download-btn-Regel; eigene Breite,
+   damit der Button nicht die volle Panelbreite aufreißt. */
+.feed-more-btn { min-height: 44px; flex: 0 1 auto; }
+
+/* ---------------- Fenster-Stundenchart (SVG, selbstständig) -------------
+   Farblos bis auf die bestehende Maliziös-Semantik: Blöcke tonal,
+   geflaggte Stunden in der bestehenden --a6-error-Tinte. Kein Glow, keine
+   neue Farbe (lab_graphite). */
+.feed-chart {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: var(--a6-surface-alt);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-md);
+}
+
+.feed-chart svg { display: block; width: 100%; height: auto; }
+
+.feed-chart-meta {
+  margin: 6px 0 0;
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .badge {
@@ -1102,6 +1159,7 @@ main {
   .lang-btn,
   .hx-stage,
   .hx-kpi,
+  .feed-chart,
   #graph {
     border: 1px solid CanvasText;
     box-shadow: none;

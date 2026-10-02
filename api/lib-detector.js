@@ -11,7 +11,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs"]);
+// rate-gate.mjs (2026-10-02): DOM-freie Token-Bucket-Bibliothek für den
+// Opt-in-LIVE-Modus des Browsers (public/app.js importiert '/lib/rate-gate.mjs').
+const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs"]);
 
 export default async function handler(req, res) {
   try {

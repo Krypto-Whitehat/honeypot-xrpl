@@ -1,39 +1,35 @@
-// scripts/calibrate-quota.mjs — Kalibrierungsfahrt gegen das Units-Quota von
-// xrplcluster.com (Befund 2026-10-02: alle Budgets beruhen auf der für
-// expand:true kalibrierten 700-Units-Obergrenze aus public/app.js:169 /
-// api/advance.js:73-78; die realen Kosten von plain ledger-/tx-Kommandos sind
-// UNVERIFIED).
+// scripts/calibrate-quota.mjs — Kalibrierungsfahrt gegen die Request-Raten
+// von honeycluster.io (Umstellung 2026-10-02: das xrplcluster-Units-Modell
+// (10.000 Units/60 s, 700/Command) ist durch das honeycluster-Request-Modell
+// ersetzt: 10 req/s steady, Burst 50/5 s, 20 initial — Nutzer-Angabe; die
+// Throttle-Semantik bei echtem Überschreiten ist UNVERIFIED).
 //
-// Zweck: MISST real, wie viele Kommandos einer Methode pro Fenster durchgehen,
-// bevor tooBusy/slowDown kommt, und leitet daraus die tatsächliche Unit-Kosten-
-// Obergrenze ab (Fenster-Units / gesendete Kommandos). Ergebnis als JSON auf
-// stdout — erst danach dürfen ANALYZE_EVERY_N_BLOCKS / MAX_RESOLVE /
-// QUOTA_CALLS_PER_MIN erhöht werden (Ergebnis in den Kommentaren von
-// public/app.js und api/advance.js verankern).
-//
-// Beobachtete Fenster (live erhalten 2026-10-02): "units quota (10000 per 60s)"
-// und "units quota (500000 per 3600s) exhausted, retry in ~91237ms". Das
-// 3600-s-Fenster ist nicht aktiv ansteuerbar — es erscheint als tooBusy-
-// error_message und wird hier protokolliert.
+// Zweck: MISST real, wie viele Requests pro Fenster durchgehen, bevor HTTP
+// 429/tooBusy/slowDown kommt, und protokolliert das beobachtete Verhalten
+// (Status, error_message, retry-after). Ergebnis als JSON auf stdout — erst
+// danach dürfen TICK_REQUEST_BUDGET/ADVANCE_BUDGET über den konservativen
+// Default hinaus erhöht werden (Ergebnis in den Kommentaren von
+// api/advance.js verankern).
 //
 // AUFRUF:
 //   node scripts/calibrate-quota.mjs ledger   (plain ledger-Kommandos)
 //   node scripts/calibrate-quota.mjs tx       (tx-Kommandos, ein Real-Hash)
 //
 // Rein lesend: kein Dateizugriff, kein Write, kein Secret. Wall-Clock-Guard
-// 120 s; maximal MAX_COMMANDS Kommandos pro Lauf (knapp über dem Client-
-// Deckel 14, damit das beobachtete Limit sichtbar wird).
+// 120 s; maximal MAX_COMMANDS Kommandos pro Lauf (knapp über dem steady-
+// Limit 10/60 s, damit das beobachtete Limit sichtbar wird — bewusst NICHT
+// am Burst-Limit 50/5 s ziehen, um honeycluster nicht zu belasten).
 
-// Import-Muster wie scripts/smoke-advance.mjs: die exportierten Budget-
-// Konstanten aus api/advance.js (Top-Level dort ist nur der try/catch-gefangene
-// config-Read — kein Netzwerk beim Import).
-import { COMMAND_COST_CEILING, MAX_RESOLVE, TICK_UNIT_BUDGET } from "../api/advance.js";
+// Import-Muster wie scripts/smoke-advance.mjs: die exportierten Request-
+// Budget-Konstanten aus api/advance.js (Top-Level dort ist nur der try/
+// catch-gefangene config-Read — kein Netzwerk beim Import).
+import { REQUESTS_PER_SEC, TICK_REQUEST_BUDGET, DEFAULT_BUDGET } from "../api/advance.js";
 
 const RPC_URL =
   process.env.RPC_URL ||
-  (process.env.WSS_URL || "wss://xrplcluster.com").replace(/^wss:/, "https:");
+  (process.env.WSS_URL || "wss://honeycluster.io").replace(/^wss:/, "https:");
 
-const MAX_COMMANDS = 16; // knapp über QUOTA_CALLS_PER_MIN=14
+const MAX_COMMANDS = 16; // knapp über dem steady-Limit 10/60 s
 const GUARD_MS = 120000;
 const started = Date.now();
 
@@ -43,13 +39,23 @@ if (method !== "ledger" && method !== "tx") {
   process.exit(2);
 }
 
-// Ein RPC-Versuch; gibt { ok, result } zurück (tooBusy/slowDown -> ok:false).
+// Ein RPC-Versuch; gibt { ok, result } zurück (HTTP 429/5xx oder
+// tooBusy/slowDown -> ok:false, throttled:true — 429-aware Kalibrierung).
 async function attempt(body) {
   const res = await fetch(RPC_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (res.status === 429 || res.status >= 500) {
+    return {
+      ok: false,
+      throttled: true,
+      error: `HTTP ${res.status}`,
+      retryAfter: res.headers.get("retry-after") ?? null,
+      message: null,
+    };
+  }
   if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
   const data = await res.json().catch(() => null);
   const err = data?.result?.error;
@@ -93,21 +99,18 @@ if (method === "tx") {
   }
 }
 
-// Abgeleitete Obergrenze: wenn zu viele Kommandos ins 60-s-Fenster passten,
-// liegt die echte Kosten-Obergrenze unter dem kalibrierten Wert 700.
-const windowUnits = 10000;
-const observedCeiling = sent > 0 ? Math.floor(windowUnits / sent) : null;
-
+// Abgeleitete Obergrenze: wenn zu viele Requests ins 60-s-Fenster passten,
+// liegt das echte Limit über dem steady-Wert 10/s; kam die Drossel früher,
+// liegt es darunter (Obergrenze, nicht Messwert).
 console.log(JSON.stringify({
   method,
   commandsSent: sent,
-  throttled: throttle ? { error: throttle.error, message: throttle.message } : null,
+  throttled: throttle ? { error: throttle.error, message: throttle.message ?? null, retryAfter: throttle.retryAfter ?? null } : null,
   sampleTxType: sample,
-  observed60sCommands: throttle?.throttled ? sent - 1 : sent,
-  derivedUnitsPerCommandUpperBound: observedCeiling,
-  calibratedCeiling: COMMAND_COST_CEILING,
-  tickUnitBudget: TICK_UNIT_BUDGET,
-  maxResolveDefault: MAX_RESOLVE,
-  note: "derived ist Obergrenze, nicht Messwert: zu viele Kommandos -> echte Kosten unter derived; zu wenige (Throttle früh) -> Kosten über derived. 3600-s-Fenster ggf. in message.",
+  observed60sRequests: throttle?.throttled ? sent - 1 : sent,
+  steadyLimitAssumed: REQUESTS_PER_SEC,
+  tickRequestBudget: TICK_REQUEST_BUDGET,
+  defaultBudget: DEFAULT_BUDGET,
+  note: "observed60sRequests ist Obergrenze, nicht Messwert: mehr Requests durch -> echtes Limit über 10/s; frühe Drossel -> darunter. Throttle-Semantik (429 vs tooBusy) UNVERIFIED — beide werden in api/advance.js gleich behandelt.",
 }, null, 2));
 process.exit(0);

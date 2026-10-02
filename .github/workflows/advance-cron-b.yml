@@ -1,0 +1,30 @@
+# Versetzter Trigger B (Offset 2/7/12/…): zusammen mit advance-cron.yml
+# (Offset 0) und advance-cron-c.yml (Offset 4) ergibt sich ein Advance-Tick
+# alle ~100 s. Gemeinsamer concurrency-group 'advance-tick' mit
+# cancel-in-progress:false — nie zwei parallele Walks (dritter Tick wird
+# queued). Kein Secret nötig (öffentlicher POST; GITHUB_HISTORY_TOKEN liegt
+# ausschließlich als Vercel-ENV, api/advance.js fail-closed 503 ohne Token).
+name: Advance-Trigger B (Live-Walk alle 5 Minuten, Offset 2)
+
+on:
+  schedule:
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: advance-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: POST /api/advance
+        run: |
+          code=$(curl -s -o response.json -w "%{http_code}" -X POST https://honeypot-xrpl.vercel.app/api/advance)
+          echo "HTTP $code"
+          cat response.json
+          # 200 = Tick gelaufen; 503 = fail-closed (Vercel-ENV GITHUB_HISTORY_TOKEN fehlt) —
+          # beides dokumentiert; der Workflow scheitert nur bei Transport-/5xx-Fehlern außer 503.
+          if [ "$code" != "200" ] && [ "$code" != "503" ]; then exit 1; fi

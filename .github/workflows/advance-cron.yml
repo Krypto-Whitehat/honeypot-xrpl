@@ -8,12 +8,23 @@
 # Expressions lassen den Deploy fehlschlagen (README, Abschnitt Cron-Trigger).
 # GitHub Actions funktioniert unabhängig vom Vercel-Plan; 5 min ist die
 # kleinste erlaubte Scheduling-Frequenz.
-name: Advance-Trigger (Live-Walk alle 5 Minuten)
+#
+# VERSSETZTE TRIGGER (2026-10-02): drei Workflows (Offsets 0/2/4) ergeben
+# zusammen einen Tick alle ~100 s — nötig, damit der Walk mit Budget 100
+# Blöcke/Tick die Blockrate (~12,6–15,3 Blöcke/min) hält und Rückstand
+# aufholt. Der gemeinsame concurrency-group 'advance-tick' mit
+# cancel-in-progress:false stellt sicher, dass NIE zwei Walks parallel
+# laufen (dritter Tick in der Gruppe wird queued, nicht verworfen).
+name: Advance-Trigger A (Live-Walk alle 5 Minuten, Offset 0)
 
 on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: advance-tick
+  cancel-in-progress: false
 
 jobs:
   tick:

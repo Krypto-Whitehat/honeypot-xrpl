@@ -34,9 +34,12 @@ import { readFlowStateGitHub, projectFlowStateView } from "../lib/flow-state.mjs
 
 export const maxDuration = 30;
 
+// honeycluster-Umstellung 2026-10-02: Standard-Endpunkt ist der offiziell
+// gelistete Full-History-Server (config.json:3); ENV RPC_URL/WSS_URL
+// überschreibt weiterhin explizit.
 const RPC_URL =
   process.env.RPC_URL ||
-  (process.env.WSS_URL || "wss://xrplcluster.com").replace(/^wss:/, "https:");
+  (process.env.WSS_URL || "wss://honeycluster.io").replace(/^wss:/, "https:");
 const VALIDATED_CACHE_MS = 60000; // 60-s-Cache wie api/ledger.js:50
 let validatedCache = null;        // { time, index } — nur im Prozess-Speicher
 
@@ -97,6 +100,10 @@ export default async function handler(req, res) {
   }
   try {
     const { doc } = await readFlowStateGitHub();
+    // baitLabels optional: projectFlowStateView löst ENV BAIT_ADDRESSES selbst
+    // (Muster api/ledger.js) — edges/rolesByAddress/memberAddresses werden
+    // serverseitig STILL gefiltert (B2; public/history-host.html rendert
+    // rolesByAddress ohne eigenen Deny-Gate).
     const view = projectFlowStateView(doc);
     const validatedIndex = await fetchValidatedIndex();
     return res.status(200).json({ ...view, validatedIndex });

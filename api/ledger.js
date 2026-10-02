@@ -1,13 +1,19 @@
 // Vercel Function: GET /api/ledger — Live-Ledger-Snapshot + Detektor-Analyse.
 //
-// Datenpfad (einziger verifizierter Serverpfad, da WSS-Ledger-Events in der
-// Sandbox nicht beobachtbar waren): JSON-RPC per fetch POST auf
-// https://xrplcluster.com mit {method:'ledger', params:[{transactions:true}]}.
-// Die Hash-Strings liegen nachweislich in result.ledger.transactions (NICHT in
-// result.transactions — per Live-Call verifiziert). Sie werden mit max. 8
-// parallelen {method:'tx'}-Calls aufgelöst (tx liefert die vollen tx-Felder
-// plus meta flach in result), bevor dieselbe Engine analyzeLedger läuft wie im
-// Browser (lib/detector.mjs — single source of truth).
+// Datenpfad (honeycluster-Umstellung 2026-10-02): JSON-RPC per fetch POST auf
+// https://honeycluster.io (config.json:3, offiziell gelisteter Mainnet-
+// Server) mit {method:'ledger', params:[{ledger_index:'validated',
+// transactions:true, expand:true}]}. expand:true liefert das vollständige
+// Ledger-Objekt mit allen Tx-Objekten (hash + metaData) in GENAU EINEM
+// Request — die Hash-Auflösung über separate tx-Kommandos (MAX_RESOLVE/
+// strideHashes/PARALLEL, a.D. 7 Requests pro Snapshot) entfällt. Ohne
+// expand:true liefert honeycluster nur Hash-Strings (live belegt 2026-10-02:
+// 0 volle Objekte; mit expand: alle Objekte mit metaData.AffectedNodes).
+// expand-Einträge tragen kein meta/ledger_index/close_time_iso — sie werden
+// pro Entry gestempelt (Adapter wie api/advance.js), bevor dieselbe Engine
+// analyzeLedger läuft wie im Browser (lib/detector.mjs — single source of
+// truth). Der Hash-Strings-Fallback bleibt defensiv erhalten (andere
+// Endpunkte ohne expand-Support).
 //
 // ANONYMITÄT: Jede öffentliche Antwort läuft durch lib/sanitize.mjs
 // (sanitizeText auf notes); Köder-Adressen werden zu Labels, Funde auf Köder-
@@ -22,13 +28,14 @@ import { strideHashes } from "../lib/stride.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
 import { sanitizeText } from "../lib/sanitize.mjs";
+import { parseRetryAfterMs } from "../lib/rate-gate.mjs";
 
 export const maxDuration = 30;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
-let config = { network: "mainnet", wss: "wss://xrplcluster.com" };
+let config = { network: "mainnet", wss: "wss://honeycluster.io" };
 try {
   config = { ...config, ...JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8")) };
 } catch {
@@ -46,12 +53,10 @@ const baitLabels = new Map();
   .forEach((addr, i) => baitLabels.set(addr, `HP-${i + 1}`));
 
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-const MAX_RESOLVE = 6; // Hash-Auflösungsbudget pro Snapshot (Quota-Bilanz
-                       // 2026-10-02: 7 Commands × 700 Units = 4.900 Units pro
-                       // Snapshot; geteilt mit Cron-Tick 2.450/2 min und
-                       // flow-state ≤700/min -> 8.050 <= 10.000 pro 60-s-
-                       // Fenster. Operator-Alternative bei 1-min-Cron: 4.)
-const PARALLEL = 8; // max. 8 parallele tx-Calls (verifiziertes Muster)
+// Hash-Auflösung nur noch im defensiven Fallback (Endpunkte ohne expand-
+// Support). honeycluster-Snapshots laufen mit expand:true -> 1 Request.
+const MAX_RESOLVE = 6; // Fallback-Kappe (strideHashes bleibt gleichmäßig)
+const PARALLEL = 8; // max. 8 parallele tx-Calls im Fallback
 const CACHE_MS = 60000; // 60-s-Cache wie threats-service
 const ERROR_CACHE_MS = 5000; // kurzer Negativ-Cache: Wiederholte Anfragen im
                              // Fenster bedient der Fehler, statt erneut 3
@@ -62,8 +67,11 @@ const ERROR_CACHE_MS = 5000; // kurzer Negativ-Cache: Wiederholte Anfragen im
 let snapshotCache = null; // { time, body } — nur im Prozess-Speicher
 let errorCache = null; // { time } — nur im Prozess-Speicher
 
-// slowDown-Backoff: xrplcluster (Clio) drosselt bei Häufung — live beobachtet
-// 2026-09-28. Ein Retry-Fenster pro Call macht den Snapshot robust.
+// slowDown/tooBusy/429/5xx-Backoff (429-aware, B4): HTTP 429 und 5xx werden
+// behandelt wie ein genanntes Quota-Fenster — retry-after-Header (Sekunden
+// oder HTTP-Datum) wird ausgesetzt (Cap 30 s wie der alte lineare Backoff,
+// damit der Snapshot innerhalb maxDuration bleibt); ohne Fenster exponentiell
+// 1,5 s/3 s/4,5 s wie bisher. a.D. warf !res.ok sofort.
 async function rpc(method, params, tries = 3) {
   for (let i = 0; i < tries; i++) {
     const res = await fetch(RPC_URL, {
@@ -71,6 +79,12 @@ async function rpc(method, params, tries = 3) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ method, params: [{ ...params }] }),
     });
+    if (res.status === 429 || res.status >= 500) {
+      const stated = parseRetryAfterMs(res.headers.get("retry-after"));
+      const delay = stated != null ? Math.min(stated, 30000) : 1500 * (i + 1);
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
     if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
     const data = await res.json();
     if (data?.result?.error === "slowDown" || data?.result?.error === "tooBusy") {
@@ -83,11 +97,20 @@ async function rpc(method, params, tries = 3) {
   throw new Error("RPC error: slowDown");
 }
 
-// Hash-Strings -> volle tx-Objekte (tx liefert Felder + meta flach in result).
-// strideHashes statt slice(0, MAX_RESOLVE) (Kritiker-Befund 2026-10-02):
-// gleiche Budget-Kappe, aber gleichmäßige Stichprobe über den Block statt
-// systematischem Blockanfang-Bias (lib/stride.mjs) — derselbe Fix wie
-// public/app.js:1527 und api/advance.js.
+// Adapter: expand:true-Einträge tragen kein meta/ledger_index/close_time_iso
+// (live belegt) — Stempeln der Ledger-Ebenen-Werte pro Entry (Muster
+// api/advance.js stampExpandEntry).
+function stampExpandEntry(e, ledgerIndex, closeIso) {
+  if (!e || typeof e !== "object") return e;
+  if (e.meta == null && e.metaData != null) e.meta = e.metaData;
+  if (e.ledger_index == null) e.ledger_index = ledgerIndex;
+  if (e.close_time_iso == null && closeIso) e.close_time_iso = closeIso;
+  return e;
+}
+
+// Hash-Strings -> volle tx-Objekte (NUR Fallback für Endpunkte ohne expand-
+// Support; tx liefert Felder + meta flach in result). strideHashes statt
+// slice(0, MAX_RESOLVE): gleiche Budget-Kappe, gleichmäßige Stichprobe.
 async function resolveHashes(hashes) {
   const entries = [];
   const list = strideHashes(hashes, MAX_RESOLVE);
@@ -137,7 +160,12 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Ledger-Abfrage fehlgeschlagen." });
     }
 
-    const led = await rpc("ledger", { ledger_index: "validated", transactions: true });
+    // expand:true: GENAU EIN Request, alle Tx-Objekte (hash + metaData).
+    const led = await rpc("ledger", {
+      ledger_index: "validated",
+      transactions: true,
+      expand: true,
+    });
     const rawTxs = led?.ledger?.transactions ?? [];
     const closeTime =
       led?.ledger?.close_time_iso ??
@@ -152,6 +180,7 @@ export default async function handler(req, res) {
     let txSource = [];
 
     if (rawTxs.length > 0 && rawTxs.every((t) => typeof t === "string")) {
+      // Fallback (Endpunkt ohne expand-Support): Hash-Auflösung per tx.
       const { entries, unresolved } = await resolveHashes(rawTxs);
       resolvedTxCount = entries.length;
       unresolvedTxCount = unresolved;
@@ -159,7 +188,11 @@ export default async function handler(req, res) {
       const result = analyzeLedger({ transactions: entries }, await buildCtx());
       findings = result.findings;
     } else {
-      txSource = rawTxs;
+      // expand:true-Pfad: volle Objekte, Adapter stempelt meta/ledger_index/
+      // close_time_iso pro Entry; analyzeLedger akzeptiert die
+      // {ledger:{transactions}}-Form direkt (extractTransactions).
+      const ledgerIndex = Number(led?.ledger?.ledger_index ?? led?.ledger_index) || null;
+      txSource = rawTxs.map((e) => stampExpandEntry(e, ledgerIndex, closeTime));
       const result = analyzeLedger(led, await buildCtx());
       findings = result.findings;
       resolvedTxCount = ledgerTxCount;
