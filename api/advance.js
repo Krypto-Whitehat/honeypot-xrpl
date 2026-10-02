@@ -239,13 +239,20 @@ async function rpc(method, params, tries = 3) {
 }
 
 // ctx für die Engine: knownBad aus der Honeypot-Präzisionsschicht, Whitelists
-// optional aus config.json (Muster api/ledger.js). firstSeenAt ist
-// serverlos leer (kein Stream-Fenster) — Frische-Regeln feuern daher primär
-// clientseitig; dokumentierte Grenze. buildCtx() läuft EINMAL pro Tick (nicht
+// optional aus config.json (Muster api/ledger.js). firstSeenAt wird aus dem
+// persistierten Flow-State geseedet (Cluster-firstSeen pro Adresse): die
+// drainer-sweep-Regel — einzige Frische-Regel mit severity malicious —
+// feuerte im Persistenzpfad bisher nie (firstSeenAt war leer); persistierte
+// Beweise enthalten jetzt strukturell Drainer-Nachweise. history ist eine
+// pro Tick lebende Map (buildCtx läuft EINMAL pro Tick): sie überlebt die
+// ~100 Blöcke eines Ticks und wird beim Tick-Start mit tiny-Kanten und
+// firstSeen aus doc.state.clusters geseedet, damit Cross-Ledger-Fenster über
+// Tick-Grenzen Anschluss finden. buildCtx() läuft EINMAL pro Tick (nicht
 // pro Block): ein kalter Threats-Cache (lib/threats-service.mjs, 60-s-TTL)
 // würde sonst pro Block account_tx-Calls feuern — zusätzliche Request-Last.
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-async function buildCtx() {
+const HISTORY_SEED_MAX = 20000; // Speicher-Obergrenze für firstSeen/history-Seeds
+async function buildCtx(doc) {
   const knownBad = new Set();
   try {
     for (const t of await getPublicThreats()) {
@@ -254,12 +261,37 @@ async function buildCtx() {
   } catch {
     /* Honeypot-Schicht optional */
   }
+  const firstSeenAt = new Map();
+  const history = new Map();
+  const clusters = doc?.state?.clusters && typeof doc.state.clusters === "object" ? doc.state.clusters : {};
+  for (const c of Object.values(clusters)) {
+    if (!c || typeof c !== "object") continue;
+    const fsRaw = c.firstSeen;
+    const fsMs = typeof fsRaw === "string" ? Date.parse(fsRaw) : Number(fsRaw);
+    if (!Number.isFinite(fsMs)) continue;
+    const members = Array.isArray(c.memberAddresses) ? c.memberAddresses : [];
+    for (const addr of members) {
+      if (typeof addr !== "string" || !XRPL_ADDR_RE.test(addr)) continue;
+      if (firstSeenAt.size >= HISTORY_SEED_MAX) break;
+      if (!firstSeenAt.has(addr)) firstSeenAt.set(addr, fsMs);
+    }
+    // history-Seed: mainDrainers/collectors-Adressen mit ihrem Volumen als
+    // fundedAt-Referenz — Cross-Ledger-Sweep/Union über Tick-Grenzen.
+    for (const d of Array.isArray(c.mainDrainers) ? c.mainDrainers : []) {
+      if (typeof d?.address !== "string") continue;
+      if (history.size >= HISTORY_SEED_MAX) break;
+      if (!history.has(d.address)) {
+        history.set(d.address, { tinyDests: new Set(), fundedAt: Number(d.outDrops) || null, createdInWindow: false, lastLedger: null });
+      }
+    }
+  }
   return {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
     benignAccounts: new Set(config.benign_accounts || []),
     threats: new Map(),
-    firstSeenAt: new Map(),
+    firstSeenAt,
+    history,
   };
 }
 
@@ -363,8 +395,9 @@ export default async function handler(req, res) {
     // (i) persistierten Cursor + Flow-State lesen (readFlowStateGitHub liefert
     // {doc, sha} — hier wird das Dokument dekonstruiert, nicht der Wrapper).
     const { doc } = await readFlowStateGitHub();
-    // (ii) Engine-Kontext EINMAL pro Tick (siehe buildCtx-Kommentar).
-    const ctx = await buildCtx();
+    // (ii) Engine-Kontext EINMAL pro Tick (siehe buildCtx-Kommentar):
+    // firstSeenAt/history werden aus dem persistierten Flow-State geseedet.
+    const ctx = await buildCtx(doc);
     // (ii.5) Cursor-Seeding: ein frischer/leerer Cursor startet am Live-Edge
     // (minus Lookback), nicht bei Genesis — sonst würde der Walk nie vorrücken.
     const cursor = await seedCursorIfFresh(doc.cursor);

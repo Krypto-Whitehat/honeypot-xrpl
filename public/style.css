@@ -718,12 +718,15 @@ main {
 .swatch-unknown { background: #f0f0f2; border-color: #62626b; border-radius: 50%; }
 .swatch-cluster { background: #ffffff; border: 1px solid #17171b; }
 
-/* Kantentyp-Swatches */
-.swatch-payment { background: #b3261e; }
-.swatch-trustset { background: #b45309; }
-.swatch-offer { background: #a16207; }
+/* Kantentyp-Swatches — Farben müssen von den Rollen-Swatches unterscheidbar
+   sein (Befund: payment==drainer #b3261e und other==relay #62626b waren
+   identisch; payment nutzt nun den Drainer-Highlight-Ton, other den
+   Relay-Randton, check entspricht EDGE_COLORS für CheckCreate/
+   PaymentChannelCreate in public/app.js). */
+.swatch-payment { background: #d03b33; }
 .swatch-escrow { background: #6d28d9; }
-.swatch-other { background: #62626b; }
+.swatch-check { background: #0f766e; }
+.swatch-other { background: #3f3f46; }
 
 /* Schweregrad-Swatches */
 .swatch-sev-malicious { background: #b3261e; }
@@ -895,6 +898,14 @@ main {
 .chain-node.chain-relay {
   border-color: var(--a6-control-line);
   color: var(--a6-muted);
+}
+
+/* Unbekannte Rolle in der Flusskette: wie der Rollen-Swatch #f0f0f2 mit
+   abgedunkeltem Rand — abgrenzbar von relay (grau) und surface-alt. */
+.chain-node.chain-unknown {
+  border-color: #62626b;
+  color: var(--a6-body);
+  background: #f0f0f2;
 }
 
 .chain-arrow { color: var(--a6-muted); }

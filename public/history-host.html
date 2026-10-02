@@ -135,14 +135,16 @@ function cssToken(name) {
 }
 
 // Rollenfarbe ausschließlich aus den bestehenden Tokens; unknown/Fallback ->
-// neutraler Randton (Muster globe.js: zu helle Flächen auf weißer Bühne).
+// derselbe Teller wie ROLE_COLORS.unknown in public/app.js (#f0f0f2 mit
+// Randton #62626b als Knotenrand) — vorher war der Fallback #62626b und
+// damit von einem echten Relay-Knoten nicht zu unterscheiden.
 function roleColor(role) {
   const token = { source: '--a6-role-source', drainer: '--a6-role-drainer', collector: '--a6-role-collector', relay: '--a6-role-relay' }[role];
   if (token) {
     const v = cssToken(token);
     if (v) return v;
   }
-  return '#62626b';
+  return '#f0f0f2';
 }
 
 // Deterministische Kurzform für Labels (volle Adresse im title-Tooltip).

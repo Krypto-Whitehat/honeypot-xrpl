@@ -129,13 +129,23 @@ async function resolveHashes(hashes) {
 // ctx für die Engine: knownBad aus der Honeypot-Präzisionsschicht
 // (getPublicThreats lässt Angreifer-Adressen öffentlich, Köder werden zu
 // Labels — sanitize.mjs:68-72), Whitelists optional aus config.json.
-// firstSeenAt ist serverlos leer (kein Stream-Fenster) — Frische-Regeln
-// feuern daher primär clientseitig; dokumentierte Grenze.
+// history ist eine Modul-Level-Map (überlebt Requests innerhalb der
+// Function-Instanz): Cross-Ledger-Regeln (Dusting-Union, Sweep-Referenz)
+// feuern damit auch im JSON-RPC-Pfad. firstSeenAt wird aus den
+// Threat-firstSeen-Werten geseedet (Muster server/index.mjs:619-624) —
+// Frische-Regeln sind hier nicht länger inert.
+const ledgerHistory = new Map();
+const HISTORY_MAX = 20000;
 async function buildCtx() {
   const knownBad = new Set();
+  const firstSeenAt = new Map();
   try {
     for (const t of await getPublicThreats()) {
-      if (t?.address && XRPL_ADDR_RE.test(t.address)) knownBad.add(t.address);
+      if (t?.address && XRPL_ADDR_RE.test(t.address)) {
+        knownBad.add(t.address);
+        const fs0 = Date.parse(t.firstSeen ?? "");
+        if (Number.isFinite(fs0) && !firstSeenAt.has(t.address)) firstSeenAt.set(t.address, fs0);
+      }
     }
   } catch {
     /* Honeypot-Schicht optional */
@@ -145,7 +155,8 @@ async function buildCtx() {
     benignIssuers: new Set(config.benign_issuers || []),
     benignAccounts: new Set(config.benign_accounts || []),
     threats: new Map(),
-    firstSeenAt: new Map(),
+    firstSeenAt,
+    history: ledgerHistory,
   };
 }
 
@@ -199,10 +210,22 @@ export default async function handler(req, res) {
     }
 
     // txRecords für den Snapshot-Fallback des Client-Graphen (poll-Modus):
-    // Köder-Endpunkte werden vor der Auslieferung gefiltert.
+    // Bait-Filter von 'verwerfen' auf 'umbenennen' umgestellt (Kernfall des
+    // Honeypots: Angreifer interagiert nur mit Ködern — bisher fiel die
+    // gesamte Angreifer-Aktivität aus dem Graph, graphTx 0/nodes []). Der
+    // Köder-Endpunkt wird durch sein Label (HP-n) ersetzt; die Köder-Adresse
+    // wird nie Knoten-Id. Findings auf Köder-Adressen bleiben unterdrückt
+    // (Oracle-Schutz unverändert, siehe findings-Filter unten).
     const txRecords = txSource
       .map((e) => txRecordFromEntry(e, closeTime))
-      .filter((r) => r && !baitLabels.has(r.account) && !(r.destination && baitLabels.has(r.destination)));
+      .filter((r) => r)
+      .map((r) => {
+        const rec = { ...r };
+        if (baitLabels.has(rec.account)) rec.account = baitLabels.get(rec.account);
+        if (rec.destination && baitLabels.has(rec.destination)) rec.destination = baitLabels.get(rec.destination);
+        return rec;
+      })
+      .filter((r) => r.account !== r.destination); // Label-Kollision (beide Endpunkte derselbe Köder) -> keine Kante
 
     const body = {
       ledgerIndex: led?.ledger_index ?? null,

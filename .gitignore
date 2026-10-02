@@ -17,6 +17,7 @@ monitor.log
 # Tooling
 node_modules/
 .vercel/
+.zcode/
 .DS_Store
 Thumbs.db
 

@@ -1143,6 +1143,13 @@ const RULE_NAME = new Map(RULE_CATALOG.map((r) => [r.id, r.name]));
 const liveStats = { ledgers: 0, txs: 0, malicious: 0, suspect: 0, info: 0 };
 const logEntries = [];              // {t, ledgerIndex, ruleId, severity, address, note}
 const firstSeenAt = new Map();      // Konto -> Zeitstempel der ersten Sichtung (Stream-Fenster)
+// Cross-Ledger-Gedächtnis der Engine (ctx.history): Konto -> {tinyDests:Set,
+// fundedAt, createdInWindow, lastLedger}. Modul-Level wie firstSeenAt —
+// buildCtx wird pro Ledger-Ereignis aufgerufen, die Map überlebt die
+// Aufrufe; ohne persistenten Träger wäre history auf einen Aufruf beschränkt.
+// Begrenzung: ~FIRST_SEEN_MAX Konten / 200 Ledger (siehe buildCtx-Prune).
+const ledgerHistory = new Map();
+const HISTORY_MAX_LEDGERS = 200;
 const seenLedgers = new Set();      // Deduplizierung WSS/Fallback
 const liveFindings = { malicious: 0, suspect: 0, info: 0 };
 
@@ -1304,9 +1311,40 @@ function connLabel() {
 }
 
 function buildCtx() {
+  // history-Begrenzung: ~FIRST_SEEN_MAX Konten / 200 Ledger. Über die
+  // Ledger-Spanne hinaus alte Einträge fallen raus (deterministisch nach
+  // lastLedger asc).
+  if (ledgerHistory.size > FIRST_SEEN_MAX) {
+    let minLedger = Infinity;
+    for (const h of ledgerHistory.values()) {
+      const l = Number(h?.lastLedger);
+      if (Number.isFinite(l) && l < minLedger) minLedger = l;
+    }
+    if (Number.isFinite(minLedger)) {
+      for (const [addr, h] of ledgerHistory) {
+        if (ledgerHistory.size <= FIRST_SEEN_MAX) break;
+        if (Number(h?.lastLedger) === minLedger) ledgerHistory.delete(addr);
+      }
+    }
+  }
+  let minL = Infinity;
+  let maxL = -Infinity;
+  for (const h of ledgerHistory.values()) {
+    const l = Number(h?.lastLedger);
+    if (!Number.isFinite(l)) continue;
+    if (l < minL) minL = l;
+    if (l > maxL) maxL = l;
+  }
+  if (Number.isFinite(minL) && maxL - minL > HISTORY_MAX_LEDGERS) {
+    const cutoff = maxL - HISTORY_MAX_LEDGERS;
+    for (const [addr, h] of ledgerHistory) {
+      if (Number(h?.lastLedger) < cutoff) ledgerHistory.delete(addr);
+    }
+  }
   return {
     knownBad,
     firstSeenAt,
+    history: ledgerHistory,
     threats: new Map(),
     // benignIssuers/benignAccounts: die Engine bringt ihre dokumentierten
     // Gateway-Defaults mit; hier wird nichts ergänzt (keine Literale im Frontend).
@@ -1617,7 +1655,11 @@ function renderWindowFeed() {
   emptyEl.textContent = t(emptyKey);
   for (const blk of flagged) {
     const li = document.createElement('li');
-    li.className = 'block-card has-malicious';
+    // Badge/className aus blk.maxSeverity (lib/block-window.mjs berechnet das
+    // Maximum der Edge-severities): ein Block mit nur suspect/info-Funden
+    // erscheint nicht mehr fix als 'malicious'.
+    const maxSev = blk?.maxSeverity ?? (Array.isArray(blk?.f) && blk.f.some((e) => e?.severity === 'malicious') ? 'malicious' : 'suspect');
+    li.className = `block-card has-${esc(maxSev)}`;
     const n = Number(blk?.n) || 0;
     const fCount = Array.isArray(blk?.f) ? blk.f.length : 0;
     li.innerHTML = `
@@ -1626,7 +1668,7 @@ function renderWindowFeed() {
         <span class="block-time">${esc(fmtClock(blk?.t))}</span>
         <span class="block-txs">${fmtNum(n)} ${esc(t('block.txs'))}</span>
       </div>
-      <div class="block-badges"><span class="badge badge-malicious">${esc(t('block.flagged', { n: fmtNum(fCount) }))}</span></div>`;
+      <div class="block-badges"><span class="badge badge-${esc(maxSev)}">${esc(t('block.flagged', { n: fmtNum(fCount) }))}</span></div>`;
     feed.appendChild(li);
   }
   updateFeedVisibility();
@@ -1652,6 +1694,7 @@ function applyFlowStateView(view) {
       label: c?.label ?? null,
       roles: rolesByAddress,
       rolesByAddress,
+      severityByAddress: c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {},
       memberAddresses: Object.keys(rolesByAddress),
       edges: Array.isArray(c?.edges) ? c.edges : [],
       totalDrops: Number(c?.totalDrops) || 0,
@@ -1663,8 +1706,12 @@ function applyFlowStateView(view) {
   });
   const nodes = [];
   for (const c of clusters) {
+    const sevByAddr = c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {};
     for (const [addr, role] of Object.entries(c.rolesByAddress)) {
-      nodes.push({ id: addr, role: ROLE_COLORS[role] ? role : 'unknown', clusterId: c.id, severity: 'info' });
+      // Polling-Pfad: severity aus der serverseitig berechneten
+      // severityByAddress (Malicious/Suspect/Info stimmen zwischen Polling-
+      // und WSS-Pfad überein) statt hart 'info'.
+      nodes.push({ id: addr, role: ROLE_COLORS[role] ? role : 'unknown', clusterId: c.id, severity: sevByAddr[addr] ?? 'info' });
     }
   }
   const edges = [];

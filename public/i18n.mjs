@@ -99,8 +99,7 @@ export const DICT = {
     'legend.unknown': 'Unknown',
     'legend.cluster': 'Cluster',
     'legend.payment': 'Payment',
-    'legend.trustset': 'TrustSet',
-    'legend.offer': 'Offer',
+    'legend.check': 'Check/Channel',
     'legend.escrow': 'Escrow',
     'legend.other': 'Other',
     'legend.malicious': 'Malicious',
@@ -391,6 +390,7 @@ export const DICT = {
     'rule.escrow-check-bait': 'Escrow/check bait to fresh accounts',
     'rule.payment-burst': 'Payment burst (airdrop distribution)',
     'rule.offer-spam': 'Offer spam (OfferCreate cascades without fill)',
+    'rule.wash-self-transfer': 'Self-Transfer Washing',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Known-malicious address involved ({type}).',
@@ -398,7 +398,7 @@ export const DICT = {
     'note.memo-phishing-url': 'Memo contains URL with claim-/airdrop-/verify- keyword.',
     'note.fake-nft-fraud-uri': 'NFTokenMint URI contains phishing/claim pattern.',
     'note.escrow-check-bait-single': '{type} with tiny amount and phishing memo to fresh target {addr}.',
-    'note.dusting-many': '{n} mini XRP payments to different targets in one ledger.',
+    'note.dusting-many': '{n} mini XRP payments to different targets in the observation window.',
     'note.dusting-fresh': '{n} mini XRP payments to fresh targets in one ledger.',
     'note.drainer-sweep': 'Freshly funded and {pct} % swept to one target.',
     'note.offer-spam': '{n} OfferCreate without fill in one ledger.',
@@ -406,13 +406,16 @@ export const DICT = {
     'note.escrow-check-bait-burst': '{n} escrow/check baits to different fresh targets.',
     'note.payment-burst': '{n} payments to different targets, {tiny} of them tiny (airdrop distribution pattern).',
     'note.airdrop-trustset-spam': '{n} TrustSets with tiny limit from different accounts to issuer {issuer} in one ledger.',
+    'note.wash-self-transfer': '{n} self-payments in one ledger (volume washing).',
+    'note.fake-nft-fraud-fee': 'NFTokenMint with usurious transfer fee ({pct} %).',
+    'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer to the same target {addr} in one ledger.',
   },
 
   de: {
     /* index.html — Kopf */
     'brand.sub': 'Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community',
     'stats.aria': 'Live-Statistiken',
-    'stat.malicious': 'Findings malicious (live)',
+    'stat.malicious': 'Funde maliziös (live)',
     'stat.suspect': 'Findings suspect (live)',
     'stat.events': 'Transaktionen (live)',
     'stat.network': 'Netzwerk',
@@ -439,7 +442,7 @@ export const DICT = {
     'live.aria': 'Live-Analyse-Statistiken',
     'live.ledgers': 'Ledger',
     'live.txs': 'geprüfte Txs',
-    'live.malicious': 'malicious',
+    'live.malicious': 'maliziös',
     'live.suspect': 'verdächtig',
     'live.info': 'Info',
     'feed.aria': 'Folge der analysierten Ledger-Blöcke',
@@ -466,8 +469,7 @@ export const DICT = {
     'legend.unknown': 'Unknown',
     'legend.cluster': 'Cluster',
     'legend.payment': 'Payment',
-    'legend.trustset': 'TrustSet',
-    'legend.offer': 'Offer',
+    'legend.check': 'Check/Channel',
     'legend.escrow': 'Escrow',
     'legend.other': 'Sonstige',
     'legend.malicious': 'Maliziös',
@@ -758,6 +760,7 @@ export const DICT = {
     'rule.escrow-check-bait': 'Escrow/Check-Köder an frische Konten',
     'rule.payment-burst': 'Zahlungs-Burst (Airdrop-Verteilung)',
     'rule.offer-spam': 'Offer-Spam (OfferCreate-Kaskaden ohne Fill)',
+    'rule.wash-self-transfer': 'Washing — Selbsttransfer (Volumenerzeugung)',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Bekannt-maliziöse Adresse beteiligt ({type}).',
@@ -765,7 +768,7 @@ export const DICT = {
     'note.memo-phishing-url': 'Memo enthält URL mit claim-/airdrop-/verify-Keyword.',
     'note.fake-nft-fraud-uri': 'NFTokenMint-URI enthält Phishing-/claim-Muster.',
     'note.escrow-check-bait-single': '{type} mit winziger Summe und Phishing-Memo an frisches Ziel {addr}.',
-    'note.dusting-many': '{n} Mini-XRP-Zahlungen an verschiedene Ziele in einem Ledger.',
+    'note.dusting-many': '{n} Mini-XRP-Zahlungen an verschiedene Ziele im Beobachtungsfenster.',
     'note.dusting-fresh': '{n} Mini-XRP-Zahlungen an frische Ziele in einem Ledger.',
     'note.drainer-sweep': 'Frisch finanziert und {pct} % an ein Ziel abgeräumt.',
     'note.offer-spam': '{n} OfferCreate ohne Fill in einem Ledger.',
@@ -773,6 +776,9 @@ export const DICT = {
     'note.escrow-check-bait-burst': '{n} Escrow/Check-Köder an verschiedene frische Ziele.',
     'note.payment-burst': '{n} Zahlungen an verschiedene Ziele, davon {tiny} winzig (Airdrop-Verteilungsmuster).',
     'note.airdrop-trustset-spam': '{n} TrustSets mit winzigem Limit von verschiedenen Konten auf Issuer {issuer} in einem Ledger.',
+    'note.wash-self-transfer': '{n} Selbstzahlungen in einem Ledger (Volumen-Washing).',
+    'note.fake-nft-fraud-fee': 'NFTokenMint mit Wucher-TransferFee ({pct} %).',
+    'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer auf dasselbe Ziel {addr} in einem Ledger.',
   },
 };
 

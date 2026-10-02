@@ -183,7 +183,11 @@ app.get("/api/bait-hashes", (req, res) => {
 // ---------- Maliziöse Historie (GET+POST /api/history) ----------
 // Persistente, kollektive Historie AUSSCHLIESSLICH als maliziös eingestufter
 // Cluster; suspect/info erreichen die Persistenz nie (severity wird in
-// lib/history.mjs serverseitig erzwungen). Lokal gilt data/history.json
+// lib/history.mjs serverseitig erzwungen). Die Suspect-Downgrades des
+// Detektors (Zitat-Memo, known-bad-Issuer-Position, firstSeenAt-only-Sweep)
+// halten solche Funde bewusst aus der malicious-History draußen — der
+// Drainer-History-Append unten bleibt malicious, weil dort nur der per
+// CreatedNode belegte Sweep gemeldet wird. Lokal gilt data/history.json
 // (atomar via tmp+rename) — KEIN Netz-Call: GitHub-Persistenz läuft nur in
 // der Vercel-Function api/history.js (Env GITHUB_HISTORY_TOKEN, separates
 // History-Repo; Details und BETRIEBSANFORDERUNGEN im Kopf von
@@ -614,6 +618,10 @@ async function resolveHashes(hashes) {
   return { entries, unresolved: hashes.length - entries.length };
 }
 
+// history-Träger im lokalen Snapshot-Pfad: Modul-Level-Map (überlebt
+// Requests innerhalb des Prozesses) — Cross-Ledger-Regeln (Dusting-Union,
+// Sweep-Referenz) feuern damit auch hier.
+const localLedgerHistory = new Map();
 function localLedgerCtx() {
   const knownBad = new Set();
   const firstSeenAt = new Map();
@@ -629,6 +637,7 @@ function localLedgerCtx() {
     benignAccounts: new Set(config.benign_accounts || []),
     threats: new Map(),
     firstSeenAt,
+    history: localLedgerHistory,
   };
 }
 
