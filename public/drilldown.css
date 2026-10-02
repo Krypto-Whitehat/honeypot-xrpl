@@ -33,7 +33,7 @@ body.cluster-modal-open {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(1180px, 100%);
+  width: min(1440px, 100%);
   max-height: 100%;
   background: var(--a6-surface);
   border: 1px solid var(--a6-line-strong);
@@ -289,8 +289,13 @@ body.cluster-modal-open {
 
 .cluster-td-addr {
   font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
   font-size: 12px;
-  word-break: break-all;
+  /* Volle Base58-Adressen kontrolliert umbrechen (anywhere statt break-all):
+     Umbruch an der natürlichsten Stelle; die Adress-Aktionen daneben bleiben
+     durch flex-shrink:0 (unten) stets erreichbar — die Adresse verdrängt
+     sie nicht mehr. */
+  overflow-wrap: anywhere;
   white-space: normal;
   min-width: 220px;
   max-width: 340px;
@@ -388,5 +393,11 @@ body.cluster-modal-open {
   .cluster-modal-close {
     border: 1px solid CanvasText;
     box-shadow: none;
+  }
+
+  /* Dominantes Rollenband bleibt auch in erzwungenen Farbschemata sichtbar */
+  .cluster-modal-surface {
+    border-left-width: 3px;
+    border-left-color: CanvasText;
   }
 }

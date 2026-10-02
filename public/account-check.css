@@ -296,14 +296,26 @@
   color: var(--a6-muted);
 }
 
-/* Disclaimers */
-.check-disclaimers { margin: 14px 0 0; }
+/* Disclaimers: ruhige Meta-Zone unter feiner Trennlinie (Panel-Hierarchie:
+   untergeordnete Info, eigene Fläche statt Karte). Die Klasse liegt auf einem
+   .graph-note-Element (account-check.js) — die 12-px-Typografie von
+   .graph-note wird hier nur um Fläche und Trennlinie ergänzt. */
+.check-disclaimers {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--a6-line);
+  background: var(--a6-surface-alt);
+  border-radius: 0 0 var(--a6-r-sm) var(--a6-r-sm);
+}
 
 .check-disclaimers ul {
   margin: 0;
   padding-left: 18px;
   display: grid;
   gap: 4px;
+  color: var(--a6-muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* ---------------- Responsiv ---------------- */

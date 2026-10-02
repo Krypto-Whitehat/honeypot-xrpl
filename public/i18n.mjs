@@ -1,0 +1,972 @@
+'use strict';
+
+/* Honeypot XRPL – i18n (public/i18n.mjs)
+ *
+ * Zweisprachigkeit EN/DE für die gesamte Frontend-Oberfläche.
+ *
+ * MODUL-VERTRAG (DOM-frei beim Import — zwingend, weil lib/history.test.mjs
+ * public/history.js importiert, das seinerseits './i18n.mjs' importiert;
+ * läuft identisch in Node, Muster public/attribution.mjs):
+ *   - Kein document-/localStorage-Zugriff auf Modulebene. Alle DOM-/
+ *     Storage-Zugriffe stehen in Funktionen mit typeof-Guards.
+ *   - Standard-Sprache ist 'en'; die Wahl wird unter localStorage-Schlüssel
+ *     'hx-lang' persistiert (guardiert — ohne Storage bleibt sie flüchtig).
+ *   - t(key, params): Lookup in der aktuellen Sprache, Fallback auf 'en',
+ *     dann auf den Key selbst (sichtbar, kein stiller Ausfall).
+ *     {name}-Platzhalter werden aus params interpoliert.
+ *   - Sprachwechsel: setLang() setzt documentElement.lang, Titel und Meta-
+ *     Description neu und sendet CustomEvent 'hx:langchange' am document —
+ *     dynamische Sichten (Graph, Cluster-Karten, Log, Drilldown, Weltkugel,
+ *     Historie, Konto-Check) re-rendern daraufhin.
+ *
+ * PROTOKOLL-GRENZE (bewusst, siehe Plan-Tradeoff): Serverseitige deutsche
+ * Strings bleiben Protokollwerte, weil Clients sie per String-Vergleich
+ * auswerten (history.js / history-host.html prüfen body.reason ===
+ * 'Persistenz nicht konfiguriert') und Tests sie asserten
+ * (account-report.test.mjs). Übersetzt wird clientseitig über
+ * serverPhrase() (Exact-Match auf die bekannten Werte) sowie über
+ * ruleName()/noteText()/summaryText() aus strukturierten Feldern
+ * (ruleId/noteKey/noteParams/verdict/score). Nicht rekonstruierbare
+ * Kuratierungstexte (criteria[2].evidence = selfReason) bleiben raw —
+ * dokumentierter Fallback.
+ */
+
+export const LANG_KEY = 'hx-lang';
+export const LANGS = ['en', 'de'];
+export const DEFAULT_LANG = 'en';
+
+/* ------------------------------------------------------------------ */
+/* Wörterbuch (flache Keys; EN und DE haben dieselbe Schlüsselmenge —  */
+/* maschinell geprüft in lib/i18n.test.mjs)                            */
+/* ------------------------------------------------------------------ */
+
+export const DICT = {
+  en: {
+    /* index.html — Kopf */
+    'brand.sub': 'Live ledger analysis and threat dashboard for the XRPL community',
+    'stats.aria': 'Live statistics',
+    'stat.malicious': 'Findings malicious (live)',
+    'stat.suspect': 'Findings suspect (live)',
+    'stat.events': 'Transactions (live)',
+    'stat.network': 'Network',
+    'stat.last': 'As of',
+    'conn.init': 'Establishing live connection …',
+
+    /* index.html — Hero-Bühne (.hx-stage) */
+    'hero.title': 'Live threat radar for the XRP Ledger',
+    'hero.lead': 'Every validated ledger block is analyzed in real time — malware memos, drainer sweeps, dusting and fake-NFT patterns are detected and the actors behind them are grouped into clusters.',
+    'hero.kpisAria': 'Live key figures',
+    'hero.kpiMalicious': 'malicious',
+    'hero.kpiSuspect': 'suspect',
+    'hero.kpiTxs': 'checked txs',
+
+    'nav.aria': 'Views',
+    'tab.dashboard': 'Dashboard',
+    'tab.history': 'History',
+    'tab.check': 'Account Check',
+    'tab.flowhost': 'Flow-Host',
+
+    /* index.html — Live-Block-Feed */
+    'live.title': 'Live Block Feed',
+    'live.hint': 'Validated ledger blocks in real time – analysis in the browser with the same engine as on the server',
+    'live.aria': 'Live analysis statistics',
+    'live.ledgers': 'ledgers',
+    'live.txs': 'checked txs',
+    'live.malicious': 'malicious',
+    'live.suspect': 'suspect',
+    'live.info': 'info',
+    'feed.aria': 'Sequence of analyzed ledger blocks',
+    'feed.empty': 'Waiting for the first validated ledger …',
+    'log.title': 'Analysis Log',
+    'log.severity': 'Severity',
+    'log.filter.all': 'All',
+    'log.filter.malicious': 'Malicious',
+    'log.filter.suspect': 'Suspect',
+    'log.filter.info': 'Info',
+    'log.rule': 'Rule',
+    'log.filter.allRules': 'All rules',
+    'log.download': 'Download log as JSON',
+    'log.empty': 'No rule hits in the observation window yet.',
+    'feed.note': 'Fund addresses are exclusively actor addresses visible in the public ledger and are shown in full as soon as the bait-hash allowlist is loaded. Bait accounts never appear in the log – the server sanitizes them to labels and the client blocks them via the hash deny-list.',
+
+    /* index.html — Aktivitäts-Graph */
+    'graph.title': 'Activity Graph',
+    'legend.aria': 'Legend',
+    'legend.source': 'Source',
+    'legend.drainer': 'Drainer',
+    'legend.collector': 'Collector',
+    'legend.relay': 'Relay',
+    'legend.unknown': 'Unknown',
+    'legend.cluster': 'Cluster',
+    'legend.payment': 'Payment',
+    'legend.trustset': 'TrustSet',
+    'legend.offer': 'Offer',
+    'legend.escrow': 'Escrow',
+    'legend.other': 'Other',
+    'legend.malicious': 'Malicious',
+    'legend.suspect': 'Suspect',
+    'legend.info': 'Info',
+    'graph.tabsAria': 'Graph view',
+    'tab.live': 'Live Network',
+    'tab.cluster': 'Cluster',
+    'tab.globe': 'Globe',
+    'graph.disclaimer': 'Roles (source, drainer, collector, relay) are heuristics based on in/out degree and money flow – not proof of guilt.',
+    'graph.aria': 'Network graph of detected activity',
+    'globe.aria': 'Globe of live activity; country assignment exclusively via the exchange registry, addresses without assignment placed symbolically',
+    'cluster.aria': 'Cluster summary',
+    'cluster.empty': 'No clusters yet – waiting for ledgers.',
+    'graph.note': 'Nodes are actors visible in the public ledger from the live analysis – addresses are shown in full as soon as the bait-hash allowlist is loaded (bait addresses always remain hidden via the hash deny-list). Clicking a cluster card or a cluster bubble opens the cluster detail view.',
+
+    /* index.html — Fuß */
+    'foot.updated': 'As of: ',
+    'foot.note': 'Bait anonymity: seeds and bait addresses are never served by the server and never rendered by the client.',
+
+    /* Sprachumschalter */
+    'lang.switchAria': 'Language',
+    'lang.en': 'EN',
+    'lang.de': 'DE',
+    'lang.enAria': 'Switch language to English',
+    'lang.deAria': 'Sprache auf Deutsch umstellen',
+
+    /* app.js — Adressaktionen */
+    'defang.bait': 'Bait (address hidden)',
+    'addr.copy': 'Copy',
+    'addr.copied': 'Copied',
+    'addr.error': 'Error',
+    'addr.copyAria': 'Copy address',
+    'addr.linkAria': 'Open on xrplcharts.com',
+
+    /* app.js — Graph */
+    'graph.visError': 'vis-network could not be loaded (CDN unreachable).',
+    'edge.other': 'Other',
+    'cluster.members': '{n} members',
+    'cluster.labelDefault': 'Cluster',
+
+    /* app.js — Cluster-Karten */
+    'cluster.ariaDetails': 'Open details for {label} – {xrp} XRP, {txs} tx, {accounts} accounts',
+    'cluster.firstSeen': 'First seen: ',
+    'cluster.lastSeen': 'Last seen: ',
+    'cluster.txUnit': 'tx',
+    'cluster.accountUnit': 'accounts',
+    'cluster.chainAria': 'Money flow: start to collector along real edges',
+
+    /* app.js — Block-Karten und Log */
+    'block.txs': 'txs',
+    'block.analyzing': 'Analyzing …',
+    'block.clean': 'no findings',
+    'block.resolved': '{resolved}/{total} txs resolved',
+    'block.quotaPaused': 'Ledger quota exhausted – analysis paused',
+    'block.quotaSkipped': 'Ledger quota exhausted – analysis skipped',
+    'block.sampled': 'Block not analyzed (sampling quota)',
+    'block.busy': 'Analysis already running – this block is not resolved',
+    'block.budgetSkipped': 'Command quota exhausted – analysis skipped',
+    'log.sevMalicious': 'malicious',
+    'log.sevSuspect': 'suspect',
+    'log.sevInfo': 'info',
+
+    /* app.js — Log-Export */
+    'export.source': 'Honeypot XRPL – live ledger analysis log',
+    'export.note': 'Addresses in full where the bait-hash allowlist is loaded and the address is not on the deny-list; otherwise short form. Bait addresses are never exported. Full attribution via ledgerIndex on the public ledger.',
+
+    /* app.js — Live-Status */
+    'net.mainnet': 'XRPL Mainnet (xrplcluster.com)',
+    'conn.wss': 'Live – WSS connected',
+    'conn.wssConnecting': 'WSS connected – waiting for ledgers …',
+    'conn.throttled': 'Live – snapshot fallback (endpoint throttling: rate limit{est})',
+    'conn.rejected': 'Live – snapshot fallback (WSS subscription rejected: {error}{est})',
+    'conn.noEvents': 'Live – snapshot fallback (WSS without events)',
+    'conn.estSuffix': ', endpoint estimate {dur}',
+    'conn.estWarn': ' – endpoint estimate {dur}, probe earlier',
+    'conn.closed': 'Connection closed – retrying in {s} s',
+    'conn.snapshotUnreachable': '{label} – ledger snapshot unreachable ({msg})',
+    'conn.noData': 'No ledger data reachable ({msg})',
+    'conn.unknownError': 'unknown error',
+    'log.consoleSubscribeRejected': 'WSS subscription rejected ({error}){msg}. Snapshot fallback remains active.',
+    'log.consoleDenyFailed': 'Bait-hash allowlist unreachable – full display permanently disabled (fail-closed).',
+    'log.consoleDenyAttempt': 'Bait-hash allowlist: attempt {n} failed ({err})',
+
+    /* drilldown.js — Modal */
+    'modal.closeAria': 'Close',
+    'modal.graphAria': 'Cluster graph',
+    'modal.detailsAria': 'Cluster details',
+    'modal.rolesAria': 'Role distribution',
+    'modal.timelineAria': 'Transaction timeline',
+    'modal.chainAria': 'Flow chain source to collector',
+    'modal.tableAria': 'Cluster accounts',
+    'modal.takeover': 'Cluster continues under a new identifier – automatically adopted (seamless takeover via member overlap).',
+    'modal.stale': 'As of {time} – cluster no longer in the current observation window.',
+    'modal.gone': 'Cluster no longer current – it no longer belongs to the current observation window.',
+    'modal.rolesTitle': 'Role distribution',
+    'modal.roleBarAria': '{role}: {count} of {total} accounts ({pct} %)',
+    'modal.timelineTitle': 'Transaction timeline',
+    'modal.timelineAriaRange': 'Timeline from {from} to {to} – {n} transactions',
+    'modal.timelineEmpty': 'No timestamps in the current observation window.',
+    'modal.timelineTxUnit': 'transactions',
+    'modal.chainTitle': 'Flow chain',
+    'modal.chainNote': 'Paths follow only transactions of the observation window – no complete wallet history, no proof of guilt.',
+    'modal.chainRoleAria': 'Cluster accounts by role – no edges in the observation window',
+    'modal.chainEmpty': 'No role chain in the current observation window.',
+    'modal.tableTitle': 'Cluster accounts',
+    'modal.tableCaption': '{n} accounts – roles are heuristics, not proof of guilt',
+    'modal.tableWrapAria': 'Accounts table, horizontally scrollable',
+    'modal.thAddr': 'Address',
+    'modal.thRole': 'Role',
+    'modal.thSeverity': 'Severity',
+    'modal.thIn': 'Incoming drops',
+    'modal.thOut': 'Outgoing drops',
+    'modal.thEdges': 'Edges (in / out)',
+    'modal.thActions': 'Actions',
+    'modal.loading3d': 'Loading 3D view …',
+    'modal.fallback2d': '3D view not available – 2D fallback view (vis-network).',
+    'modal.noGraph': 'No graph available – details in role distribution, flow chain and accounts table.',
+
+    /* globe.js */
+    'globe.note': 'Positions are derived deterministically from the address hash – the XRPL ledger contains no location data. The globe is a symbolic activity view; country assignment via the exchange registry is currently unavailable.',
+    'globe.noteCountries': 'Country borders: Natural Earth (TopoJSON). Country assignment exclusively via the exchange registry (countries where the exchanges are based); addresses without assignment remain placed deterministically from the address hash – the XRPL ledger itself contains no location data.',
+    'globe.ariaCountries': 'Globe of live activity with country borders; country assignment exclusively via the exchange registry, addresses without assignment placed symbolically',
+    'globe.ariaFailed': 'Globe of live activity; country assignment via the exchange registry is currently unavailable, positions remain symbolically derived from the address hash',
+    'globe.ctxLost': 'WebGL graphics context lost – exactly one recovery attempt is starting …',
+    'globe.fallback': 'Globe unavailable (WebGL or CDN unreachable) — the same data is available in the cluster cards and in the drilldown accounts table.',
+    'globe.rebuild': 'Rebuilding globe …',
+    'globe.loading': 'Loading globe …',
+    'globe.legendTitle': 'Country activity',
+    'globe.legendSrc': 'Assignment exclusively via the exchange registry · borders: Natural Earth (TopoJSON)',
+    'globe.legendUnassigned': 'Addresses without country assignment: {n}',
+    'globe.activity1': 'activity',
+    'globe.activityN': 'activities',
+    'globe.edge1': 'edge',
+    'globe.edgeN': 'edges',
+    'globe.inflow': 'inflow',
+    'globe.outflow': 'outflow',
+    'globe.exchanges': 'exchanges',
+    'globe.tx1': 'transaction',
+    'globe.txN': 'transactions',
+
+    /* account-check.js */
+    'check.title': 'Account Check',
+    'check.hint': 'Profiling report of an XRPL address against the threat list, pattern detection and cluster heuristics.',
+    'check.label': 'XRPL address (required)',
+    'check.go': 'Check',
+    'check.loading': 'Checking account …',
+    'check.verdict.clean': 'clean',
+    'check.verdict.contact': 'risk-associated',
+    'check.verdict.bad': 'known malicious',
+    'check.verdict.unknown': 'unknown',
+    'check.elig.ok': 'Likely unproblematic',
+    'check.elig.review': 'Worth reviewing',
+    'check.elig.unknown': 'Not assessable',
+    'check.noAbzug': 'no deduction',
+    'check.metaChecked': 'Checked transactions: ',
+    'check.metaNetwork': 'Network: ',
+    'check.metaAt': 'Checked on: ',
+    'check.metaTruncated': 'max. 300 txs checked – statement limited',
+    'check.roleEmpty': 'No role involvement in the checked window.',
+    'check.roleIn': 'Inflow: {n} edges ({xrp} XRP)',
+    'check.roleOut': 'Outflow: {n} edges ({xrp} XRP)',
+    'check.roleNote': 'The role applies only to the checked window – heuristic from in/out degree and money flow, not proof of guilt.',
+    'check.patternsEmpty': 'No known patterns in the checked window.',
+    'check.contactsEmpty': 'No contacts to listed addresses in the checked window.',
+    'check.contactsAria': 'Contacts to listed addresses',
+    'check.thCounterparty': 'Counterparty',
+    'check.thDirection': 'Direction',
+    'check.thTxType': 'Tx type',
+    'check.thTime': 'Time',
+    'check.thRisk': 'Risk',
+    'check.thNote': 'Note',
+    'check.reportAria': 'Check report of the checked address',
+    'check.scoreAria': 'Score out of 100',
+    'check.sectionScore': 'Score composition',
+    'check.sectionRole': 'Role involvement',
+    'check.sectionPatterns': 'Known patterns',
+    'check.sectionContacts': 'Contacts to listed addresses',
+    'check.sectionEligibility': 'Off-ramp assessment',
+    'check.errInvalidAddr': 'Invalid XRPL address (expected: r followed by 24–34 Base58 characters).',
+    'check.errInvalid400': 'Invalid or non-checkable address.',
+    'check.errLedger502': 'Ledger query failed',
+    'check.errUnexpected': 'Unexpected response (HTTP {status}).',
+    'check.errNetworkTitle': 'Network error',
+    'check.errNetworkDetail': 'The account check is currently unreachable — please try again later.',
+
+    /* Zusammenfassung (Rebuild aus strukturierten Report-Feldern) */
+    'summary.unknown': 'Not assessable — no or incomplete data.',
+    'summary.score': 'Score {score} out of 100.',
+    'summary.selfListed': 'The address itself is listed in the threat list.',
+    'summary.malicious': '{n} distinct counterparty/parties with known malicious status.',
+    'summary.suspect': '{n} distinct counterparty/parties with suspect status.',
+    'summary.noContacts': 'No contacts to listed addresses in the checked window.',
+    'summary.patterns': 'Pattern findings: {list}.',
+
+    /* Server-Phrasen (Exact-Match; Rohwerte bleiben Protokoll) */
+    'srv.persistenz': 'Persistence not configured',
+    'srv.persistenzHost': 'Persistence not configured — without persistence authorization the endpoint delivers no flow state.',
+    'srv.eligUnknown': 'Not assessable — no or incomplete data.',
+    'srv.eligOk': 'Likely unproblematic for off-ramps (heuristic).',
+    'srv.eligReview': 'Worth reviewing — rejection or manual review by the provider is likely.',
+    'srv.disc1': 'The assessment is a heuristic over at most the last 300 transactions — older contacts and patterns are not covered.',
+    'srv.disc2': 'Roles and patterns are heuristics (in/out degree, money flow) — not proof of guilt, no legal or liability statement.',
+    'srv.disc3': 'The eligibility assessment is a heuristic — the decision rests with the off-ramp provider.',
+    'srv.disc4': 'The queried address is not stored.',
+
+    /* history.js */
+    'history.title': 'Malicious History',
+    'history.hint': 'Persistent history exclusively of clusters classified as malicious — suspect clusters are deliberately not persisted.',
+    'history.searchLabel': 'Search',
+    'history.searchPlaceholder': 'Address, cluster label or rule',
+    'history.loading': 'Loading history …',
+    'history.unconfigured': 'History persistence is not configured on this server — reports are not stored permanently.',
+    'history.empty': 'No malicious clusters in the history yet — it fills through live observation and visitor reports.',
+    'history.errorHttp': 'History unreachable (HTTP {status})',
+    'history.errorNet': 'History unreachable (network)',
+    'history.moreMembers': '{n} more members',
+    'history.sightings': 'Reported by visitors: {n}×',
+    'history.unbestaetigt': 'unconfirmed · 1 sighting',
+    'history.maliciousBadge': 'malicious',
+
+    /* history-host.html */
+    'fh.title': 'Flow-Host: accumulated cross-block flow state',
+    'fh.navAria': 'Navigation',
+    'fh.stateTitle': 'Accumulated Flow State',
+    'fh.stateHint': 'Cross-block accumulation of the ledger walk — cursor position and cluster view',
+    'fh.refresh': 'Refresh',
+    'fh.walkAria': 'Walk status',
+    'fh.cursor': 'cursor position',
+    'fh.lag': 'lag',
+    'fh.updated': 'as of',
+    'fh.graphEmpty': 'No retained flow edges in the accumulated state — the flow graph remains empty.',
+    'fh.graphNote': 'Flow graph from the LIMITED retained flow edges + roles of the accumulated state (lib/ledger-walk.mjs). Positions are derived deterministically in a circle — the XRPL ledger contains no location data; the view is a symbolic flow view.',
+    'fh.clustersTitle': 'Clusters',
+    'fh.clustersHint': 'Sorted by volume (descending), then transaction count (descending)',
+    'fh.empty': 'No accumulated flow state yet — the walk has not formed clusters yet.',
+    'fh.emptyNoPersist': 'No flow state available.',
+    'fh.statusPersist': 'Persistence not configured — without persistence authorization the endpoint delivers no flow state.',
+    'fh.statusHint': 'Note: {reason}',
+    'fh.unreachable': 'Flow state unreachable — please try again later.',
+    'fh.graphAria': 'Flow graph of the accumulated state',
+
+    /* Schweregrade */
+    'sev.malicious': 'malicious',
+    'sev.suspect': 'suspect',
+    'sev.info': 'info',
+
+    /* Regel-Namen (lib/detector.mjs RULES, ids unverändert) */
+    'rule.known-bad-hit': 'Known-bad hit (honeypot-derived + curation)',
+    'rule.memo-phishing': 'Memo phishing (URLs/seed patterns in payments)',
+    'rule.drainer-sweep': 'Drainer — freshly funded, swept immediately',
+    'rule.airdrop-trustset-spam': 'Fake airdrop TrustSet spam',
+    'rule.dusting': 'Dusting — mini XRP to fresh accounts',
+    'rule.fake-nft-fraud': 'Fake NFT fraud',
+    'rule.escrow-check-bait': 'Escrow/check bait to fresh accounts',
+    'rule.payment-burst': 'Payment burst (airdrop distribution)',
+    'rule.offer-spam': 'Offer spam (OfferCreate cascades without fill)',
+
+    /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
+    'note.known-bad-hit': 'Known-malicious address involved ({type}).',
+    'note.memo-phishing-seed': 'Memo contains seed pattern.',
+    'note.memo-phishing-url': 'Memo contains URL with claim-/airdrop-/verify- keyword.',
+    'note.fake-nft-fraud-uri': 'NFTokenMint URI contains phishing/claim pattern.',
+    'note.escrow-check-bait-single': '{type} with tiny amount and phishing memo to fresh target {addr}.',
+    'note.dusting-many': '{n} mini XRP payments to different targets in one ledger.',
+    'note.dusting-fresh': '{n} mini XRP payments to fresh targets in one ledger.',
+    'note.drainer-sweep': 'Freshly funded and {pct} % swept to one target.',
+    'note.offer-spam': '{n} OfferCreate without fill in one ledger.',
+    'note.fake-nft-fraud-accept': '{n} NFTokenAcceptOffer without payment in one ledger.',
+    'note.escrow-check-bait-burst': '{n} escrow/check baits to different fresh targets.',
+    'note.payment-burst': '{n} payments to different targets, {tiny} of them tiny (airdrop distribution pattern).',
+    'note.airdrop-trustset-spam': '{n} TrustSets with tiny limit from different accounts to issuer {issuer} in one ledger.',
+  },
+
+  de: {
+    /* index.html — Kopf */
+    'brand.sub': 'Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community',
+    'stats.aria': 'Live-Statistiken',
+    'stat.malicious': 'Findings malicious (live)',
+    'stat.suspect': 'Findings suspect (live)',
+    'stat.events': 'Transaktionen (live)',
+    'stat.network': 'Netzwerk',
+    'stat.last': 'Stand',
+    'conn.init': 'Live-Verbindung wird aufgebaut …',
+
+    /* index.html — Hero-Bühne (.hx-stage) */
+    'hero.title': 'Live-Bedrohungsradar für das XRP-Ledger',
+    'hero.lead': 'Jeder validierte Ledger-Block wird in Echtzeit analysiert — Malware-Memos, Drainer-Abflüsse, Dusting und Fake-NFT-Muster werden erkannt und die Akteure dahinter zu Clustern gruppiert.',
+    'hero.kpisAria': 'Live-Kennzahlen',
+    'hero.kpiMalicious': 'maliziös',
+    'hero.kpiSuspect': 'verdächtig',
+    'hero.kpiTxs': 'geprüfte Txs',
+
+    'nav.aria': 'Ansichten',
+    'tab.dashboard': 'Dashboard',
+    'tab.history': 'Historie',
+    'tab.check': 'Konto-Check',
+    'tab.flowhost': 'Flow-Host',
+
+    /* index.html — Live-Block-Feed */
+    'live.title': 'Live-Block-Feed',
+    'live.hint': 'Validierte Ledger-Blöcke in Echtzeit – Analyse im Browser mit derselben Engine wie serverseitig',
+    'live.aria': 'Live-Analyse-Statistiken',
+    'live.ledgers': 'Ledger',
+    'live.txs': 'geprüfte Txs',
+    'live.malicious': 'malicious',
+    'live.suspect': 'verdächtig',
+    'live.info': 'Info',
+    'feed.aria': 'Folge der analysierten Ledger-Blöcke',
+    'feed.empty': 'Warte auf den ersten validierten Ledger …',
+    'log.title': 'Analyse-Log',
+    'log.severity': 'Schweregrad',
+    'log.filter.all': 'Alle',
+    'log.filter.malicious': 'Maliziös',
+    'log.filter.suspect': 'Verdächtig',
+    'log.filter.info': 'Info',
+    'log.rule': 'Regel',
+    'log.filter.allRules': 'Alle Regeln',
+    'log.download': 'Log als JSON',
+    'log.empty': 'Noch keine Regel-Treffer im Beobachtungsfenster.',
+    'feed.note': 'Fund-Adressen sind ausschließlich öffentlich im Ledger sichtbare Akteur-Adressen und werden vollständig angezeigt, sobald die Bait-Hash-Allowlist geladen ist. Köder-Konten erscheinen nie im Log – sie werden vom Server zu Labels sanitisiert und clientseitig über die Hash-Deny-Liste gesperrt.',
+
+    /* index.html — Aktivitäts-Graph */
+    'graph.title': 'Aktivitäts-Graph',
+    'legend.aria': 'Legende',
+    'legend.source': 'Source',
+    'legend.drainer': 'Drainer',
+    'legend.collector': 'Kollektor',
+    'legend.relay': 'Relay',
+    'legend.unknown': 'Unknown',
+    'legend.cluster': 'Cluster',
+    'legend.payment': 'Payment',
+    'legend.trustset': 'TrustSet',
+    'legend.offer': 'Offer',
+    'legend.escrow': 'Escrow',
+    'legend.other': 'Sonstige',
+    'legend.malicious': 'Maliziös',
+    'legend.suspect': 'Verdächtig',
+    'legend.info': 'Info',
+    'graph.tabsAria': 'Graph-Ansicht',
+    'tab.live': 'Live-Netz',
+    'tab.cluster': 'Cluster',
+    'tab.globe': 'Weltkugel',
+    'graph.disclaimer': 'Rollen (Source, Drainer, Kollektor, Relay) sind Heuristiken aus Ein-/Ausgrad und Geldfluss – kein Schuldnachweis.',
+    'graph.aria': 'Netzwerkgraph der erkannten Aktivitäten',
+    'globe.aria': 'Weltkugel der Live-Aktivität; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert',
+    'cluster.aria': 'Cluster-Zusammenfassung',
+    'cluster.empty': 'Noch keine Cluster – warte auf Ledger.',
+    'graph.note': 'Knoten sind öffentlich im Ledger sichtbare Akteure aus der Live-Analyse – Adressen werden vollständig angezeigt, sobald die Bait-Hash-Allowlist geladen ist (Köder-Adressen bleiben über die Hash-Deny-Liste stets verborgen). Klick auf eine Cluster-Karte oder eine Cluster-Bubble öffnet die Cluster-Detailansicht.',
+
+    /* index.html — Fuß */
+    'foot.updated': 'Stand: ',
+    'foot.note': 'Anonymität der Köder: Seeds und Köder-Adressen werden vom Server nie ausgeliefert und vom Client nie gerendert.',
+
+    /* Sprachumschalter */
+    'lang.switchAria': 'Sprache',
+    'lang.en': 'EN',
+    'lang.de': 'DE',
+    'lang.enAria': 'Sprache auf Englisch umstellen',
+    'lang.deAria': 'Sprache auf Deutsch umstellen',
+
+    /* app.js — Adressaktionen */
+    'defang.bait': 'Köder (Adresse verborgen)',
+    'addr.copy': 'Kopieren',
+    'addr.copied': 'Kopiert',
+    'addr.error': 'Fehler',
+    'addr.copyAria': 'Adresse kopieren',
+    'addr.linkAria': 'Auf xrplcharts.com öffnen',
+
+    /* app.js — Graph */
+    'graph.visError': 'vis-network konnte nicht geladen werden (CDN nicht erreichbar).',
+    'edge.other': 'Sonstige',
+    'cluster.members': '{n} Mitglieder',
+    'cluster.labelDefault': 'Cluster',
+
+    /* app.js — Cluster-Karten */
+    'cluster.ariaDetails': 'Details zu {label} öffnen – {xrp} XRP, {txs} Tx, {accounts} Konten',
+    'cluster.firstSeen': 'Erste Sichtung: ',
+    'cluster.lastSeen': 'Letzte Sichtung: ',
+    'cluster.txUnit': 'Tx',
+    'cluster.accountUnit': 'Konten',
+    'cluster.chainAria': 'Geldfluss: Start bis Kollektor entlang echter Kanten',
+
+    /* app.js — Block-Karten und Log */
+    'block.txs': 'Txs',
+    'block.analyzing': 'Analysiere …',
+    'block.clean': 'keine Funde',
+    'block.resolved': '{resolved}/{total} Txs aufgelöst',
+    'block.quotaPaused': 'Ledger-Quota erschöpft – Analyse pausiert',
+    'block.quotaSkipped': 'Ledger-Quota erschöpft – Analyse übersprungen',
+    'block.sampled': 'Block nicht analysiert (Stichproben-Kontingent)',
+    'block.busy': 'Analyse läuft bereits – dieser Block wird nicht aufgelöst',
+    'block.budgetSkipped': 'Kommandokontingent erschöpft – Analyse übersprungen',
+    'log.sevMalicious': 'maliziös',
+    'log.sevSuspect': 'verdächtig',
+    'log.sevInfo': 'info',
+
+    /* app.js — Log-Export */
+    'export.source': 'Honeypot XRPL – Live-Ledger-Analyse-Log',
+    'export.note': 'Adressen vollständig, sofern die Bait-Hash-Allowlist geladen ist und die Adresse nicht auf der Deny-Liste steht; sonst Kurzform. Köder-Adressen werden nie exportiert. Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
+
+    /* app.js — Live-Status */
+    'net.mainnet': 'XRPL Mainnet (xrplcluster.com)',
+    'conn.wss': 'Live – WSS verbunden',
+    'conn.wssConnecting': 'WSS verbunden – warte auf Ledger …',
+    'conn.throttled': 'Live – Snapshot-Fallback (Endpunkt-Drosselung: rate limit{est})',
+    'conn.rejected': 'Live – Snapshot-Fallback (WSS-Abo abgelehnt: {error}{est})',
+    'conn.noEvents': 'Live – Snapshot-Fallback (WSS ohne Events)',
+    'conn.estSuffix': ', Endpunkt-Schätzung {dur}',
+    'conn.estWarn': ' – Endpunkt-Schätzung {dur}, Sonde früher',
+    'conn.closed': 'Verbindung getrennt – erneuter Versuch in {s} s',
+    'conn.snapshotUnreachable': '{label} – Ledger-Snapshot nicht erreichbar ({msg})',
+    'conn.noData': 'Keine Ledger-Daten erreichbar ({msg})',
+    'conn.unknownError': 'unbekannter Fehler',
+    'log.consoleSubscribeRejected': 'WSS-Abo abgelehnt ({error}){msg}. Snapshot-Fallback bleibt aktiv.',
+    'log.consoleDenyFailed': 'Bait-Hash-Allowlist nicht erreichbar – Vollanzeige dauerhaft deaktiviert (fail-closed).',
+    'log.consoleDenyAttempt': 'Bait-Hash-Allowlist: Versuch {n} fehlgeschlagen ({err})',
+
+    /* drilldown.js — Modal */
+    'modal.closeAria': 'Schließen',
+    'modal.graphAria': 'Cluster-Graph',
+    'modal.detailsAria': 'Cluster-Details',
+    'modal.rolesAria': 'Rollen-Verteilung',
+    'modal.timelineAria': 'Zeitachse der Transaktionen',
+    'modal.chainAria': 'Flusskette Source bis Kollektor',
+    'modal.tableAria': 'Konten des Clusters',
+    'modal.takeover': 'Cluster läuft unter neuer Kennung weiter – automatisch übernommen (nahtlose Übernahme über die Mitglieder-Schnittmenge).',
+    'modal.stale': 'Stand {time} – Cluster nicht mehr im aktuellen Beobachtungsfenster.',
+    'modal.gone': 'Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.',
+    'modal.rolesTitle': 'Rollen-Verteilung',
+    'modal.roleBarAria': '{role}: {count} von {total} Konten ({pct} %)',
+    'modal.timelineTitle': 'Zeitachse der Transaktionen',
+    'modal.timelineAriaRange': 'Zeitachse von {from} bis {to} – {n} Transaktionen',
+    'modal.timelineEmpty': 'Keine Zeitstempel im aktuellen Beobachtungsfenster.',
+    'modal.timelineTxUnit': 'Transaktionen',
+    'modal.chainTitle': 'Flusskette',
+    'modal.chainNote': 'Pfade folgen nur Transaktionen des Beobachtungsfensters – keine vollständige Wallet-Historie, kein Schuldnachweis.',
+    'modal.chainRoleAria': 'Konten des Clusters nach Rolle – keine Kanten im Beobachtungsfenster',
+    'modal.chainEmpty': 'Keine Rollen-Kette im aktuellen Beobachtungsfenster.',
+    'modal.tableTitle': 'Konten des Clusters',
+    'modal.tableCaption': '{n} Konten – Rollen sind Heuristiken, kein Schuldnachweis',
+    'modal.tableWrapAria': 'Konten-Tabelle, horizontal scrollbar',
+    'modal.thAddr': 'Adresse',
+    'modal.thRole': 'Rolle',
+    'modal.thSeverity': 'Schweregrad',
+    'modal.thIn': 'Eingehende Drops',
+    'modal.thOut': 'Ausgehende Drops',
+    'modal.thEdges': 'Kanten (in / aus)',
+    'modal.thActions': 'Aktionen',
+    'modal.loading3d': '3D-Ansicht wird geladen …',
+    'modal.fallback2d': '3D-Ansicht nicht verfügbar – 2D-Ausweichansicht (vis-network).',
+    'modal.noGraph': 'Kein Graph verfügbar – Detaildaten in Rollen-Verteilung, Flusskette und Konten-Tabelle.',
+
+    /* globe.js */
+    'globe.note': 'Positionen sind deterministisch aus dem Adress-Hash abgeleitet — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar.',
+    'globe.noteCountries': 'Ländergrenzen: Natural Earth (TopoJSON). Länderzuordnung ausschließlich über die Börsen-Registry (Sitzländer der Börsen); Adressen ohne Zuordnung bleiben deterministisch aus dem Adress-Hash platziert — das XRPL-Ledger selbst enthält keine Standortdaten.',
+    'globe.ariaCountries': 'Weltkugel der Live-Aktivität mit Ländergrenzen; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert',
+    'globe.ariaFailed': 'Weltkugel der Live-Aktivität; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar, Positionen bleiben symbolisch aus dem Adress-Hash abgeleitet',
+    'globe.ctxLost': 'WebGL-Grafikkontext verloren — genau ein Wiederherstellungsversuch wird gestartet …',
+    'globe.fallback': 'Weltkugel nicht verfügbar (WebGL oder CDN nicht erreichbar) — dieselben Daten stehen in den Cluster-Karten und in der Konten-Tabelle des Drilldowns.',
+    'globe.rebuild': 'Weltkugel wird neu aufgebaut …',
+    'globe.loading': 'Weltkugel wird geladen …',
+    'globe.legendTitle': 'Länderaktivität',
+    'globe.legendSrc': 'Zuordnung ausschließlich über die Börsen-Registry · Grenzen: Natural Earth (TopoJSON)',
+    'globe.legendUnassigned': 'Adressen ohne Länderzuordnung: {n}',
+    'globe.activity1': 'Aktivität',
+    'globe.activityN': 'Aktivitäten',
+    'globe.edge1': 'Kante',
+    'globe.edgeN': 'Kanten',
+    'globe.inflow': 'Zufluss',
+    'globe.outflow': 'Abfluss',
+    'globe.exchanges': 'Börsen',
+    'globe.tx1': 'Transaktion',
+    'globe.txN': 'Transaktionen',
+
+    /* account-check.js */
+    'check.title': 'Konto-Check',
+    'check.hint': 'Profiling-Report einer XRPL-Adresse gegen Threat-Liste, Muster-Erkennung und Cluster-Heuristik.',
+    'check.label': 'XRPL-Adresse (Pflichtfeld)',
+    'check.go': 'Prüfen',
+    'check.loading': 'Prüfe Konto …',
+    'check.verdict.clean': 'sauber',
+    'check.verdict.contact': 'risikobehaftet',
+    'check.verdict.bad': 'bekannt maliziös',
+    'check.verdict.unknown': 'unbekannt',
+    'check.elig.ok': 'Voraussichtlich unproblematisch',
+    'check.elig.review': 'Prüfungswürdig',
+    'check.elig.unknown': 'Nicht bewertbar',
+    'check.noAbzug': 'kein Abzug',
+    'check.metaChecked': 'Geprüfte Transaktionen: ',
+    'check.metaNetwork': 'Netzwerk: ',
+    'check.metaAt': 'Geprüft am: ',
+    'check.metaTruncated': 'max. 300 Txs geprüft — Aussage begrenzt',
+    'check.roleEmpty': 'Keine Rollenbeteiligung im geprüften Fenster.',
+    'check.roleIn': 'Eingang: {n} Kanten ({xrp} XRP)',
+    'check.roleOut': 'Ausgang: {n} Kanten ({xrp} XRP)',
+    'check.roleNote': 'Rolle gilt nur für das geprüfte Fenster — Heuristik aus Ein-/Ausgrad und Geldfluss, kein Schuldnachweis.',
+    'check.patternsEmpty': 'Keine bekannten Muster im geprüften Fenster.',
+    'check.contactsEmpty': 'Keine Kontakte zu gelisteten Adressen im geprüften Fenster.',
+    'check.contactsAria': 'Kontakte zu gelisteten Adressen',
+    'check.thCounterparty': 'Gegenpartei',
+    'check.thDirection': 'Richtung',
+    'check.thTxType': 'Tx-Typ',
+    'check.thTime': 'Zeit',
+    'check.thRisk': 'Risiko',
+    'check.thNote': 'Notiz',
+    'check.reportAria': 'Prüfbericht der geprüften Adresse',
+    'check.scoreAria': 'Score von 100',
+    'check.sectionScore': 'Score-Zusammensetzung',
+    'check.sectionRole': 'Rollenbeteiligung',
+    'check.sectionPatterns': 'Bekannte Muster',
+    'check.sectionContacts': 'Kontakte zu gelisteten Adressen',
+    'check.sectionEligibility': 'Off-Ramp-Einschätzung',
+    'check.errInvalidAddr': 'Ungültige XRPL-Adresse (erwartet: r gefolgt von 24–34 Base58-Zeichen).',
+    'check.errInvalid400': 'Ungültige oder nicht prüfbare Adresse.',
+    'check.errLedger502': 'Ledger-Abfrage fehlgeschlagen',
+    'check.errUnexpected': 'Unerwartete Antwort (HTTP {status}).',
+    'check.errNetworkTitle': 'Netzwerkfehler',
+    'check.errNetworkDetail': 'Der Konto-Check ist derzeit nicht erreichbar — bitte später erneut versuchen.',
+
+    /* Zusammenfassung (Rebuild aus strukturierten Report-Feldern) */
+    'summary.unknown': 'Nicht bewertbar — keine oder unvollständige Daten.',
+    'summary.score': 'Score {score} von 100.',
+    'summary.selfListed': 'Die Adresse ist selbst in der Bedrohungsliste gelistet.',
+    'summary.malicious': '{n} verschiedene Gegenpartei(en) mit bekanntem Malicious-Status.',
+    'summary.suspect': '{n} verschiedene Gegenpartei(en) mit Verdachts-Status.',
+    'summary.noContacts': 'Keine Kontakte zu gelisteten Adressen im geprüften Fenster.',
+    'summary.patterns': 'Muster-Funde: {list}.',
+
+    /* Server-Phrasen (Exact-Match; Rohwerte bleiben Protokoll) */
+    'srv.persistenz': 'Persistenz nicht konfiguriert',
+    'srv.persistenzHost': 'Persistenz nicht konfiguriert — ohne Persistenz-Berechtigung liefert der Endpunkt keinen Flow-State.',
+    'srv.eligUnknown': 'Nicht bewertbar — keine oder unvollständige Daten.',
+    'srv.eligOk': 'Voraussichtlich unproblematisch für Off-Ramps (heuristisch).',
+    'srv.eligReview': 'Prüfungswürdig — Ablehnung oder manuelle Prüfung durch den Anbieter ist wahrscheinlich.',
+    'srv.disc1': 'Die Bewertung ist eine Heuristik über maximal die letzten 300 Transaktionen — ältere Kontakte und Muster sind nicht erfasst.',
+    'srv.disc2': 'Rollen und Muster sind Heuristiken (Ein-/Ausgrad, Geldfluss) — kein Schuldnachweis, keine Rechts- oder Haftaussage.',
+    'srv.disc3': 'Die Eligibility-Einschätzung ist eine Heuristik — die Entscheidung liegt beim Off-Ramp-Anbieter.',
+    'srv.disc4': 'Die abgefragte Adresse wird nicht gespeichert.',
+
+    /* history.js */
+    'history.title': 'Maliziöse Historie',
+    'history.hint': 'Persistente Historie ausschließlich als maliziös eingestufter Cluster — verdächtige (suspect) Cluster werden bewusst nicht persistiert.',
+    'history.searchLabel': 'Suchen',
+    'history.searchPlaceholder': 'Adresse, Cluster-Label oder Regel',
+    'history.loading': 'Historie wird geladen …',
+    'history.unconfigured': 'Historie-Persistenz ist auf diesem Server nicht konfiguriert — Meldungen werden nicht dauerhaft gespeichert.',
+    'history.empty': 'Noch keine maliziösen Cluster in der Historie — sie füllt sich durch Live-Beobachtung und Besucher-Meldungen.',
+    'history.errorHttp': 'Historie nicht erreichbar (HTTP {status})',
+    'history.errorNet': 'Historie nicht erreichbar (Netzwerk)',
+    'history.moreMembers': 'weitere {n} Mitglieder',
+    'history.sightings': 'Von Besuchern gemeldet: {n}×',
+    'history.unbestaetigt': 'unbestätigt · 1 Sichtung',
+    'history.maliciousBadge': 'maliziös',
+
+    /* history-host.html */
+    'fh.title': 'Flow-Host: akkumulierter Cross-Block-Flow-State',
+    'fh.navAria': 'Navigation',
+    'fh.stateTitle': 'Akkumulierter Flow-State',
+    'fh.stateHint': 'Cross-Block-Akkumulation des Ledger-Walks — Cursor-Stand und Cluster-View',
+    'fh.refresh': 'Aktualisieren',
+    'fh.walkAria': 'Walk-Status',
+    'fh.cursor': 'Cursor-Stand',
+    'fh.lag': 'Rückstand',
+    'fh.updated': 'Stand',
+    'fh.graphEmpty': 'Keine retained Fluss-Kanten im akkumulierten State — der Flow-Graph bleibt leer.',
+    'fh.graphNote': 'Flow-Graph aus den BEGRENZTEN retained Fluss-Kanten + Rollen des akkumulierten States (lib/ledger-walk.mjs). Positionen sind deterministisch kreisförmig abgeleitet — das XRPL-Ledger enthält keine Standortdaten; die Darstellung ist eine symbolische Flussansicht.',
+    'fh.clustersTitle': 'Cluster',
+    'fh.clustersHint': 'Sortiert nach Volumen (absteigend), dann Transaktionszahl (absteigend)',
+    'fh.empty': 'Noch kein akkumulierter Flow-State — der Walk hat noch keine Cluster gebildet.',
+    'fh.emptyNoPersist': 'Kein Flow-State verfügbar.',
+    'fh.statusPersist': 'Persistenz nicht konfiguriert — ohne Persistenz-Berechtigung liefert der Endpunkt keinen Flow-State.',
+    'fh.statusHint': 'Hinweis: {reason}',
+    'fh.unreachable': 'Flow-State nicht erreichbar — bitte später erneut versuchen.',
+    'fh.graphAria': 'Flow-Graph des akkumulierten States',
+
+    /* Schweregrade */
+    'sev.malicious': 'maliziös',
+    'sev.suspect': 'verdächtig',
+    'sev.info': 'info',
+
+    /* Regel-Namen (lib/detector.mjs RULES, ids unverändert) */
+    'rule.known-bad-hit': 'Known-Bad-Treffer (Honeypot-abgeleitet + Kuratierung)',
+    'rule.memo-phishing': 'Memo-Phishing (URLs/Seed-Muster in Zahlungen)',
+    'rule.drainer-sweep': 'Drainer — frisch finanziert, sofort abgeräumt',
+    'rule.airdrop-trustset-spam': 'Fake-Airdrop-TrustSet-Spam',
+    'rule.dusting': 'Dusting — Mini-XRP an frische Konten',
+    'rule.fake-nft-fraud': 'Fake-NFT-Betrug',
+    'rule.escrow-check-bait': 'Escrow/Check-Köder an frische Konten',
+    'rule.payment-burst': 'Zahlungs-Burst (Airdrop-Verteilung)',
+    'rule.offer-spam': 'Offer-Spam (OfferCreate-Kaskaden ohne Fill)',
+
+    /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
+    'note.known-bad-hit': 'Bekannt-maliziöse Adresse beteiligt ({type}).',
+    'note.memo-phishing-seed': 'Memo enthält Seed-Muster.',
+    'note.memo-phishing-url': 'Memo enthält URL mit claim-/airdrop-/verify-Keyword.',
+    'note.fake-nft-fraud-uri': 'NFTokenMint-URI enthält Phishing-/claim-Muster.',
+    'note.escrow-check-bait-single': '{type} mit winziger Summe und Phishing-Memo an frisches Ziel {addr}.',
+    'note.dusting-many': '{n} Mini-XRP-Zahlungen an verschiedene Ziele in einem Ledger.',
+    'note.dusting-fresh': '{n} Mini-XRP-Zahlungen an frische Ziele in einem Ledger.',
+    'note.drainer-sweep': 'Frisch finanziert und {pct} % an ein Ziel abgeräumt.',
+    'note.offer-spam': '{n} OfferCreate ohne Fill in einem Ledger.',
+    'note.fake-nft-fraud-accept': '{n} NFTokenAcceptOffer ohne Zahlung in einem Ledger.',
+    'note.escrow-check-bait-burst': '{n} Escrow/Check-Köder an verschiedene frische Ziele.',
+    'note.payment-burst': '{n} Zahlungen an verschiedene Ziele, davon {tiny} winzig (Airdrop-Verteilungsmuster).',
+    'note.airdrop-trustset-spam': '{n} TrustSets mit winzigem Limit von verschiedenen Konten auf Issuer {issuer} in einem Ledger.',
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* Sprache: Persistenz + Lookup                                          */
+/* ------------------------------------------------------------------ */
+
+function storageGet() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage === null) return null;
+    return localStorage.getItem(LANG_KEY);
+  } catch { return null; } // Private Mode / Storage gesperrt
+}
+
+function storageSet(value) {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage === null) return;
+    localStorage.setItem(LANG_KEY, value);
+  } catch { /* Speicher voll / Private Mode: Sprache bleibt flüchtig */ }
+}
+
+// Aktuelle Sprache: persistierter Wert (validiert), sonst Default 'en'.
+export function getLang() {
+  const raw = storageGet();
+  return LANGS.includes(raw) ? raw : DEFAULT_LANG;
+}
+
+// Persistierbare Sprache als reine Funktion (getestet in lib/i18n.test.mjs):
+// validiert gegen LANGS, sonst Default; schreibt über den übergebenen
+// Storage (Injektion für Tests; ohne Argument das globale localStorage).
+export function resolveLang(raw, storage) {
+  const s = storage !== undefined ? storage : (typeof localStorage !== 'undefined' ? localStorage : null);
+  const value = LANGS.includes(raw) ? raw : DEFAULT_LANG;
+  try { if (s) s.setItem(LANG_KEY, value); } catch { /* flüchtig */ }
+  return value;
+}
+
+function interpolate(template, params) {
+  if (params == null) return template;
+  return String(template).replace(/\{([A-Za-z0-9_]+)\}/g, (m, name) =>
+    params[name] !== undefined && params[name] !== null ? String(params[name]) : m);
+}
+
+// Lookup: aktuelle Sprache -> 'en' -> Key selbst (sichtbarer Fallback).
+export function t(key, params) {
+  const lang = getLang();
+  const dict = DICT[lang] || DICT[DEFAULT_LANG];
+  let value = dict[key];
+  if (value === undefined) value = DICT[DEFAULT_LANG][key];
+  if (value === undefined) return key;
+  return interpolate(value, params);
+}
+
+/* ------------------------------------------------------------------ */
+/* Formatter (Locale folgt der aktuellen Sprache)                       */
+/* ------------------------------------------------------------------ */
+
+export function locale() {
+  return getLang() === 'de' ? 'de-DE' : 'en-US';
+}
+
+export function fmtNum(v) {
+  return Number(v ?? 0).toLocaleString(locale());
+}
+
+export function fmtXrp(drops) {
+  const n = Number(drops ?? 0) / 1e6;
+  return n.toLocaleString(locale(), { maximumFractionDigits: 2 });
+}
+
+export function fmtClock(value) {
+  if (value === null || value === undefined || value === '') return '–';
+  const d = new Date(typeof value === 'number' ? value : value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleTimeString(locale());
+}
+
+export function fmtDateTime(value) {
+  if (value === null || value === undefined || value === '') return '–';
+  const d = new Date(typeof value === 'number' ? value : value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString(locale());
+}
+
+/* ------------------------------------------------------------------ */
+/* Strukturierte Übersetzung serverseitiger Fund-/Report-Daten          */
+/* ------------------------------------------------------------------ */
+
+// Regelname aus ruleId (die 9 ids aus lib/detector.mjs RULES).
+export function ruleName(ruleId) {
+  const id = String(ruleId ?? '');
+  const key = 'rule.' + id;
+  const lang = getLang();
+  const dict = DICT[lang] || DICT[DEFAULT_LANG];
+  if (dict[key] !== undefined) return dict[key];
+  if (DICT[DEFAULT_LANG][key] !== undefined) return DICT[DEFAULT_LANG][key];
+  return id; // unbekannte id: sichtbar roh
+}
+
+// Note aus noteKey + noteParams (additive Felder aus lib/detector.mjs);
+// ohne noteKey Fallback auf die (sanitisierte) deutsche note des Servers.
+export function noteText(finding) {
+  if (!finding || typeof finding !== 'object') return '';
+  const key = finding.noteKey;
+  if (typeof key === 'string' && key) {
+    const dictKey = 'note.' + key;
+    const lang = getLang();
+    const dict = DICT[lang] || DICT[DEFAULT_LANG];
+    const template = dict[dictKey] !== undefined ? dict[dictKey] : DICT[DEFAULT_LANG][dictKey];
+    if (template !== undefined) return interpolate(template, finding.noteParams);
+  }
+  return String(finding.note ?? '');
+}
+
+export function sevText(sev) {
+  const s = String(sev ?? '');
+  const key = 'sev.' + s;
+  const dict = DICT[getLang()] || DICT[DEFAULT_LANG];
+  if (dict[key] !== undefined) return dict[key];
+  return s;
+}
+
+// Exact-Match-Übersetzung bekannter deutscher Server-Phrasen
+// (account-report eligibilityReason/Disclaimers, Persistenz-Grund).
+// Unbekannte Werte bleiben roh (Protokollgrenze, dokumentierter Fallback).
+export function serverPhrase(s) {
+  const raw = String(s ?? '');
+  const lang = getLang();
+  if (lang === 'de') return raw;
+  const en = DICT[DEFAULT_LANG];
+  for (const key of [
+    'srv.persistenz', 'srv.eligUnknown', 'srv.eligOk', 'srv.eligReview',
+    'srv.disc1', 'srv.disc2', 'srv.disc3', 'srv.disc4',
+  ]) {
+    if (DICT.de[key] === raw) return en[key];
+  }
+  return raw;
+}
+
+// Zusammenfassung des Konto-Reports neu aufgebaut aus strukturierten
+// Feldern (verdict/score/contacts/patterns) — dieselbe Satzfolge wie
+// buildSummary in lib/account-report.mjs, in der aktuellen Sprache.
+// report.patterns sind Regel-ids; sie werden wie im Original roh gelistet.
+export function summaryText(report) {
+  if (!report || typeof report !== 'object') return '';
+  const verdict = String(report.verdict ?? 'unknown');
+  if (verdict === 'unknown') return t('summary.unknown');
+  const contacts = Array.isArray(report.contacts) ? report.contacts : [];
+  const malicious = new Set();
+  const suspect = new Set();
+  for (const c of contacts) {
+    if (!c || typeof c !== 'object') continue;
+    const addr = String(c.counterparty ?? '');
+    if (!addr) continue;
+    if (c.risk === 'malicious') malicious.add(addr);
+    else if (c.risk === 'suspect') suspect.add(addr);
+  }
+  const patterns = Array.isArray(report.patterns) ? report.patterns : [];
+  const parts = [t('summary.score', { score: report.score })];
+  if (verdict === 'bad') parts.push(t('summary.selfListed'));
+  if (malicious.size > 0) parts.push(t('summary.malicious', { n: malicious.size }));
+  if (suspect.size > 0) parts.push(t('summary.suspect', { n: suspect.size }));
+  if (verdict === 'clean' && malicious.size === 0 && suspect.size === 0) {
+    parts.push(t('summary.noContacts'));
+  }
+  if (patterns.length > 0) parts.push(t('summary.patterns', { list: patterns.join(', ') }));
+  return parts.join(' ');
+}
+
+/* ------------------------------------------------------------------ */
+/* DOM-Anwendung (guardiert — ohne DOM Noop)                            */
+/* ------------------------------------------------------------------ */
+
+export function applyStatic(root) {
+  const scope = root && typeof root.querySelectorAll === 'function' ? root
+    : (typeof document !== 'undefined' ? document : null);
+  if (!scope) return;
+  for (const el of scope.querySelectorAll('[data-i18n]')) {
+    el.textContent = t(el.getAttribute('data-i18n'));
+  }
+  for (const el of scope.querySelectorAll('[data-i18n-aria]')) {
+    el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria')));
+  }
+  for (const el of scope.querySelectorAll('[data-i18n-placeholder]')) {
+    el.setAttribute('placeholder', t(el.getAttribute('data-i18n-placeholder')));
+  }
+  for (const el of scope.querySelectorAll('[data-i18n-title]')) {
+    el.setAttribute('title', t(el.getAttribute('data-i18n-title')));
+  }
+}
+
+const PAGE_TITLE = {
+  index: { en: 'Honeypot XRPL – Live Ledger Analysis', de: 'Honeypot XRPL – Live-Ledger-Analyse' },
+  flowhost: { en: 'Honeypot XRPL – Flow-Host', de: 'Honeypot XRPL – Flow-Host' },
+};
+const PAGE_DESC = {
+  index: {
+    en: 'Live ledger analysis of the XRPL: validated blocks are checked in real time for malware, spam and draining patterns, and the detected actors are grouped into clusters (source, drainer, collector, relay).',
+    de: 'Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft und die erkannten Akteure zu Clustern gruppiert (Source, Drainer, Kollektor, Relay).',
+  },
+  flowhost: {
+    en: 'Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.',
+    de: 'Akkumulierter Cross-Block-Flow-State des XRPL-Ledger-Walks: Cluster-View mit Rollen, Volumen und Sichtungszeiten sowie Cursor-Stand des Walks.',
+  },
+};
+
+function pageKind() {
+  try {
+    if (typeof location !== 'undefined' && /history-host/i.test(String(location.pathname ?? ''))) return 'flowhost';
+  } catch { /* ohne location: index */ }
+  return 'index';
+}
+
+// documentElement.lang, Titel und Meta-Description auf die aktuelle Sprache
+// stellen und 'hx:langchange' senden (dynamische Sichten re-rendern darauf).
+export function applyLang() {
+  const lang = getLang();
+  if (typeof document === 'undefined' || document === null) return lang;
+  try { document.documentElement.setAttribute('lang', lang); } catch { /* Noop */ }
+  const kind = pageKind();
+  try { if (PAGE_TITLE[kind]) document.title = PAGE_TITLE[kind][lang]; } catch { /* Noop */ }
+  try {
+    const meta = document.querySelector('meta[name="description"]');
+    if (meta && PAGE_DESC[kind]) meta.setAttribute('content', PAGE_DESC[kind][lang]);
+  } catch { /* Noop */ }
+  try { document.dispatchEvent(new CustomEvent('hx:langchange', { detail: { lang } })); } catch { /* Noop */ }
+  return lang;
+}
+
+// Sprache setzen: validieren, persistieren, DOM anwenden, Event senden.
+export function setLang(lang) {
+  const value = resolveLang(lang);
+  applyLang();
+  return value;
+}
+
+// Sprachumschalter: zwei native Buttons EN/DE (44-px-Zielhöhe via CSS),
+// aria-pressed spiegelt die aktuelle Sprache.
+export function initLangSwitcher(container) {
+  if (!container || typeof document === 'undefined' || document === null) return null;
+  container.setAttribute('role', 'group');
+  container.setAttribute('aria-label', t('lang.switchAria'));
+  const buttons = new Map();
+  for (const lang of LANGS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'lang-btn lang-btn-' + lang;
+    btn.textContent = t('lang.' + lang);
+    btn.setAttribute('aria-pressed', String(getLang() === lang));
+    btn.setAttribute('title', t('lang.' + lang + 'Aria'));
+    btn.addEventListener('click', () => setLang(lang));
+    container.appendChild(btn);
+    buttons.set(lang, btn);
+  }
+  const sync = () => {
+    const current = getLang();
+    for (const [lang, btn] of buttons) btn.setAttribute('aria-pressed', String(current === lang));
+    try { container.setAttribute('aria-label', t('lang.switchAria')); } catch { /* Noop */ }
+  };
+  try { document.addEventListener('hx:langchange', sync); } catch { /* Noop */ }
+  sync();
+  return { sync };
+}

@@ -3,6 +3,7 @@
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/index.html", "destination": "/public/index.html" },
     { "source": "/app.js", "destination": "/public/app.js" },
+    { "source": "/i18n.mjs", "destination": "/public/i18n.mjs" },
     { "source": "/style.css", "destination": "/public/style.css" },
     { "source": "/globe.js", "destination": "/public/globe.js" },
     { "source": "/globe.css", "destination": "/public/globe.css" },

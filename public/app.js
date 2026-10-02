@@ -50,6 +50,15 @@
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
 import { strideHashes } from '/lib/stride.mjs';
+/* i18n: statischer Import (durch vercel.json-Rewrite /i18n.mjs gedeckt).
+ * EN/DE ist damit vor dem ersten Render garantiert initialisiert; ein 404
+ * von /i18n.mjs würde das ganze Modul stoppen — bewusst die konsistentere
+ * Alternative zum fehlertoleranten dynamischen Import (Muster globe.js). */
+import {
+  t, ruleName, noteText, sevText, serverPhrase,
+  fmtNum, fmtXrp, fmtClock,
+  applyStatic, applyLang, initLangSwitcher,
+} from './i18n.mjs';
 
 /* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
  * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
@@ -234,16 +243,12 @@ const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 // landen — der Server sanitisiert bereits, hier wird das doppelt abgesichert.
 function defang(value) {
   const s = String(value ?? '');
-  if (XRPL_ADDR_RE.test(s)) return 'Köder (Adresse verborgen)';
+  if (XRPL_ADDR_RE.test(s)) return t('defang.bait');
   return s;
 }
 
-function fmtClock(value) {
-  if (value === null || value === undefined || value === '') return '–';
-  const d = new Date(typeof value === 'number' ? value : value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleTimeString('de-DE');
-}
+// fmtClock/fmtXrp kommen jetzt aus ./i18n.mjs (Locale folgt der aktuellen
+// Sprache); die ctx-Übergabe an drilldown/history/account-check bleibt gleich.
 
 // XRPL close_time (Sekunden seit 2000-01-01) -> ISO.
 function xrplIso(closeTime, closeTimeIso) {
@@ -257,12 +262,6 @@ function xrplIso(closeTime, closeTimeIso) {
 function shortAddr(a) {
   const s = String(a ?? '');
   return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s;
-}
-
-// Drops -> XRP (de-DE, max. 2 Nachkommastellen).
-function fmtXrp(drops) {
-  const n = Number(drops ?? 0) / 1e6;
-  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
 }
 
 async function fetchJson(path) {
@@ -454,13 +453,13 @@ async function refetchBaitHashes(force) {
       denyPermanentlyFailed = true;
       denyLoaded = false;
       fullDisplay = false;
-      console.warn('Bait-Hash-Allowlist nicht erreichbar – Vollanzeige dauerhaft deaktiviert (fail-closed).', err);
+      console.warn(t('log.consoleDenyFailed'), err);
       // Gepufferte Kandidaten dürfen in knownBad (known-bad-hit der Engine
       // bleibt im WSS-Pfad funktionsfähig); die Anzeige bleibt Kurzform.
       for (const a of pendingCandidates) knownBadAdd(a);
       pendingCandidates.length = 0;
     } else {
-      console.warn(`Bait-Hash-Allowlist: Versuch ${denyFailCount} fehlgeschlagen (${err && err.message})`);
+      console.warn(t('log.consoleDenyAttempt', { n: denyFailCount, err: err && err.message }));
     }
   }
 }
@@ -507,8 +506,8 @@ function addrActionsHtml(address) {
   const href = `https://xrplcharts.com/accounts/${encodeURIComponent(a)}`;
   return (
     `<span class="addr-actions">` +
-    `<button type="button" class="addr-copy" data-addr="${esc(a)}" aria-label="Adresse kopieren">Kopieren</button>` +
-    `<a class="addr-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" aria-label="Auf xrplcharts.com öffnen" title="Auf xrplcharts.com öffnen">↗</a>` +
+    `<button type="button" class="addr-copy" data-addr="${esc(a)}" aria-label="${esc(t('addr.copyAria'))}">${esc(t('addr.copy'))}</button>` +
+    `<a class="addr-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(t('addr.linkAria'))}" title="${esc(t('addr.linkAria'))}">↗</a>` +
     `</span>`
   );
 }
@@ -543,9 +542,9 @@ function bindAddrActions() {
     const btn = e.target.closest('.addr-copy');
     if (!btn) return;
     const ok = await copyAddress(btn.dataset.addr);
-    btn.textContent = ok ? 'Kopiert' : 'Fehler';
+    btn.textContent = ok ? t('addr.copied') : t('addr.error');
     btn.setAttribute('aria-live', 'polite');
-    setTimeout(() => { btn.textContent = 'Kopieren'; }, 2000);
+    setTimeout(() => { btn.textContent = t('addr.copy'); }, 2000);
   });
 }
 
@@ -656,7 +655,7 @@ function isClusterNode(id) {
 function initGraph() {
   if (typeof vis === 'undefined') {
     document.getElementById('graph').innerHTML =
-      '<p class="graph-error">vis-network konnte nicht geladen werden (CDN nicht erreichbar).</p>';
+      `<p class="graph-error">${esc(t('graph.visError'))}</p>`;
     return false;
   }
   nodesDS = new vis.DataSet([]);
@@ -720,7 +719,7 @@ function updateRawGraph(cg) {
     return {
       id: String(n.id),
       label,
-      title: `${displayFindingAddr(n.id)} (${ROLE_LABEL[role]})`,
+      title: `${displayFindingAddr(n.id)} (${roleLabelText(role)})`,
       shape: 'dot',
       size: 16,
       color: ROLE_COLORS[role],
@@ -731,15 +730,20 @@ function updateRawGraph(cg) {
   });
 
   const nextEdges = rawEdges.map((e) => {
+    // type bleibt ROH: Edge-Id (`${e.from}->${e.to}::${type}`) und
+    // EDGE_COLORS-Lookup dürfen bei Sprachwechsel nicht wandern (sonst
+    // stale Kanten im inkrementell gepflegten vis-Netz). Nur das Label
+    // wird übersetzt gerendert.
     const type = String(e.type || 'Sonstige');
+    const typeLabel = type === 'Sonstige' ? t('edge.other') : type;
     return {
       id: String(e.txHash || `${e.from}->${e.to}::${type}`),
       from: String(e.from),
       to: String(e.to),
-      label: type,
+      label: typeLabel,
       // Kanten-Tooltip: volle Adressen bei geladener Allowlist und Nicht-Treffer
       // auf der Deny-Liste, sonst Kurzform (displayFindingAddr, fail-closed).
-      title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${type})`,
+      title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`,
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
       font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
@@ -758,7 +762,7 @@ function updateRawGraph(cg) {
 
 function clusterBubbleLabel(c) {
   const members = Array.isArray(c.memberAddresses) ? c.memberAddresses.length : 0;
-  return `${c.label ?? 'Cluster'}\n${members} Mitglieder · ${fmtXrp(c.totalDrops)} XRP`;
+  return `${c.label ?? t('cluster.labelDefault')}\n${t('cluster.members', { n: members })} · ${fmtXrp(c.totalDrops)} XRP`;
 }
 
 function clusterBubbleTitle(c) {
@@ -766,7 +770,7 @@ function clusterBubbleTitle(c) {
     .slice(0, 8)
     .map(displayFindingAddr)
     .join(', ');
-  return `${c.label ?? 'Cluster'}: ${members}`;
+  return `${c.label ?? t('cluster.labelDefault')}: ${members}`;
 }
 
 /* Cluster-Tab: alle Bubbles schließen (Rohzustand), Rohdaten aktualisieren,
@@ -899,7 +903,11 @@ function setGraphTab(tab) {
 
 const SEV_RANK = { info: 0, suspect: 1, malicious: 2 };
 const ROLE_ORDER = ['drainer', 'collector', 'relay', 'source', 'unknown']; // Dominanz wie Rollenkonflikt
+// ROLE_LABEL bleibt die kanonische (deutsche) Rollen-Tafel — ctx-Partner
+// (drilldown/account-check) greifen darauf zurück. Für Anzeigen im Host
+// übersetzt roleLabelText über die Legenden-Keys (EN: Collector, DE: Kollektor).
 const ROLE_LABEL = { source: 'Source', drainer: 'Drainer', collector: 'Kollektor', relay: 'Relay', unknown: 'Unknown' };
+const roleLabelText = (role) => t('legend.' + role);
 
 // Flusskette als Markup: Pfade aus flowPaths (lib/cluster.mjs) werden entlang
 // EBENER KANTEN mit '→' verbunden; mehrere Pfade trennt ein '·'. Volle
@@ -949,12 +957,12 @@ function clusterCardHtml(c, index) {
 
   const chips = ['source', 'drainer', 'collector', 'relay', 'unknown']
     .filter((r) => roleCounts.get(r))
-    .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${roleCounts.get(r)} × ${ROLE_LABEL[r]}</span>`)
+    .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${roleCounts.get(r)} × ${esc(roleLabelText(r))}</span>`)
     .join('');
 
   // Severity-Chip nur bei malicious/suspect; 'info' wird unterdrückt.
   const badge = sev === 'malicious' || sev === 'suspect'
-    ? `<span class="risk-badge risk-${esc(sev)}">${sev === 'malicious' ? 'maliziös' : 'verdächtig'}</span>`
+    ? `<span class="risk-badge risk-${esc(sev)}">${esc(sevText(sev))}</span>`
     : '';
 
   // Flusskette: echte Start-bis-Ende-Pfade aus den Cluster-Kanten (flowPaths,
@@ -973,13 +981,18 @@ function clusterCardHtml(c, index) {
     chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges, { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
   }
   const chainHtml = chainInner
-    ? `<div class="cluster-chain" aria-label="Geldfluss: Start bis Kollektor entlang echter Kanten">${chainInner}</div>`
+    ? `<div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${chainInner}</div>`
     : '';
 
   // Schaltflächen-Semantik für Screenreader: die Karte öffnet das Drilldown-
   // Modal (Klick + Enter/Leertaste) — deshalb role="button" plus sprechendes
   // aria-label (Befund 2026-09-29).
-  const ariaLabel = `Details zu ${c.label ?? 'Cluster'} öffnen – ${fmtXrp(c.totalDrops)} XRP, ${Number(c.txCount ?? 0).toLocaleString('de-DE')} Tx, ${Number(c.distinctAccounts ?? 0).toLocaleString('de-DE')} Konten`;
+  const ariaLabel = t('cluster.ariaDetails', {
+    label: c.label ?? t('cluster.labelDefault'),
+    xrp: fmtXrp(c.totalDrops),
+    txs: fmtNum(c.txCount ?? 0),
+    accounts: fmtNum(c.distinctAccounts ?? 0),
+  });
 
   // data-cluster trägt NUR den Listen-Index — c.id ('cluster:<Adresse>')
   // wird nie im DOM gerendert (c.id ist ausschließlich interner Lookup-Schlüssel).
@@ -992,13 +1005,13 @@ function clusterCardHtml(c, index) {
       <div class="cluster-roles">${chips}</div>
       <div class="cluster-metrics">
         <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
-        <span class="cluster-txs">${Number(c.txCount ?? 0).toLocaleString('de-DE')} Tx</span>
-        <span class="cluster-accounts">${Number(c.distinctAccounts ?? 0).toLocaleString('de-DE')} Konten</span>
+        <span class="cluster-txs">${fmtNum(c.txCount ?? 0)} ${esc(t('cluster.txUnit'))}</span>
+        <span class="cluster-accounts">${fmtNum(c.distinctAccounts ?? 0)} ${esc(t('cluster.accountUnit'))}</span>
       </div>
       ${chainHtml}
       <div class="cluster-times">
-        <span>Erste Sichtung: ${esc(fmtClock(c.firstSeen))}</span>
-        <span>Letzte Sichtung: ${esc(fmtClock(c.lastSeen))}</span>
+        <span>${esc(t('cluster.firstSeen'))}${esc(fmtClock(c.firstSeen))}</span>
+        <span>${esc(t('cluster.lastSeen'))}${esc(fmtClock(c.lastSeen))}</span>
       </div>
     </li>`;
 }
@@ -1251,7 +1264,7 @@ function setConn(ok, text) {
 }
 
 function connLabel() {
-  if (liveMode === 'wss') return 'Live – WSS verbunden';
+  if (liveMode === 'wss') return t('conn.wss');
   if (liveMode === 'poll') {
     if (wssSubscribeError) {
       // Volle Server-Schätzung (retry-Delta) NUR hier im Text — der
@@ -1259,21 +1272,22 @@ function connLabel() {
       const rest = wssSubscribeError.retryMs
         ? Math.max(0, wssSubscribeError.at + wssSubscribeError.retryMs - Date.now())
         : 0;
-      const est = rest > 0 ? `, Endpunkt-Schätzung ${fmtDur(rest)}` : '';
+      const est = rest > 0 ? t('conn.estSuffix', { dur: fmtDur(rest) }) : '';
       if (wssSubscribeError.throttled) {
-        return `Live – Snapshot-Fallback (Endpunkt-Drosselung: rate limit${est})`;
+        return t('conn.throttled', { est });
       }
-      return `Live – Snapshot-Fallback (WSS-Abo abgelehnt: ${wssSubscribeError.error}${est})`;
+      // Server-Fehlerwert (error) bleibt roh interpoliert — Protokollwert.
+      return t('conn.rejected', { error: wssSubscribeError.error, est });
     }
     // Abo frisch angenommen: 'WSS verbunden' schon mit dem ersten erfolgreichen
     // subscribe-Versuch (Events folgen in ~4 s). Bleiben Events dauerhaft aus,
     // fällt die Anzeige danach ehrlich auf den generischen Fallback-Text.
     if (wssSubscribeOk && Date.now() - wssSubscribeOkAt < WSS_SUBSCRIBE_OK_WINDOW_MS) {
-      return 'Live – WSS verbunden';
+      return t('conn.wss');
     }
-    return 'Live – Snapshot-Fallback (WSS ohne Events)';
+    return t('conn.noEvents');
   }
-  return 'Live-Verbindung wird aufgebaut …';
+  return t('conn.init');
 }
 
 function buildCtx() {
@@ -1310,9 +1324,9 @@ function addBlockCard(ledgerIndex, closeIso, txCount, state) {
     <div class="block-head">
       <span class="block-height">#${esc(ledgerIndex)}</span>
       <span class="block-time">${esc(fmtClock(closeIso))}</span>
-      <span class="block-txs">${Number(txCount).toLocaleString('de-DE')} Txs</span>
+      <span class="block-txs">${fmtNum(txCount)} ${esc(t('block.txs'))}</span>
     </div>
-    <div class="block-badges"><span class="badge badge-analyzing">Analysiere …</span></div>`;
+    <div class="block-badges"><span class="badge badge-analyzing">${esc(t('block.analyzing'))}</span></div>`;
   const feed = document.getElementById('block-feed');
   feed.prepend(li);
   while (feed.children.length > FEED_CARDS) feed.lastElementChild.remove();
@@ -1322,9 +1336,9 @@ function addBlockCard(ledgerIndex, closeIso, txCount, state) {
 
 function severityBadgeHtml(counts) {
   const parts = [];
-  if (counts.malicious) parts.push(`<span class="badge badge-malicious">${counts.malicious} × Maliziös</span>`);
-  if (counts.suspect) parts.push(`<span class="badge badge-suspect">${counts.suspect} × Verdächtig</span>`);
-  if (counts.info) parts.push(`<span class="badge badge-info">${counts.info} × Info</span>`);
+  if (counts.malicious) parts.push(`<span class="badge badge-malicious">${counts.malicious} × ${esc(t('log.filter.malicious'))}</span>`);
+  if (counts.suspect) parts.push(`<span class="badge badge-suspect">${counts.suspect} × ${esc(t('log.filter.suspect'))}</span>`);
+  if (counts.info) parts.push(`<span class="badge badge-info">${counts.info} × ${esc(t('log.filter.info'))}</span>`);
   return parts.join('');
 }
 
@@ -1336,11 +1350,11 @@ function finishBlockCard(card, findings, ledgerTxCount, resolvedCount) {
   const badges = [];
   const sevHtml = severityBadgeHtml(counts);
   if (sevHtml) badges.push(sevHtml);
-  else badges.push('<span class="badge badge-clean">keine Funde</span>');
+  else badges.push(`<span class="badge badge-clean">${esc(t('block.clean'))}</span>`);
   if (counts.malicious) card.classList.add('has-malicious');
   else if (counts.suspect) card.classList.add('has-suspect');
   if (resolvedCount < ledgerTxCount) {
-    badges.push(`<span class="badge badge-partial">${resolvedCount}/${ledgerTxCount} Txs aufgelöst</span>`);
+    badges.push(`<span class="badge badge-partial">${esc(t('block.resolved', { resolved: resolvedCount, total: ledgerTxCount }))}</span>`);
   }
   card.querySelector('.block-badges').innerHTML = badges.join('');
 }
@@ -1369,6 +1383,11 @@ function registerFindings(findings, ledgerIndex) {
       severity: String(f.severity ?? 'info'),
       address: String(f.address ?? ''),
       note: String(f.note ?? ''),
+      // Additive Übersetzungsfelder des Detectors (noteKey/noteParams):
+      // ermöglichen clientseitige Re-Renderung in der aktuellen Sprache;
+      // die sanitisierte note bleibt als Fallback erhalten.
+      noteKey: typeof f.noteKey === 'string' ? f.noteKey : null,
+      noteParams: f.noteParams && typeof f.noteParams === 'object' ? f.noteParams : null,
     });
     if (liveFindings[f.severity] != null) liveFindings[f.severity] += 1;
   }
@@ -1395,13 +1414,16 @@ function renderLog() {
   const rows = list.slice(-LOG_RENDER_MAX).reverse().map((e) => {
     const shown = displayFindingAddr(e.address);
     const actions = isFullShownAddr(e.address) ? addrActionsHtml(e.address) : '';
+    // Note: bei noteKey/noteParams (additive Felder des Detectors) übersetzt
+    // gerendert; sonst Fallback auf die sanitisierte Server-note (raw).
+    const noteShown = e.noteKey ? noteText(e) : defang(e.note);
     return `
     <div class="log-row sev-${esc(e.severity)}">
       <span class="log-time">${esc(fmtClock(e.t))}</span>
-      <span class="log-sev sev-text-${esc(e.severity)}">${esc(e.severity === 'malicious' ? 'maliziös' : e.severity === 'suspect' ? 'verdächtig' : 'info')}</span>
-      <span class="log-rule">${esc(RULE_NAME.get(e.ruleId) ?? e.ruleId)}</span>
+      <span class="log-sev sev-text-${esc(e.severity)}">${esc(sevText(e.severity))}</span>
+      <span class="log-rule">${esc(ruleName(e.ruleId))}</span>
       <span class="log-addr" title="${esc(shown)}">${esc(shown)}${actions}</span>
-      <span class="log-note">${esc(defang(e.note))}</span>
+      <span class="log-note">${esc(defang(noteShown))}</span>
       <span class="log-ledger">#${esc(e.ledgerIndex)}</span>
     </div>`;
   }).join('');
@@ -1410,17 +1432,17 @@ function renderLog() {
 
 function buildRuleFilter() {
   const sel = document.getElementById('log-rule');
-  sel.innerHTML = '<option value="all">Alle Regeln</option>' + RULE_CATALOG
-    .map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`)
+  sel.innerHTML = `<option value="all">${esc(t('log.filter.allRules'))}</option>` + RULE_CATALOG
+    .map((r) => `<option value="${esc(r.id)}">${esc(ruleName(r.id))}</option>`)
     .join('');
 }
 
 function downloadLog() {
   const payload = {
     exportedAt: new Date().toISOString(),
-    source: 'Honeypot XRPL – Live-Ledger-Analyse-Log',
+    source: t('export.source'),
     network: document.getElementById('stat-network').textContent,
-    note: 'Adressen vollständig, sofern die Bait-Hash-Allowlist geladen ist und die Adresse nicht auf der Deny-Liste steht; sonst Kurzform. Köder-Adressen werden nie exportiert. Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
+    note: t('export.note'),
     count: logEntries.length,
     entries: logEntries.map((e) => ({
       time: new Date(e.t).toISOString(),
@@ -1428,7 +1450,7 @@ function downloadLog() {
       ruleId: e.ruleId,
       severity: e.severity,
       address: displayFindingAddr(e.address),
-      note: e.note,
+      note: e.noteKey ? noteText(e) : e.note,
     })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1442,18 +1464,26 @@ function downloadLog() {
 }
 
 function updateLiveStats() {
-  document.getElementById('live-ledgers').textContent = liveStats.ledgers.toLocaleString('de-DE');
-  document.getElementById('live-txs').textContent = liveStats.txs.toLocaleString('de-DE');
-  document.getElementById('live-f-malicious').textContent = liveFindings.malicious.toLocaleString('de-DE');
-  document.getElementById('live-f-suspect').textContent = liveFindings.suspect.toLocaleString('de-DE');
-  document.getElementById('live-f-info').textContent = liveFindings.info.toLocaleString('de-DE');
-  const nowText = new Date().toLocaleTimeString('de-DE');
-  document.getElementById('last-update').textContent = 'Stand: ' + nowText;
+  document.getElementById('live-ledgers').textContent = fmtNum(liveStats.ledgers);
+  document.getElementById('live-txs').textContent = fmtNum(liveStats.txs);
+  document.getElementById('live-f-malicious').textContent = fmtNum(liveFindings.malicious);
+  document.getElementById('live-f-suspect').textContent = fmtNum(liveFindings.suspect);
+  document.getElementById('live-f-info').textContent = fmtNum(liveFindings.info);
+  const nowText = fmtClock(Date.now());
+  document.getElementById('last-update').textContent = t('foot.updated') + nowText;
   // Kopfzeilen-Stats (IDs unverändert) aus denselben Live-Werten.
-  document.getElementById('stat-malicious').textContent = liveFindings.malicious.toLocaleString('de-DE');
-  document.getElementById('stat-suspect').textContent = liveFindings.suspect.toLocaleString('de-DE');
-  document.getElementById('stat-events').textContent = liveStats.txs.toLocaleString('de-DE');
+  document.getElementById('stat-malicious').textContent = fmtNum(liveFindings.malicious);
+  document.getElementById('stat-suspect').textContent = fmtNum(liveFindings.suspect);
+  document.getElementById('stat-events').textContent = fmtNum(liveStats.txs);
   document.getElementById('stat-last').textContent = nowText;
+  // Hero-KPI-Zeile (index.html .hx-stage): dieselben Live-Werte, eigene IDs —
+  // guardiert, damit die Funktion auch auf Seiten ohne Hero läuft.
+  const kpiMalicious = document.getElementById('hx-kpi-malicious');
+  const kpiSuspect = document.getElementById('hx-kpi-suspect');
+  const kpiTxs = document.getElementById('hx-kpi-txs');
+  if (kpiMalicious) kpiMalicious.textContent = fmtNum(liveFindings.malicious);
+  if (kpiSuspect) kpiSuspect.textContent = fmtNum(liveFindings.suspect);
+  if (kpiTxs) kpiTxs.textContent = fmtNum(liveStats.txs);
 }
 
 /* ---------- Volles Ledger pro Block über denselben WebSocket ---------- */
@@ -1565,7 +1595,7 @@ function markQuotaThrottled(card, errorMessage) {
   const cooldownMs = Math.min(parseRetryMs(errorMessage) || QUOTA_COOLDOWN_FALLBACK_MS, QUOTA_COOLDOWN_MAX_MS);
   quotaCooldownUntil = Date.now() + cooldownMs;
   card.querySelector('.block-badges').innerHTML =
-    '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse pausiert</span>';
+    `<span class="badge badge-partial">${esc(t('block.quotaPaused'))}</span>`;
 }
 
 async function onLedgerEvent(msg) {
@@ -1608,7 +1638,7 @@ async function onLedgerEvent(msg) {
   if (idx % ANALYZE_EVERY_N_BLOCKS !== 0) {
     const skippedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
     skippedCard.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Block nicht analysiert (Stichproben-Kontingent)</span>';
+      `<span class="badge badge-partial">${esc(t('block.sampled'))}</span>`;
     return;
   }
 
@@ -1620,7 +1650,7 @@ async function onLedgerEvent(msg) {
   if (analysisInFlight) {
     const queuedCard = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
     queuedCard.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Analyse läuft bereits – dieser Block wird nicht aufgelöst</span>';
+      `<span class="badge badge-partial">${esc(t('block.busy'))}</span>`;
     return;
   }
   const card = addBlockCard(idx, closeIso, declaredCount, 'analyzing');
@@ -1644,7 +1674,7 @@ async function analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, car
     !quotaBudgetOk(MAX_RESOLVE + 1);
   if (overBudget) {
     card.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Kommandokontingent erschöpft – Analyse übersprungen</span>';
+      `<span class="badge badge-partial">${esc(t('block.budgetSkipped'))}</span>`;
     return;
   }
   const needLedgerFetch = !eventHashes.length && !inCooldown;
@@ -1661,7 +1691,7 @@ async function analyzeLedgerBlock(idx, eventHashes, declaredCount, closeIso, car
   }
   if (inCooldown) {
     card.querySelector('.block-badges').innerHTML =
-      '<span class="badge badge-partial">Ledger-Quota erschöpft – Analyse übersprungen</span>';
+      `<span class="badge badge-partial">${esc(t('block.quotaSkipped'))}</span>`;
     return;
   }
   const rawTxs = led?.ledger?.transactions;
@@ -1756,7 +1786,7 @@ function handleSubscribeResponse(msg) {
     wssSubscribeOk = true;
     wssSubscribeOkAt = Date.now();
     if (wsProbeTimer) { clearTimeout(wsProbeTimer); wsProbeTimer = null; }
-    setConn(true, 'Live – WSS verbunden');
+    setConn(true, t('conn.wss'));
     return;
   }
   const error = String(msg.error ?? 'unbekannt');
@@ -1769,8 +1799,9 @@ function handleSubscribeResponse(msg) {
   // (sticky bis zum nächsten Snapshot); der Snapshot-Fallback ist ab jetzt
   // die Datenquelle. onLedgerEvent stellt 'wss' beim ersten Event wieder her.
   if (liveMode === 'wss') liveMode = 'poll';
-  const est = retryMs ? ` – Endpunkt-Schätzung ${fmtDur(retryMs)}, Sonde früher` : '';
-  console.warn(`WSS-Abo abgelehnt (${error})${message ? `: ${message}` : ''}${est}. Snapshot-Fallback bleibt aktiv.`);
+  const est = retryMs ? t('conn.estWarn', { dur: fmtDur(retryMs) }) : '';
+  const msgSuffix = message ? `: ${message}` : '';
+  console.warn(t('log.consoleSubscribeRejected', { error, msg: msgSuffix, est }));
   scheduleWssProbe(retryMs);
   setConn(liveMode !== 'init', connLabel());
 }
@@ -1808,7 +1839,7 @@ function connectLive() {
     try {
       ws.send(JSON.stringify({ command: 'subscribe', id: SUBSCRIBE_ID, streams: ['ledger'], transactions: true }));
     } catch { /* onclose behandelt es */ }
-    if (liveMode !== 'poll') setConn(true, 'WSS verbunden – warte auf Ledger …');
+    if (liveMode !== 'poll') setConn(true, t('conn.wssConnecting'));
   };
 
   ws.onmessage = (ev) => {
@@ -1837,7 +1868,7 @@ function connectLive() {
     // 'Live – WSS verbunden' zeigen, obwohl die Datenquelle ab jetzt der
     // Snapshot-Fallback ist (onLedgerEvent stellt 'wss' wieder her).
     if (liveMode === 'wss') liveMode = 'poll';
-    if (liveMode !== 'poll') setConn(false, `Verbindung getrennt – erneuter Versuch in ${Math.round(wsBackoff / 1000)} s`);
+    if (liveMode !== 'poll') setConn(false, t('conn.closed', { s: Math.round(wsBackoff / 1000) }));
     scheduleReconnect();
   };
 
@@ -1924,11 +1955,11 @@ async function pollSnapshotFallback() {
       // WSS-Abo bereits mit tooBusy/rate limit ab, wäre der generische
       // Fehltext ein Informationsverlust — connLabel() nennt die Endpunkt-
       // Drosselung samt Schätzung, der Snapshot-Fehler wird angehängt.
-      const msg = err && err.message ? String(err.message) : 'unbekannter Fehler';
+      const msg = err && err.message ? String(err.message) : t('conn.unknownError');
       if (liveMode === 'poll' && wssSubscribeError && wssSubscribeError.throttled) {
-        setConn(false, `${connLabel()} – Ledger-Snapshot nicht erreichbar (${msg})`);
+        setConn(false, t('conn.snapshotUnreachable', { label: connLabel(), msg }));
       } else {
-        setConn(false, `Keine Ledger-Daten erreichbar (${msg})`);
+        setConn(false, t('conn.noData', { msg }));
       }
     }
   }
@@ -1977,9 +2008,35 @@ bindViews();
 setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
 bindLive();
 bindAddrActions();
-document.getElementById('stat-network').textContent = 'XRPL Mainnet (xrplcluster.com)';
+document.getElementById('stat-network').textContent = t('net.mainnet');
 connectLive();
 setInterval(watchdog, WATCHDOG_MS);
 // Bait-Hash-Allowlist: beim Start, alle 60 s und bei jedem Snapshot-Zyklus.
 refetchBaitHashes(true);
 setInterval(() => { refetchBaitHashes(true); }, BAIT_HASH_REFETCH_MS);
+
+/* ---------- i18n-Bootstrap ----------
+ * Sprache anwenden (persistiert oder Default 'en'), statische Texte des
+ * index.html übersetzen, Sprachumschalter im Header einsetzen.
+ * 'hx:langchange' re-rendert alle dynamischen Sichten, die der Host besitzt;
+ * die Module (drilldown/globe/history/account-check) re-agieren selbst oder
+ * werden über ihre refresh-API nachgezogen. */
+applyLang();
+applyStatic(document);
+initLangSwitcher(document.getElementById('lang-switch'));
+document.addEventListener('hx:langchange', () => {
+  applyStatic(document);
+  buildRuleFilter();
+  renderLog();
+  updateLiveStats();
+  document.getElementById('stat-network').textContent = t('net.mainnet');
+  setConn(liveMode !== 'init', connLabel());
+  if (lastClusterGraph) {
+    renderLiveGraph(lastClusterGraph);
+    renderClusterList(lastClusterGraph.clusters);
+  }
+  if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
+  if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh(true);
+  if (historyMod && typeof historyMod.refresh === 'function') historyMod.refresh();
+  if (checkMod && typeof checkMod.reRender === 'function') checkMod.reRender();
+});

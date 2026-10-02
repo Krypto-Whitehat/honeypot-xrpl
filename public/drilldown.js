@@ -34,6 +34,8 @@
  * Modal-Artefakt auf.
  */
 
+import { t, fmtNum, sevText } from './i18n.mjs';
+
 const FORCE_GRAPH_URL = 'https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js';
 
 export function initClusterDrilldown(ctx) {
@@ -53,7 +55,14 @@ export function initClusterDrilldown(ctx) {
   // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
   const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
 
-  const num = (v) => Number(v ?? 0).toLocaleString('de-DE');
+  const num = (v) => fmtNum(v);
+  // Rollen-Beschriftung übersetzt über die Legenden-Keys (EN: Collector,
+  // DE: Kollektor); ctx.roleLabels bleibt Fallback für unbekannte Rollen.
+  const roleLabelText = (role) => {
+    const viaI18n = t('legend.' + role);
+    if (viaI18n !== 'legend.' + role) return viaI18n;
+    return ctx.roleLabels && ctx.roleLabels[role] ? ctx.roleLabels[role] : role;
+  };
   const cssEscape = (s) => (window.CSS && typeof window.CSS.escape === 'function')
     ? window.CSS.escape(String(s))
     : String(s).replace(/[^a-zA-Z0-9_-]/g, (c) => `\\${c}`);
@@ -143,20 +152,20 @@ export function initClusterDrilldown(ctx) {
             <span class="cluster-modal-badge"></span>
           </div>
           <div class="cluster-modal-metrics"></div>
-          <button type="button" class="cluster-modal-close" aria-label="Schließen">&times;</button>
+          <button type="button" class="cluster-modal-close" aria-label="${esc(t('modal.closeAria'))}">&times;</button>
         </header>
         <p class="graph-note cluster-modal-stale" role="status" hidden
            style="margin:0;padding:10px 18px;border-bottom:1px solid var(--a6-line);background:var(--a6-surface-alt);"></p>
         <div class="cluster-modal-body">
-          <section class="cluster-modal-graph" aria-label="Cluster-Graph">
+          <section class="cluster-modal-graph" aria-label="${esc(t('modal.graphAria'))}">
             <div class="cluster-3d"></div>
             <p class="graph-note cluster-graph-note" hidden></p>
           </section>
-          <aside class="cluster-modal-side" aria-label="Cluster-Details">
-            <section class="cluster-modal-roles" aria-label="Rollen-Verteilung"></section>
-            <section class="cluster-modal-timeline" aria-label="Zeitachse der Transaktionen"></section>
-            <section class="cluster-modal-chain" aria-label="Flusskette Source bis Kollektor"></section>
-            <section class="cluster-modal-table" aria-label="Konten des Clusters"></section>
+          <aside class="cluster-modal-side" aria-label="${esc(t('modal.detailsAria'))}">
+            <section class="cluster-modal-roles" aria-label="${esc(t('modal.rolesAria'))}"></section>
+            <section class="cluster-modal-timeline" aria-label="${esc(t('modal.timelineAria'))}"></section>
+            <section class="cluster-modal-chain" aria-label="${esc(t('modal.chainAria'))}"></section>
+            <section class="cluster-modal-table" aria-label="${esc(t('modal.tableAria'))}"></section>
           </aside>
         </div>
       </div>`;
@@ -306,7 +315,7 @@ export function initClusterDrilldown(ctx) {
   function showTakeoverNotice() {
     const note = overlay && overlay.querySelector('.cluster-modal-stale');
     if (note) {
-      note.textContent = 'Cluster läuft unter neuer Kennung weiter – automatisch übernommen (nahtlose Übernahme über die Mitglieder-Schnittmenge).';
+      note.textContent = t('modal.takeover');
       note.hidden = false;
     }
     clearTakeoverNotice();
@@ -355,7 +364,7 @@ export function initClusterDrilldown(ctx) {
     clearTakeoverNotice(); // Übernahme-Hinweis hat seinen Cluster verloren
     const note = overlay.querySelector('.cluster-modal-stale');
     if (note) note.hidden = true;
-    els.titleEl.textContent = 'Cluster';
+    els.titleEl.textContent = t('cluster.labelDefault');
     els.badgeEl.innerHTML = '';
     els.metricsEl.innerHTML = '';
     els.rolesEl.innerHTML = '';
@@ -364,7 +373,7 @@ export function initClusterDrilldown(ctx) {
     els.tableEl.innerHTML = '';
     teardown3D();
     teardown2D();
-    els.graphEl.innerHTML = '<p class="graph-note">Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.</p>';
+    els.graphEl.innerHTML = `<p class="graph-note">${esc(t('modal.gone'))}</p>`;
     els.noteEl.hidden = true;
   }
 
@@ -394,7 +403,7 @@ export function initClusterDrilldown(ctx) {
       staleShown = true;
       const note = overlay.querySelector('.cluster-modal-stale');
       if (note) {
-        note.textContent = `Stand ${fmtClock(snapshot.at)} – Cluster nicht mehr im aktuellen Beobachtungsfenster.`;
+        note.textContent = t('modal.stale', { time: fmtClock(snapshot.at) });
         note.hidden = false;
       }
       if (fg3d) { try { fg3d.pauseAnimation(); } catch { /* egal */ } }
@@ -468,18 +477,18 @@ export function initClusterDrilldown(ctx) {
     }
     lastRenderDigest = digest;
 
-    titleEl.textContent = cluster.label ?? 'Cluster';
+    titleEl.textContent = cluster.label ?? t('cluster.labelDefault');
     const sev = clusterSeverity(cluster, clusterNodes);
     badgeEl.innerHTML = sev === 'malicious' || sev === 'suspect'
-      ? `<span class="risk-badge risk-${esc(sev)}">${sev === 'malicious' ? 'maliziös' : 'verdächtig'}</span>`
+      ? `<span class="risk-badge risk-${esc(sev)}">${esc(sevText(sev))}</span>`
       : '';
     metricsEl.innerHTML = `
       <span class="cluster-xrp">${esc(fmtXrp(cluster.totalDrops))} XRP</span>
-      <span class="cluster-txs">${num(cluster.txCount)} Tx</span>
-      <span class="cluster-accounts">${num(cluster.distinctAccounts)} Konten</span>
+      <span class="cluster-txs">${num(cluster.txCount)} ${esc(t('cluster.txUnit'))}</span>
+      <span class="cluster-accounts">${num(cluster.distinctAccounts)} ${esc(t('cluster.accountUnit'))}</span>
       <span class="cluster-times">
-        <span>Erste Sichtung: ${esc(fmtClock(cluster.firstSeen))}</span>
-        <span>Letzte Sichtung: ${esc(fmtClock(cluster.lastSeen))}</span>
+        <span>${esc(t('cluster.firstSeen'))}${esc(fmtClock(cluster.firstSeen))}</span>
+        <span>${esc(t('cluster.lastSeen'))}${esc(fmtClock(cluster.lastSeen))}</span>
       </span>`;
 
     renderRoles(cluster, clusterNodes, rolesEl);
@@ -521,16 +530,16 @@ export function initClusterDrilldown(ctx) {
         const pct = Math.round((count / total) * 100);
         return `
           <div class="role-bar-row">
-            <span class="role-bar-label"><span class="swatch swatch-${esc(r)}"></span>${esc(roleLabels[r] ?? r)}</span>
-            <span class="role-bar-track" role="img" aria-label="${esc(roleLabels[r] ?? r)}: ${count} von ${clusterNodes.length} Konten (${pct} %)">
+            <span class="role-bar-label"><span class="swatch swatch-${esc(r)}"></span>${esc(roleLabelText(r))}</span>
+            <span class="role-bar-track" role="img" aria-label="${esc(t('modal.roleBarAria', { role: roleLabelText(r), count, total: clusterNodes.length, pct }))}">
               <span class="role-bar-fill role-bar-${esc(r)}" style="width:${pct}%"></span>
             </span>
             <span class="role-bar-count">${num(count)}</span>
           </div>`;
       }).join('');
-    el.innerHTML = `<h3 class="cluster-modal-h">Rollen-Verteilung</h3>
+    el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.rolesTitle'))}</h3>
       <div class="role-bars">${rows}</div>
-      <p class="graph-note">Rollen (Source, Drainer, Kollektor, Relay) sind Heuristiken aus Ein-/Ausgrad und Geldfluss – kein Schuldnachweis.</p>`;
+      <p class="graph-note">${esc(t('graph.disclaimer'))}</p>`;
   }
 
   /* ---------------- Zeitachse (SVG, epoch-basiert) ---------------- */
@@ -542,8 +551,8 @@ export function initClusterDrilldown(ctx) {
       if (Number.isFinite(ep)) points.push({ ep, type: String(e.type ?? '') });
     }
     if (!points.length) {
-      el.innerHTML = '<h3 class="cluster-modal-h">Zeitachse der Transaktionen</h3>'
-        + '<p class="graph-note">Keine Zeitstempel im aktuellen Beobachtungsfenster.</p>';
+      el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.timelineTitle'))}</h3>`
+        + `<p class="graph-note">${esc(t('modal.timelineEmpty'))}</p>`;
       return;
     }
     let min = points[0].ep;
@@ -568,15 +577,15 @@ export function initClusterDrilldown(ctx) {
     ).join('');
     const minIso = new Date(min).toISOString();
     const maxIso = new Date(max).toISOString();
-    el.innerHTML = `<h3 class="cluster-modal-h">Zeitachse der Transaktionen</h3>
+    el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.timelineTitle'))}</h3>
       <svg class="cluster-timeline" role="img"
-           aria-label="Zeitachse von ${esc(fmtClock(minIso))} bis ${esc(fmtClock(maxIso))} – ${points.length} Transaktionen">
+           aria-label="${esc(t('modal.timelineAriaRange', { from: fmtClock(minIso), to: fmtClock(maxIso), n: points.length }))}">
         <line class="timeline-axis" x1="${PAD_PCT}%" y1="${CY}" x2="${100 - PAD_PCT}%" y2="${CY}"></line>
         ${dots}
       </svg>
       <div class="cluster-timeline-labels">
-        <span>Erste Sichtung: ${esc(fmtClock(cluster.firstSeen ?? minIso))}</span>
-        <span>Letzte Sichtung: ${esc(fmtClock(cluster.lastSeen ?? maxIso))}</span>
+        <span>${esc(t('cluster.firstSeen'))}${esc(fmtClock(cluster.firstSeen ?? minIso))}</span>
+        <span>${esc(t('cluster.lastSeen'))}${esc(fmtClock(cluster.lastSeen ?? maxIso))}</span>
       </div>`;
   }
 
@@ -605,9 +614,9 @@ export function initClusterDrilldown(ctx) {
       const rows = paths
         .map((p) => p.map(chip).join('<span class="chain-arrow" aria-hidden="true">→</span>'))
         .join('<span class="chain-path-sep" aria-hidden="true">·</span>');
-      el.innerHTML = `<h3 class="cluster-modal-h">Flusskette</h3>
-        <div class="cluster-chain" aria-label="Geldfluss: Start bis Kollektor entlang echter Kanten">${rows}</div>
-        <p class="graph-note">Pfade folgen nur Transaktionen des Beobachtungsfensters – keine vollständige Wallet-Historie, kein Schuldnachweis.</p>`;
+      el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.chainTitle'))}</h3>
+        <div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${rows}</div>
+        <p class="graph-note">${esc(t('modal.chainNote'))}</p>`;
       return;
     }
     // Fallback (keine Kante im Fenster bzw. flowPaths offline): Rollen-Chips
@@ -621,13 +630,13 @@ export function initClusterDrilldown(ctx) {
       for (const n of list) entries.push({ address: String(n.id), role });
     }
     if (!entries.length) {
-      el.innerHTML = '<h3 class="cluster-modal-h">Flusskette</h3>'
-        + '<p class="graph-note">Keine Rollen-Kette im aktuellen Beobachtungsfenster.</p>';
+      el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.chainTitle'))}</h3>`
+        + `<p class="graph-note">${esc(t('modal.chainEmpty'))}</p>`;
       return;
     }
     const chips = entries.map((x) => chip({ id: x.address, role: x.role })).join('<span class="chain-path-sep" aria-hidden="true">·</span>');
-    el.innerHTML = `<h3 class="cluster-modal-h">Flusskette</h3>
-      <div class="cluster-chain" aria-label="Konten des Clusters nach Rolle – keine Kanten im Beobachtungsfenster">${chips}</div>`;
+    el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.chainTitle'))}</h3>
+      <div class="cluster-chain" aria-label="${esc(t('modal.chainRoleAria'))}">${chips}</div>`;
   }
 
   /* ---------------- Konten-Tabelle ---------------- */
@@ -643,7 +652,7 @@ export function initClusterDrilldown(ctx) {
         const shown = displayAddr(id);
         const sev = String(n.severity ?? 'info');
         const badge = sev === 'malicious' || sev === 'suspect'
-          ? `<span class="risk-badge risk-${esc(sev)}">${sev === 'malicious' ? 'maliziös' : 'verdächtig'}</span>`
+          ? `<span class="risk-badge risk-${esc(sev)}">${esc(sevText(sev))}</span>`
           : '<span class="cluster-table-dash">–</span>';
         const actions = full ? addrActionsHtml(id) : '<span class="cluster-table-dash">–</span>';
         const role = roleLabels[n.role] ? n.role : 'unknown';
@@ -654,7 +663,7 @@ export function initClusterDrilldown(ctx) {
         // displayAddr(n.id), nicht gegen die rohe Id.
         return `<tr data-addr="${esc(full ? id : shown)}">
           <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}</td>
-          <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabels[role] ?? role)}</span></td>
+          <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabelText(role))}</span></td>
           <td>${badge}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.outDrops))}</td>
@@ -662,19 +671,19 @@ export function initClusterDrilldown(ctx) {
           <td>${actions}</td>
         </tr>`;
       }).join('');
-    el.innerHTML = `<h3 class="cluster-modal-h">Konten des Clusters</h3>
-      <div class="cluster-table-wrap" tabindex="0" role="region" aria-label="Konten-Tabelle, horizontal scrollbar">
+    el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.tableTitle'))}</h3>
+      <div class="cluster-table-wrap" tabindex="0" role="region" aria-label="${esc(t('modal.tableWrapAria'))}">
         <table class="cluster-table">
-          <caption>${num(clusterNodes.length)} Konten – Rollen sind Heuristiken, kein Schuldnachweis</caption>
+          <caption>${esc(t('modal.tableCaption', { n: num(clusterNodes.length) }))}</caption>
           <thead>
             <tr>
-              <th scope="col">Adresse</th>
-              <th scope="col">Rolle</th>
-              <th scope="col">Schweregrad</th>
-              <th scope="col">Eingehende Drops</th>
-              <th scope="col">Ausgehende Drops</th>
-              <th scope="col">Kanten (in / aus)</th>
-              <th scope="col">Aktionen</th>
+              <th scope="col">${esc(t('modal.thAddr'))}</th>
+              <th scope="col">${esc(t('modal.thRole'))}</th>
+              <th scope="col">${esc(t('modal.thSeverity'))}</th>
+              <th scope="col">${esc(t('modal.thIn'))}</th>
+              <th scope="col">${esc(t('modal.thOut'))}</th>
+              <th scope="col">${esc(t('modal.thEdges'))}</th>
+              <th scope="col">${esc(t('modal.thActions'))}</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -687,7 +696,7 @@ export function initClusterDrilldown(ctx) {
   async function renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token, clusterId) {
     noteEl.hidden = true;
     if (typeof window.ForceGraph3D !== 'function') {
-      graphEl.innerHTML = '<p class="graph-note">3D-Ansicht wird geladen …</p>';
+      graphEl.innerHTML = `<p class="graph-note">${esc(t('modal.loading3d'))}</p>`;
     }
     const ok3d = await loadForceGraph3D();
     if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
@@ -704,7 +713,7 @@ export function initClusterDrilldown(ctx) {
     if (typeof window.vis !== 'undefined') {
       try {
         build2D(clusterNodes, clusterEdges, graphEl);
-        noteEl.textContent = '3D-Ansicht nicht verfügbar – 2D-Ausweichansicht (vis-network).';
+        noteEl.textContent = t('modal.fallback2d');
         noteEl.hidden = false;
         return;
       } catch {
@@ -712,7 +721,7 @@ export function initClusterDrilldown(ctx) {
       }
     }
     teardown2D();
-    graphEl.innerHTML = '<p class="graph-note">Kein Graph verfügbar – Detaildaten in Rollen-Verteilung, Flusskette und Konten-Tabelle.</p>';
+    graphEl.innerHTML = `<p class="graph-note">${esc(t('modal.noGraph'))}</p>`;
   }
 
   function nodeColorAccessor() {
@@ -829,7 +838,7 @@ export function initClusterDrilldown(ctx) {
       return {
         id: String(n.id),
         label: shortAddrFn(n.id),
-        title: `${displayAddr(n.id)} (${roleLabels[role] ?? role})`,
+        title: `${displayAddr(n.id)} (${roleLabelText(role)})`,
         shape: 'dot',
         size: 14,
         color: roleColors[role],

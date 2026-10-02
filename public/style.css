@@ -32,6 +32,22 @@
   --a6-ui: 280ms;
   --a6-e1: 0 1px 0 #fff inset, 0 14px 32px -26px rgba(20, 20, 22, 0.28);
   --a6-e2: 0 1px 0 #fff inset, 0 28px 60px -42px rgba(20, 20, 22, 0.34);
+  --a6-e3: 0 1px 0 #fff inset, 0 44px 90px -54px rgba(20, 20, 22, 0.38);
+
+  /* Astra-6-Marke (lab_graphite): graphitfarbene Primäraktion, warmer Akzent
+     nur auf der Hero-Bühne und für Status-Signale — kein Glow auf jeder Karte
+     (SKILL lab_graphite.avoid). */
+  --a6-accent: #ec5b00;
+  --a6-accent-hi: #ff8a2e;
+  --a6-accent-text: #a63c00;
+  --a6-on-accent: #141416;
+  --a6-accent-soft: #fff0e6;
+
+  /* Raster (Astra-6): Gutter skaliert mit der Viewportbreite; main,
+     view-nav und Hero-Bühne teilen sich dieselbe Breitenformel —
+     max 2400px (Nutzer-Vorgabe; überschreibt den Skill-Default 90rem). */
+  --a6-gutter: clamp(12px, 2vw, 26px);
+  --a6-container: 2400px;
 
   /* Graph-Bühne: weiß, Tintenlinie, dezente Grautöne (Palantir) */
   --a6-graph-canvas: #ffffff;
@@ -104,7 +120,7 @@ html, body {
   flex-wrap: wrap;
   align-items: center;
   gap: 18px;
-  padding: 18px 26px;
+  padding: 18px var(--a6-gutter);
   background: var(--a6-surface);
   border-bottom: 1px solid var(--a6-line-strong);
 }
@@ -196,8 +212,8 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 14px 26px 0;
-  max-width: 1400px;
+  padding: 14px var(--a6-gutter) 0;
+  max-width: min(var(--a6-container), 100% - 2 * var(--a6-gutter));
   margin-inline: auto;
   width: 100%;
 }
@@ -212,11 +228,11 @@ html, body {
 /* ---------------- Panels ---------------- */
 
 main {
-  padding: 22px 26px;
+  padding: 22px var(--a6-gutter);
   display: flex;
   flex-direction: column;
   gap: 22px;
-  max-width: 1400px;
+  max-width: min(var(--a6-container), 100% - 2 * var(--a6-gutter));
   margin: 0 auto;
   width: 100%;
 }
@@ -225,7 +241,7 @@ main {
   background: var(--a6-surface);
   border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-lg);
-  padding: 18px 20px;
+  padding: clamp(1rem, 1.5vw, 1.5rem);
   box-shadow: var(--a6-e1);
 }
 
@@ -659,13 +675,24 @@ main {
 
 /* ---------------- Cluster-Zusammenfassung ---------------- */
 
+/* Cluster-Karten: bewusst MAXIMAL zwei Spalten pro Zeile (Nutzer-Vorgabe).
+   Track-Minimum = max(26rem, 50 % des Containers − halber Gap):
+   — 2400 px Viewport: main-Inhalt 2296, Panel-Inhalt 2254 → Track-Min 1117;
+     2·1117 + 16 Gap = 2250 ≤ 2254 → zwei Spalten;
+     3·1117 + 32 = 3383 > 2254 → nie drei Spalten.
+   — 1400 px Viewport: main-Inhalt 1296, Panel-Inhalt 1254 → Track-Min 617;
+     2·617 + 16 = 1250 ≤ 1254 → zwei Spalten.
+   — 900 px Viewport: main-Inhalt 822, Panel-Inhalt 780 → Track-Min 416;
+     2·416 + 16 = 848 > 780 → eine Spalte.
+   Der 10-px-Abschlag hält die Zwei-Spalten-Grenze auch bei Rundung
+   (Browser-Auflösung) stabil; unter 760 px erzwingt der Override unten 1fr. */
 .cluster-list {
   list-style: none;
   margin: 14px 0 0;
   padding: 0;
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(max(26rem, min(100%, calc(50% - 10px))), 1fr));
 }
 
 .cluster-card {
@@ -673,7 +700,7 @@ main {
   border: 1px solid var(--a6-line);
   border-left: 3px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
-  padding: 12px 14px;
+  padding: clamp(1rem, 1.5vw, 1.5rem);
   box-shadow: var(--a6-e1);
   cursor: pointer;
   min-inline-size: 0; /* Grid-Kind darf schrumpfen, damit Inhalte umbrechen */
@@ -774,12 +801,17 @@ main {
 }
 
 .chain-node {
-  padding: 3px 9px;
+  padding: 6px 12px;
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
   background: var(--a6-surface-alt);
   color: var(--a6-body);
-  word-break: break-all;
+  /* Volle Base58-Adressen kontrolliert umbrechen lassen (anywhere statt
+     break-all): bricht an der natürlichsten Stelle, nicht hart mitten im
+     Wort — Adressen bleiben in den Karten vollständig lesbar. */
+  overflow-wrap: anywhere;
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
   /* Flex-Kind der Kette: darf schrumpfen, aber nie über die Karte hinaus
      wachsen (Befund 2026-09-29 — volle Base58-Adresse bricht im Chip um). */
   max-inline-size: 100%;
@@ -853,6 +885,135 @@ main {
   border: 1px solid rgba(154, 91, 0, 0.4);
 }
 
+/* ---------------- Hero-Bühne (Astra-6 .a6-stage, SKILL hero_system) ------
+   Eigene Breitenbegrenzung: die Bühne liegt außerhalb von main und erbt
+   die main-Breite NICHT — identische Formel hält sie fluchtgleich zu den
+   Panels. Panel-Hierarchie: Hero mit e3 (höchste Erhebung), Panels mit e1 —
+   der Glow (::before) wohnt auf GENAU dieser einen Bühne, nicht auf jeder
+   Karte (lab_graphite.avoid: „Glow auf jeder Karte"). */
+.hx-stage {
+  position: relative;
+  isolation: isolate;
+  width: min(var(--a6-container), 100% - 2 * var(--a6-gutter));
+  margin: 22px auto 0;
+  padding: clamp(1.25rem, 4vw, 4rem);
+  border: 1px solid var(--a6-line-strong);
+  border-radius: clamp(1.25rem, 3vw, 2rem);
+  background: linear-gradient(155deg, #fff 0%, #fbfbfc 58%, #eeeef1 100%);
+  box-shadow: var(--a6-e3);
+}
+
+.hx-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 95% 0%, rgba(255, 178, 107, 0.20), transparent 55%),
+    radial-gradient(ellipse at 0% 100%, rgba(78, 88, 112, 0.07), transparent 60%);
+}
+
+.hx-stage-copy {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.hx-title {
+  max-inline-size: 18ch;
+  font-size: clamp(2.25rem, 1.35rem + 3.2vw, 4.5rem);
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+  text-wrap: balance;
+}
+
+.hx-lead {
+  max-inline-size: 56ch;
+  color: var(--a6-body);
+  font-size: clamp(1rem, 0.94rem + 0.3vw, 1.1875rem);
+  line-height: 1.7;
+}
+
+/* KPI-Zeile: zeigt ausschließlich bereits live gemessene Werte (dieselben
+   Zähler wie die Kopfstatistik) — keine erfundenen Zahlen, keine duplizierten
+   IDs (SKILL honesty: „Keine erfundenen Bewertungen, Projektzahlen"). */
+.hx-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: clamp(1rem, 2vw, 1.5rem);
+}
+
+.hx-kpi {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--a6-surface);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  box-shadow: var(--a6-e1);
+}
+
+.hx-kpi-value {
+  font-family: var(--a6-mono);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-ink);
+}
+
+.hx-kpi-label {
+  font-size: 12px;
+  color: var(--a6-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.hx-kpi-malicious .hx-kpi-value { color: var(--a6-error); }
+.hx-kpi-suspect .hx-kpi-value { color: var(--a6-warn); }
+.hx-kpi-txs .hx-kpi-value { color: var(--a6-ink); }
+
+/* ---------------- Sprachumschalter (initLangSwitcher in i18n.mjs) --------
+   Zwei native Buttons EN/DE, aria-pressed spiegelt die aktuelle Sprache;
+   Zielhöhe 44 px (Astra-6-Button-Contract), Stil konsistent zu .graph-tab. */
+.lang-switch {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.lang-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 16px;
+  background: var(--a6-surface);
+  color: var(--a6-body);
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-pill);
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: var(--a6-e1);
+  transition: background-color var(--a6-fast), color var(--a6-fast), transform var(--a6-ui) var(--a6-ease);
+}
+
+.lang-btn[aria-pressed="true"] {
+  background: #141416;
+  border-color: #141416;
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lang-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
+}
+
+.lang-btn:active { transform: translateY(0); }
+
 /* ---------------- Fußzeile ---------------- */
 
 .footbar {
@@ -902,6 +1063,7 @@ main {
   main { padding: 12px; }
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
+  .hx-stage { margin-top: 14px; }
   #graph { height: 320px; }
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
@@ -918,7 +1080,8 @@ main {
     transition: none !important;
   }
   .graph-tab,
-  .cluster-card { transform: none !important; }
+  .cluster-card,
+  .lang-btn { transform: none !important; }
 }
 
 @media (forced-colors: active) {
@@ -936,9 +1099,18 @@ main {
   .role-chip,
   .chain-node,
   .vis-tooltip,
+  .lang-btn,
+  .hx-stage,
+  .hx-kpi,
   #graph {
     border: 1px solid CanvasText;
     box-shadow: none;
+  }
+
+  /* Der Radial-Glow der Hero-Bühne tritt in erzwungenen Farbschemata
+     vollständig zurück (SKILL forced_colors_css: .a6-stage::before). */
+  .hx-stage::before {
+    display: none;
   }
 
   .block-card,

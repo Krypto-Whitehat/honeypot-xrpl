@@ -31,10 +31,13 @@
  * MODULKOPF DOM-FREI: kein document-/window-Zugriff auf Top-Level —
  * Voraussetzung für den Konsistenz-Test (node --test importiert diese Datei
  * und vergleicht normalizedNameClient/historyKeyClient mit lib/history.mjs).
- * Alle DOM-Zugriffe erfolgen lazily in Funktionen; fehlt #history-root
- * (Panel noch nicht gemountet), degradiert das Modul still — Melden via
- * onClusterRebuild bleibt funktionsfähig.
+ * Auch der Import von './i18n.mjs' ist DOM-frei (reines ESM, Muster
+ * public/attribution.mjs). Alle DOM-Zugriffe erfolgen lazily in Funktionen;
+ * fehlt #history-root (Panel noch nicht gemountet), degradiert das Modul
+ * still — Melden via onClusterRebuild bleibt funktionsfähig.
  */
+
+import { t, ruleName as i18nRuleName, fmtNum, fmtXrp, fmtClock } from './i18n.mjs';
 
 const POST_MIN_INTERVAL_MS = 10000; // max. 1 POST je 10 s pro Tab
 const REFRESH_MS = 60000;           // GET-Takt, nur wenn Ansicht sichtbar
@@ -81,21 +84,21 @@ export function initHistory(ctx) {
   const shortAddr = typeof host.shortAddr === 'function'
     ? host.shortAddr
     : (a) => { const s = String(a ?? ''); return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s; };
-  const fmtXrp = typeof host.fmtXrp === 'function'
-    ? host.fmtXrp
-    : (drops) => (Number(drops ?? 0) / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 2 });
-  const fmtClock = typeof host.fmtClock === 'function'
-    ? host.fmtClock
-    : (v) => (v === null || v === undefined || v === '' ? '–' : new Date(v).toLocaleTimeString('de-DE'));
+  const fmtXrpHost = typeof host.fmtXrp === 'function' ? host.fmtXrp : fmtXrp;
+  const fmtClockHost = typeof host.fmtClock === 'function' ? host.fmtClock : fmtClock;
   const isDeniedAddr = typeof host.isDeniedAddr === 'function' ? host.isDeniedAddr : () => false;
   const isFullShownAddr = typeof host.isFullShownAddr === 'function' ? host.isFullShownAddr : () => false;
   const displayAddr = typeof host.displayAddr === 'function' ? host.displayAddr : (a) => shortAddr(a);
   const addrActionsHtml = typeof host.addrActionsHtml === 'function' ? host.addrActionsHtml : () => '';
 
-  const numDe = (v) => Number(v ?? 0).toLocaleString('de-DE');
+  const numDe = (v) => fmtNum(v);
 
+  // Regelname: i18n-Lookup (aktuelle Sprache) für die bekannten 9 ids;
+  // unbekannte ids fallen auf die ctx-Tafel des Hosts und zuletzt roh.
   function ruleName(ruleId) {
     const id = String(ruleId ?? '');
+    const viaI18n = i18nRuleName(id);
+    if (viaI18n !== id) return viaI18n;
     const rn = host.ruleNames;
     if (typeof rn === 'function') return rn(id) ?? id;
     if (rn && typeof rn.get === 'function') return rn.get(id) ?? id;
@@ -236,14 +239,14 @@ export function initHistory(ctx) {
     if (shellReady || !root) return;
     root.innerHTML = `
       <div class="panel-head">
-        <h2 id="history-title">Maliziöse Historie</h2>
-        <span class="hint">Persistente Historie ausschließlich als maliziös eingestufter Cluster — verdächtige (suspect) Cluster werden bewusst nicht persistiert.</span>
+        <h2 id="history-title">${esc(t('history.title'))}</h2>
+        <span class="hint">${esc(t('history.hint'))}</span>
       </div>
       <div class="history-search">
-        <label class="filter-label" for="history-search">Suchen</label>
-        <input id="history-search" type="search" class="filter-select" placeholder="Adresse, Cluster-Label oder Regel">
+        <label class="filter-label" for="history-search">${esc(t('history.searchLabel'))}</label>
+        <input id="history-search" type="search" class="filter-select" placeholder="${esc(t('history.searchPlaceholder'))}">
       </div>
-      <p class="graph-note" id="history-state" role="status" aria-live="polite">Historie wird geladen …</p>
+      <p class="graph-note" id="history-state" role="status" aria-live="polite">${esc(t('history.loading'))}</p>
       <ul class="cluster-list" id="history-list" aria-labelledby="history-title"></ul>`;
     root.querySelector('#history-search').addEventListener('input', (e) => {
       query = e.target.value;
@@ -253,17 +256,17 @@ export function initHistory(ctx) {
   }
 
   function stateText() {
-    if (state === 'loading') return 'Historie wird geladen …';
+    if (state === 'loading') return t('history.loading');
     if (state === 'unconfigured') {
-      return 'Historie-Persistenz ist auf diesem Server nicht konfiguriert — Meldungen werden nicht dauerhaft gespeichert.';
+      return t('history.unconfigured');
     }
     if (state === 'empty') {
-      return 'Noch keine maliziösen Cluster in der Historie — sie füllt sich durch Live-Beobachtung und Besucher-Meldungen.';
+      return t('history.empty');
     }
     if (state === 'error') {
       return errorStatus > 0
-        ? `Historie nicht erreichbar (HTTP ${errorStatus})`
-        : 'Historie nicht erreichbar (Netzwerk)';
+        ? t('history.errorHttp', { status: errorStatus })
+        : t('history.errorNet');
     }
     return '';
   }
@@ -293,7 +296,7 @@ export function initHistory(ctx) {
     const visible = members.slice(0, MAX_VISIBLE_MEMBERS);
     const restCount = members.length - visible.length;
     const restHtml = restCount > 0
-      ? `<details class="history-members-more"><summary>weitere ${numDe(restCount)} Mitglieder</summary>` +
+      ? `<details class="history-members-more"><summary>${esc(t('history.moreMembers', { n: numDe(restCount) }))}</summary>` +
         `<ul class="history-members">${members.slice(MAX_VISIBLE_MEMBERS).map(memberLine).join('')}</ul></details>`
       : '';
     const rules = (Array.isArray(c?.rules) ? c.rules : []).slice(0, 16);
@@ -302,25 +305,25 @@ export function initHistory(ctx) {
       : '';
     const sightings = Math.max(1, Number(c?.sightings ?? 1));
     const sightingBadge = sightings >= 2
-      ? `<span class="badge">Von Besuchern gemeldet: ${numDe(sightings)}×</span>`
-      : '<span class="badge badge-partial">unbestätigt · 1 Sichtung</span>';
+      ? `<span class="badge">${esc(t('history.sightings', { n: numDe(sightings) }))}</span>`
+      : `<span class="badge badge-partial">${esc(t('history.unbestaetigt'))}</span>`;
     return `
       <li class="cluster-card sev-malicious">
         <div class="cluster-head">
-          <span class="cluster-label">${esc(c?.label || 'Cluster')}</span>
-          <span class="risk-badge risk-malicious">maliziös</span>
+          <span class="cluster-label">${esc(c?.label || t('cluster.labelDefault'))}</span>
+          <span class="risk-badge risk-malicious">${esc(t('history.maliciousBadge'))}</span>
         </div>
         <ul class="history-members">${visible.map(memberLine).join('')}</ul>
         ${restHtml}
         <div class="cluster-metrics">
-          <span class="cluster-xrp">${esc(fmtXrp(c?.totalDrops))} XRP</span>
-          <span class="cluster-txs">${numDe(c?.txCount)} Tx</span>
-          <span class="cluster-accounts">${numDe(c?.distinctAccounts ?? members.length)} Konten</span>
+          <span class="cluster-xrp">${esc(fmtXrpHost(c?.totalDrops))} XRP</span>
+          <span class="cluster-txs">${numDe(c?.txCount)} ${esc(t('cluster.txUnit'))}</span>
+          <span class="cluster-accounts">${numDe(c?.distinctAccounts ?? members.length)} ${esc(t('cluster.accountUnit'))}</span>
         </div>
         ${ruleBadges}
         <div class="cluster-times">
-          <span>Erste Sichtung: ${esc(fmtClock(c?.firstSeen))}</span>
-          <span>Letzte Sichtung: ${esc(fmtClock(c?.lastSeen))}</span>
+          <span>${esc(t('cluster.firstSeen'))}${esc(fmtClockHost(c?.firstSeen))}</span>
+          <span>${esc(t('cluster.lastSeen'))}${esc(fmtClockHost(c?.lastSeen))}</span>
         </div>
         <div class="history-sightings">${sightingBadge}</div>
       </li>`;
@@ -352,6 +355,9 @@ export function initHistory(ctx) {
         return;
       }
       const body = await res.json();
+      // Vergleich auf dem ROHEN Server-String (api/history.js reason-Feld —
+      // Protokollwert, wird nicht übersetzt); nur die Anzeige (stateText)
+      // folgt der aktuellen Sprache.
       if (body && body.reason === 'Persistenz nicht konfiguriert') {
         state = 'unconfigured'; // eigener Zustand — NICHT der Leerzustand
         currentClusters = [];
@@ -408,5 +414,18 @@ export function initHistory(ctx) {
     } catch { /* Melden darf den Live-Betrieb nie brechen */ }
   }
 
-  return { onClusterRebuild, setView, refresh };
+  // Sprachwechsel: Shell neu bauen (statische Texte) und Liste re-rendern.
+  // Guardiert — ohne document kein Listener (Node-Import bleibt sicher).
+  function reRender() {
+    if (shellReady) {
+      shellReady = false;
+      renderShell();
+      renderList();
+    }
+  }
+  if (typeof document !== 'undefined' && document && typeof document.addEventListener === 'function') {
+    try { document.addEventListener('hx:langchange', reRender); } catch { /* Noop */ }
+  }
+
+  return { onClusterRebuild, setView, refresh, reRender };
 }

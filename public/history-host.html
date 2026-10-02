@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
   <title>Honeypot XRPL – Flow-Host</title>
-  <meta name="description" content="Akkumulierter Cross-Block-Flow-State des XRPL-Ledger-Walks: Cluster-View mit Rollen, Volumen und Sichtungszeiten sowie Cursor-Stand des Walks.">
+  <meta name="description" content="Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23f5a623' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23f5a623'/%3E%3C/svg%3E">
 </head>
@@ -13,46 +13,47 @@
   <header class="topbar">
     <div class="brand">
       <h1>Honeypot&nbsp;XRPL</h1>
-      <p class="sub">Flow-Host: akkumulierter Cross-Block-Flow-State</p>
+      <p class="sub" data-i18n="fh.title">Flow-Host: accumulated cross-block flow state</p>
     </div>
+    <div class="lang-switch" id="lang-switch"></div>
   </header>
 
-  <nav class="view-nav graph-tabs" aria-label="Navigation">
-    <a class="view-tab graph-tab" href="index.html">Dashboard</a>
+  <nav class="view-nav graph-tabs" aria-label="Navigation" data-i18n-aria="fh.navAria">
+    <a class="view-tab graph-tab" href="index.html" data-i18n="tab.dashboard">Dashboard</a>
   </nav>
 
   <main>
     <section class="panel" aria-labelledby="fh-title">
       <div class="panel-head">
-        <h2 id="fh-title">Akkumulierter Flow-State</h2>
-        <span class="hint">Cross-Block-Akkumulation des Ledger-Walks — Cursor-Stand und Cluster-View</span>
+        <h2 id="fh-title" data-i18n="fh.stateTitle">Accumulated Flow State</h2>
+        <span class="hint" data-i18n="fh.stateHint">Cross-block accumulation of the ledger walk — cursor position and cluster view</span>
         <div class="live-controls">
-          <button type="button" id="fh-refresh" class="download-btn">Aktualisieren</button>
+          <button type="button" id="fh-refresh" class="download-btn" data-i18n="fh.refresh">Refresh</button>
         </div>
       </div>
 
-      <div class="live-stats" aria-label="Walk-Status">
-        <span class="livestat"><span class="livestat-value" id="fh-cursor">–</span> Cursor-Stand</span>
-        <span class="livestat"><span class="livestat-value" id="fh-lag">–</span> Rückstand</span>
-        <span class="livestat"><span class="livestat-value" id="fh-updated">–</span> Stand</span>
+      <div class="live-stats" aria-label="Walk status" data-i18n-aria="fh.walkAria">
+        <span class="livestat"><span class="livestat-value" id="fh-cursor">–</span> <span data-i18n="fh.cursor">cursor position</span></span>
+        <span class="livestat"><span class="livestat-value" id="fh-lag">–</span> <span data-i18n="fh.lag">lag</span></span>
+        <span class="livestat"><span class="livestat-value" id="fh-updated">–</span> <span data-i18n="fh.updated">as of</span></span>
       </div>
       <p class="empty" id="fh-status-msg" hidden></p>
       <div id="fh-graph" hidden></div>
-      <p class="empty" id="fh-graph-empty" hidden>Keine retained Fluss-Kanten im akkumulierten State — der Flow-Graph bleibt leer.</p>
-      <p class="graph-note">Flow-Graph aus den BEGRENZTEN retained Fluss-Kanten + Rollen des akkumulierten States (lib/ledger-walk.mjs). Positionen sind deterministisch kreisförmig abgeleitet — das XRPL-Ledger enthält keine Standortdaten; die Darstellung ist eine symbolische Flussansicht.</p>
+      <p class="empty" id="fh-graph-empty" hidden data-i18n="fh.graphEmpty">No retained flow edges in the accumulated state — the flow graph remains empty.</p>
+      <p class="graph-note" data-i18n="fh.graphNote">Flow graph from the LIMITED retained flow edges + roles of the accumulated state (lib/ledger-walk.mjs). Positions are derived deterministically in a circle — the XRPL ledger contains no location data; the view is a symbolic flow view.</p>
     </section>
 
     <section class="panel" aria-labelledby="fh-clusters-title">
       <div class="panel-head">
-        <h2 id="fh-clusters-title">Cluster</h2>
-        <span class="hint">Sortiert nach Volumen (absteigend), dann Transaktionszahl (absteigend)</span>
+        <h2 id="fh-clusters-title" data-i18n="fh.clustersTitle">Clusters</h2>
+        <span class="hint" data-i18n="fh.clustersHint">Sorted by volume (descending), then transaction count (descending)</span>
       </div>
       <ul class="cluster-list" id="fh-cluster-list" hidden></ul>
-      <p class="empty" id="fh-empty">Noch kein akkumulierter Flow-State — der Walk hat noch keine Cluster gebildet.</p>
+      <p class="empty" id="fh-empty" data-i18n="fh.empty">No accumulated flow state yet — the walk has not formed clusters yet.</p>
     </section>
   </main>
 
-  <script>
+  <script type="module">
 'use strict';
 /* Flow-Host: lädt die NORMALISIERTE Projektion des akkumulierten Flow-States
  * (GET /api/flow-state) und rendert die Cluster-View plus Cursor-Stand UND
@@ -63,37 +64,24 @@
  * (kein Math.random, kein Date.now) — symbolische Flussansicht, keine
  * Standortdaten. Die Karten-Markup folgt dem bestehenden Muster (app.js
  * clusterCardHtml) ohne Schweregrad und Flusskette — Schweregrad ist aus dem
- * akkumulierten State nicht ableitbar (keine Findings). */
+ * akkumulierten State nicht ableitbar (keine Findings).
+ * Sprachteil: alle sichtbaren Texte laufen über public/i18n.mjs (t()-Keys,
+ * Formatter-Locale folgt der Sprache); statische Texte via data-i18n. */
 
+import {
+  t, fmtNum, fmtXrp, fmtDateTime, applyLang, applyStatic, initLangSwitcher,
+} from './i18n.mjs';
+
+// Rollen-Map bleibt als Fallback erhalten (Markup-Muster app.js); die
+// sichtbare Beschriftung läuft über die legend.*-Keys (EN/DE).
 const ROLE_LABEL = { source: 'Source', drainer: 'Drainer', collector: 'Kollektor', relay: 'Relay', unknown: 'Unknown' };
 const ROLE_ORDER = ['source', 'drainer', 'collector', 'relay', 'unknown'];
+const roleLabel = (role) => t('legend.' + role) || ROLE_LABEL[role] || 'Unknown';
 
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[c]);
-}
-
-// Drops -> XRP (de-DE, max. 2 Nachkommastellen) — Muster app.js fmtXrp.
-function fmtXrp(drops) {
-  const n = Number(drops ?? 0) / 1e6;
-  return n.toLocaleString('de-DE', { maximumFractionDigits: 2 });
-}
-
-// Zeitstempel-Anzeige (de-DE, Zeit) — Muster app.js fmtClock.
-function fmtClock(value) {
-  if (value === null || value === undefined || value === '') return '–';
-  const d = new Date(typeof value === 'number' ? value : value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleTimeString('de-DE');
-}
-
-// Persistenz-Zeitstempel (de-DE, Datum + Zeit) — der Stand kann Tage alt sein.
-function fmtDateTime(value) {
-  if (value === null || value === undefined || value === '') return '–';
-  const d = new Date(typeof value === 'number' ? value : value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleString('de-DE');
 }
 
 // Cluster-Karte: Markup-Muster app.js clusterCardHtml (ohne Schweregrad/
@@ -107,22 +95,22 @@ function clusterCardHtml(c, index) {
   }
   const chips = ROLE_ORDER
     .filter((r) => counts[r])
-    .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${Number(counts[r])} × ${ROLE_LABEL[r]}</span>`)
+    .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${Number(counts[r])} × ${esc(roleLabel(r))}</span>`)
     .join('');
   return `
     <li class="cluster-card role-${dominant}" data-cluster-index="${Number(index) || 0}">
       <div class="cluster-head">
-        <span class="cluster-label">${esc(c.label ?? 'Cluster')}</span>
+        <span class="cluster-label">${esc(c.label ?? t('cluster.labelDefault'))}</span>
       </div>
       <div class="cluster-roles">${chips}</div>
       <div class="cluster-metrics">
         <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
-        <span class="cluster-txs">${Number(c.txCount ?? 0).toLocaleString('de-DE')} Tx</span>
-        <span class="cluster-accounts">${Number(c.distinctAccounts ?? 0).toLocaleString('de-DE')} Konten</span>
+        <span class="cluster-txs">${fmtNum(c.txCount ?? 0)} ${esc(t('cluster.txUnit'))}</span>
+        <span class="cluster-accounts">${fmtNum(c.distinctAccounts ?? 0)} ${esc(t('cluster.accountUnit'))}</span>
       </div>
       <div class="cluster-times">
-        <span>Erste Sichtung: ${esc(fmtDateTime(c.firstSeen))}</span>
-        <span>Letzte Sichtung: ${esc(fmtDateTime(c.lastSeen))}</span>
+        <span>${esc(t('cluster.firstSeen'))}${esc(fmtDateTime(c.firstSeen))}</span>
+        <span>${esc(t('cluster.lastSeen'))}${esc(fmtDateTime(c.lastSeen))}</span>
       </div>
     </li>`;
 }
@@ -234,7 +222,7 @@ function renderFlowGraph(graph) {
   const labelEdgeIds = new Set(graph.edges.slice(0, EDGE_LABEL_MAX).map(edgeIdentity));
   const edgeColor = cssToken('--a6-edge-neutral') || '#62626b';
   const parts = [];
-  parts.push('<svg viewBox="0 0 ' + GW + ' ' + GH + '" style="width:100%;height:auto;display:block" role="img" aria-label="Flow-Graph des akkumulierten States">');
+  parts.push('<svg viewBox="0 0 ' + GW + ' ' + GH + '" style="width:100%;height:auto;display:block" role="img" aria-label="' + esc(t('fh.graphAria')) + '">');
   for (const e of graph.edges) {
     const a = graph.pos[e.from];
     const b = graph.pos[e.to];
@@ -252,7 +240,7 @@ function renderFlowGraph(graph) {
   for (const nd of graph.nodes) {
     const p = graph.pos[nd.id];
     const fill = roleColor(nd.role);
-    const title = esc(nd.id) + ' (' + esc(ROLE_LABEL[nd.role] || 'Unknown') + ')';
+    const title = esc(nd.id) + ' (' + esc(roleLabel(nd.role)) + ')';
     let label = '';
     if (labelNodes) {
       const dx = p[0] - GCX, dy = p[1] - GCY;
@@ -271,7 +259,7 @@ function renderFlowGraph(graph) {
 // Legende: bestehende Swatch-Klassen + Rollen-Labels (kein zweites Farbsystem).
 function flowLegendHtml() {
   const rows = ROLE_ORDER
-    .map((r) => '<span class="role-chip"><span class="swatch swatch-' + r + '"></span>' + ROLE_LABEL[r] + '</span>')
+    .map((r) => '<span class="role-chip"><span class="swatch swatch-' + r + '"></span>' + esc(roleLabel(r)) + '</span>')
     .join('');
   return '<div class="cluster-roles">' + rows + '</div>';
 }
@@ -293,7 +281,7 @@ function renderView(data) {
   const configured = !data.reason;
   const cursorNum = Number(data.cursor);
   els.cursor.textContent = configured && Number.isFinite(cursorNum)
-    ? cursorNum.toLocaleString('de-DE')
+    ? fmtNum(cursorNum)
     : '–';
   // Rückstand = validatedIndex − Cursor: macht sichtbar, dass der Flow-State
   // ein Akkumulator ist und der Walk hinter dem Live-Edge herläuft. Ohne
@@ -306,13 +294,14 @@ function renderView(data) {
     ? validatedNum - cursorNum
     : null;
   els.lag.textContent = lag != null && lag >= 0
-    ? lag.toLocaleString('de-DE')
+    ? fmtNum(lag)
     : '–';
   els.updated.textContent = configured ? fmtDateTime(data.updatedAt) : '–';
   if (data.reason) {
+    // Der Vergleich bleibt roh: data.reason ist ein Server-Protokollwert.
     els.status.textContent = data.reason === 'Persistenz nicht konfiguriert'
-      ? 'Persistenz nicht konfiguriert — ohne Persistenz-Berechtigung liefert der Endpunkt keinen Flow-State.'
-      : `Hinweis: ${data.reason}`;
+      ? t('fh.statusPersist')
+      : t('fh.statusHint', { reason: data.reason });
     els.status.hidden = false;
   } else {
     els.status.hidden = true;
@@ -326,9 +315,7 @@ function renderView(data) {
     els.list.innerHTML = '';
     els.list.hidden = true;
     els.empty.hidden = false;
-    els.empty.textContent = configured
-      ? 'Noch kein akkumulierter Flow-State — der Walk hat noch keine Cluster gebildet.'
-      : 'Kein Flow-State verfügbar.';
+    els.empty.textContent = configured ? t('fh.empty') : t('fh.emptyNoPersist');
     return;
   }
   // Cluster existieren: Flow-Graph aus den retained edges + Rollen rendern.
@@ -348,15 +335,19 @@ function renderView(data) {
   els.list.innerHTML = clusters.map((c, i) => clusterCardHtml(c, i)).join('');
 }
 
+let lastData = null; // letzte geladene Projektion — für Re-Render bei Sprachwechsel
+
 async function load() {
   els.refresh.disabled = true;
   try {
     const res = await fetch('/api/flow-state', { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    lastData = data;
     renderView(data);
   } catch {
-    els.status.textContent = 'Flow-State nicht erreichbar — bitte später erneut versuchen.';
+    lastData = null;
+    els.status.textContent = t('fh.unreachable');
     els.status.hidden = false;
     els.cursor.textContent = '–';
     els.lag.textContent = '–';
@@ -364,13 +355,24 @@ async function load() {
     els.list.innerHTML = '';
     els.list.hidden = true;
     els.empty.hidden = false;
-    els.empty.textContent = 'Kein Flow-State verfügbar.';
+    els.empty.textContent = t('fh.emptyNoPersist');
   } finally {
     els.refresh.disabled = false;
   }
 }
 
 els.refresh.addEventListener('click', load);
+
+// Sprach-Basisteil: Titel/Meta/lang, statische data-i18n-Texte, Umschalter;
+// dynamische Sichten (Cluster-Karten, Graph, Status) re-rendern auf hx:langchange.
+applyLang();
+applyStatic(document);
+initLangSwitcher(document.getElementById('lang-switch'));
+document.addEventListener('hx:langchange', () => {
+  applyStatic(document);
+  if (lastData) renderView(lastData);
+});
+
 load();
 // Poll alle 60 s: der serverseitige 60-s-Cache des validatedIndex-Abrufs
 // (api/flow-state.js) deckelt die RPC-Kosten dieses Polls auf <= 1 Call/Minute

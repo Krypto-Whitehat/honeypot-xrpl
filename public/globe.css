@@ -113,6 +113,8 @@
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-sm);
+  /* feine Erhebung wie die Panels (e1) — hebt die Legende vom Liniennetz ab */
+  box-shadow: var(--a6-e1);
   pointer-events: none;
   font-size: 12px;
   line-height: 1.6;

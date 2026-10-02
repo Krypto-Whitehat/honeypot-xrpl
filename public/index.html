@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
-  <title>Honeypot XRPL – Live-Ledger-Analyse</title>
-  <meta name="description" content="Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft und die erkannten Akteure zu Clustern gruppiert (Source, Drainer, Kollektor, Relay).">
+  <title>Honeypot XRPL – Live Ledger Analysis</title>
+  <meta name="description" content="Live ledger analysis of the XRPL: validated blocks are checked in real time for malware, spam and draining patterns, and the detected actors are grouped into clusters (source, drainer, collector, relay).">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="drilldown.css">
   <link rel="stylesheet" href="globe.css">
@@ -17,119 +17,137 @@
   <header class="topbar">
     <div class="brand">
       <h1>Honeypot&nbsp;XRPL</h1>
-      <p class="sub">Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community</p>
+      <p class="sub" data-i18n="brand.sub">Live ledger analysis and threat dashboard for the XRPL community</p>
     </div>
 
-    <div class="stats" id="stats" aria-label="Live-Statistiken">
+    <div class="stats" id="stats" data-i18n-aria="stats.aria">
       <div class="stat stat-malicious">
         <span class="stat-value" id="stat-malicious">–</span>
-        <span class="stat-label">Findings malicious (live)</span>
+        <span class="stat-label" data-i18n="stat.malicious">Findings malicious (live)</span>
       </div>
       <div class="stat stat-suspect">
         <span class="stat-value" id="stat-suspect">–</span>
-        <span class="stat-label">Findings suspect (live)</span>
+        <span class="stat-label" data-i18n="stat.suspect">Findings suspect (live)</span>
       </div>
       <div class="stat stat-events">
         <span class="stat-value" id="stat-events">–</span>
-        <span class="stat-label">Transaktionen (live)</span>
+        <span class="stat-label" data-i18n="stat.events">Transactions (live)</span>
       </div>
       <div class="stat stat-network">
         <span class="stat-value" id="stat-network">–</span>
-        <span class="stat-label">Netzwerk</span>
+        <span class="stat-label" data-i18n="stat.network">Network</span>
       </div>
       <div class="stat stat-last">
         <span class="stat-value stat-value-small" id="stat-last">–</span>
-        <span class="stat-label">Stand</span>
+        <span class="stat-label" data-i18n="stat.last">As of</span>
       </div>
     </div>
 
     <div class="conn" id="conn" role="status">
       <span class="conn-dot" id="conn-dot"></span>
-      <span id="conn-text">Live-Verbindung wird aufgebaut …</span>
+      <span id="conn-text" data-i18n="conn.init">Establishing live connection …</span>
     </div>
+
+    <div class="lang-switch" id="lang-switch"></div>
   </header>
 
-  <nav class="view-nav graph-tabs" role="tablist" aria-label="Ansichten">
-    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-dashboard" aria-selected="true" aria-controls="view-dashboard">Dashboard</button>
-    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-history" aria-selected="false" aria-controls="view-history">Historie</button>
-    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-check" aria-selected="false" aria-controls="view-check">Konto-Check</button>
+  <!-- Hero-Bühne (Astra-6 .a6-stage-Muster, Profil lab_graphite): eine
+       ruhige, hochkontrastreiche Bühne über den Views; die KPI-Werte sind
+       dieselben Live-Zähler wie in der Kopfstatistik — keine erfundenen
+       Zahlen, keine duplizierten IDs. -->
+  <section class="hx-stage" aria-labelledby="hx-title">
+    <div class="hx-stage-copy">
+      <h2 class="hx-title" id="hx-title" data-i18n="hero.title">Live threat radar for the XRP Ledger</h2>
+      <p class="hx-lead" data-i18n="hero.lead">Every validated ledger block is analyzed in real time — malware memos, drainer sweeps, dusting and fake-NFT patterns are detected and the actors behind them are grouped into clusters.</p>
+    </div>
+    <div class="hx-kpis" data-i18n-aria="hero.kpisAria">
+      <span class="hx-kpi hx-kpi-malicious"><span class="hx-kpi-value" id="hx-kpi-malicious">0</span><span class="hx-kpi-label" data-i18n="hero.kpiMalicious">malicious</span></span>
+      <span class="hx-kpi hx-kpi-suspect"><span class="hx-kpi-value" id="hx-kpi-suspect">0</span><span class="hx-kpi-label" data-i18n="hero.kpiSuspect">suspect</span></span>
+      <span class="hx-kpi hx-kpi-txs"><span class="hx-kpi-value" id="hx-kpi-txs">0</span><span class="hx-kpi-label" data-i18n="hero.kpiTxs">checked txs</span></span>
+    </div>
+  </section>
+
+  <nav class="view-nav graph-tabs" role="tablist" data-i18n-aria="nav.aria">
+    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-dashboard" aria-selected="true" aria-controls="view-dashboard" data-i18n="tab.dashboard">Dashboard</button>
+    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-history" aria-selected="false" aria-controls="view-history" data-i18n="tab.history">History</button>
+    <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-check" aria-selected="false" aria-controls="view-check" data-i18n="tab.check">Account Check</button>
     <!-- Flow-Host: eigenständige Seite (kein SPA-View) — Link statt Tab-Button. -->
-    <a class="view-tab graph-tab" href="history-host.html">Flow-Host</a>
+    <a class="view-tab graph-tab" href="history-host.html" data-i18n="tab.flowhost">Flow-Host</a>
   </nav>
 
   <main>
     <div id="view-dashboard" role="tabpanel" aria-labelledby="view-tab-dashboard">
     <section class="panel" aria-labelledby="live-title">
       <div class="panel-head">
-        <h2 id="live-title">Live-Block-Feed</h2>
-        <span class="hint">Validierte Ledger-Blöcke in Echtzeit – Analyse im Browser mit derselben Engine wie serverseitig</span>
-        <div class="live-stats" aria-label="Live-Analyse-Statistiken">
-          <span class="livestat"><span class="livestat-value" id="live-ledgers">0</span> Ledger</span>
-          <span class="livestat"><span class="livestat-value" id="live-txs">0</span> geprüfte Txs</span>
-          <span class="livestat livestat-malicious"><span class="livestat-value" id="live-f-malicious">0</span> malicious</span>
-          <span class="livestat livestat-suspect"><span class="livestat-value" id="live-f-suspect">0</span> verdächtig</span>
-          <span class="livestat livestat-info"><span class="livestat-value" id="live-f-info">0</span> Info</span>
+        <h2 id="live-title" data-i18n="live.title">Live Block Feed</h2>
+        <span class="hint" data-i18n="live.hint">Validated ledger blocks in real time – analysis in the browser with the same engine as on the server</span>
+        <div class="live-stats" data-i18n-aria="live.aria">
+          <span class="livestat"><span class="livestat-value" id="live-ledgers">0</span> <span data-i18n="live.ledgers">ledgers</span></span>
+          <span class="livestat"><span class="livestat-value" id="live-txs">0</span> <span data-i18n="live.txs">checked txs</span></span>
+          <span class="livestat livestat-malicious"><span class="livestat-value" id="live-f-malicious">0</span> <span data-i18n="live.malicious">malicious</span></span>
+          <span class="livestat livestat-suspect"><span class="livestat-value" id="live-f-suspect">0</span> <span data-i18n="live.suspect">suspect</span></span>
+          <span class="livestat livestat-info"><span class="livestat-value" id="live-f-info">0</span> <span data-i18n="live.info">info</span></span>
         </div>
       </div>
 
-      <ol class="block-feed" id="block-feed" aria-label="Folge der analysierten Ledger-Blöcke"></ol>
-      <p class="empty" id="feed-empty">Warte auf den ersten validierten Ledger …</p>
+      <ol class="block-feed" id="block-feed" data-i18n-aria="feed.aria"></ol>
+      <p class="empty" id="feed-empty" data-i18n="feed.empty">Waiting for the first validated ledger …</p>
 
       <div class="log-head">
-        <h3 id="log-title">Analyse-Log</h3>
+        <h3 id="log-title" data-i18n="log.title">Analysis Log</h3>
         <div class="live-controls">
-          <label class="filter-label" for="log-severity">Schweregrad</label>
+          <label class="filter-label" for="log-severity" data-i18n="log.severity">Severity</label>
           <select id="log-severity" class="filter-select">
-            <option value="all">Alle</option>
-            <option value="malicious">Maliziös</option>
-            <option value="suspect">Verdächtig</option>
-            <option value="info">Info</option>
+            <option value="all" data-i18n="log.filter.all">All</option>
+            <option value="malicious" data-i18n="log.filter.malicious">Malicious</option>
+            <option value="suspect" data-i18n="log.filter.suspect">Suspect</option>
+            <option value="info" data-i18n="log.filter.info">Info</option>
           </select>
-          <label class="filter-label" for="log-rule">Regel</label>
+          <label class="filter-label" for="log-rule" data-i18n="log.rule">Rule</label>
           <select id="log-rule" class="filter-select"></select>
-          <button type="button" id="log-download" class="download-btn">Log als JSON</button>
+          <button type="button" id="log-download" class="download-btn" data-i18n="log.download">Download log as JSON</button>
         </div>
       </div>
       <div class="log-list" id="analysis-log" role="log" aria-labelledby="log-title"></div>
-      <p class="empty" id="log-empty">Noch keine Regel-Treffer im Beobachtungsfenster.</p>
-      <p class="graph-note">Fund-Adressen sind ausschließlich öffentlich im Ledger sichtbare Akteur-Adressen und werden vollständig angezeigt, sobald die Bait-Hash-Allowlist geladen ist. Köder-Konten erscheinen nie im Log – sie werden vom Server zu Labels sanitisiert und clientseitig über die Hash-Deny-Liste gesperrt.</p>
+      <p class="empty" id="log-empty" data-i18n="log.empty">No rule hits in the observation window yet.</p>
+      <p class="graph-note" data-i18n="feed.note">Fund addresses are exclusively actor addresses visible in the public ledger and are shown in full as soon as the bait-hash allowlist is loaded. Bait accounts never appear in the log – the server sanitizes them to labels and the client blocks them via the hash deny-list.</p>
     </section>
 
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
-        <h2 id="graph-title">Aktivitäts-Graph</h2>
-        <div class="legend" aria-label="Legende">
-          <span class="legend-item"><span class="swatch swatch-source"></span>Source</span>
-          <span class="legend-item"><span class="swatch swatch-drainer"></span>Drainer</span>
-          <span class="legend-item"><span class="swatch swatch-collector"></span>Kollektor</span>
-          <span class="legend-item"><span class="swatch swatch-relay"></span>Relay</span>
-          <span class="legend-item"><span class="swatch swatch-unknown"></span>Unknown</span>
-          <span class="legend-item"><span class="swatch swatch-cluster"></span>Cluster</span>
-          <span class="legend-item"><span class="swatch swatch-payment"></span>Payment</span>
-          <span class="legend-item"><span class="swatch swatch-trustset"></span>TrustSet</span>
-          <span class="legend-item"><span class="swatch swatch-offer"></span>Offer</span>
-          <span class="legend-item"><span class="swatch swatch-escrow"></span>Escrow</span>
-          <span class="legend-item"><span class="swatch swatch-other"></span>Sonstige</span>
-          <span class="legend-item"><span class="swatch swatch-sev-malicious"></span>Maliziös</span>
-          <span class="legend-item"><span class="swatch swatch-sev-suspect"></span>Verdächtig</span>
-          <span class="legend-item"><span class="swatch swatch-sev-info"></span>Info</span>
+        <h2 id="graph-title" data-i18n="graph.title">Activity Graph</h2>
+        <div class="legend" data-i18n-aria="legend.aria">
+          <span class="legend-item"><span class="swatch swatch-source"></span><span data-i18n="legend.source">Source</span></span>
+          <span class="legend-item"><span class="swatch swatch-drainer"></span><span data-i18n="legend.drainer">Drainer</span></span>
+          <span class="legend-item"><span class="swatch swatch-collector"></span><span data-i18n="legend.collector">Collector</span></span>
+          <span class="legend-item"><span class="swatch swatch-relay"></span><span data-i18n="legend.relay">Relay</span></span>
+          <span class="legend-item"><span class="swatch swatch-unknown"></span><span data-i18n="legend.unknown">Unknown</span></span>
+          <span class="legend-item"><span class="swatch swatch-cluster"></span><span data-i18n="legend.cluster">Cluster</span></span>
+          <span class="legend-item"><span class="swatch swatch-payment"></span><span data-i18n="legend.payment">Payment</span></span>
+          <span class="legend-item"><span class="swatch swatch-trustset"></span><span data-i18n="legend.trustset">TrustSet</span></span>
+          <span class="legend-item"><span class="swatch swatch-offer"></span><span data-i18n="legend.offer">Offer</span></span>
+          <span class="legend-item"><span class="swatch swatch-escrow"></span><span data-i18n="legend.escrow">Escrow</span></span>
+          <span class="legend-item"><span class="swatch swatch-other"></span><span data-i18n="legend.other">Other</span></span>
+          <span class="legend-item"><span class="swatch swatch-sev-malicious"></span><span data-i18n="legend.malicious">Malicious</span></span>
+          <span class="legend-item"><span class="swatch swatch-sev-suspect"></span><span data-i18n="legend.suspect">Suspect</span></span>
+          <span class="legend-item"><span class="swatch swatch-sev-info"></span><span data-i18n="legend.info">Info</span></span>
         </div>
       </div>
 
-      <div class="graph-tabs" role="tablist" aria-label="Graph-Ansicht">
-        <button type="button" class="graph-tab" role="tab" id="tab-live" aria-selected="true" aria-controls="graph">Live-Netz</button>
-        <button type="button" class="graph-tab" role="tab" id="tab-cluster" aria-selected="false" aria-controls="graph">Cluster</button>
-        <button type="button" class="graph-tab" role="tab" id="tab-globe" aria-selected="false" aria-controls="globe">Weltkugel</button>
+      <div class="graph-tabs" role="tablist" data-i18n-aria="graph.tabsAria">
+        <button type="button" class="graph-tab" role="tab" id="tab-live" aria-selected="true" aria-controls="graph" data-i18n="tab.live">Live Network</button>
+        <button type="button" class="graph-tab" role="tab" id="tab-cluster" aria-selected="false" aria-controls="graph" data-i18n="tab.cluster">Cluster</button>
+        <button type="button" class="graph-tab" role="tab" id="tab-globe" aria-selected="false" aria-controls="globe" data-i18n="tab.globe">Globe</button>
       </div>
-      <p class="graph-disclaimer">Rollen (Source, Drainer, Kollektor, Relay) sind Heuristiken aus Ein-/Ausgrad und Geldfluss – kein Schuldnachweis.</p>
+      <p class="graph-disclaimer" data-i18n="graph.disclaimer">Roles (source, drainer, collector, relay) are heuristics based on in/out degree and money flow – not proof of guilt.</p>
 
-      <div id="graph" aria-label="Netzwerkgraph der erkannten Aktivitäten"></div>
-      <div id="globe" aria-label="Weltkugel der Live-Aktivität; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert" hidden></div>
+      <div id="graph" data-i18n-aria="graph.aria"></div>
+      <div id="globe" data-i18n-aria="globe.aria" hidden></div>
 
-      <ul class="cluster-list" id="cluster-list" aria-label="Cluster-Zusammenfassung" hidden></ul>
-      <p class="empty" id="cluster-empty" hidden>Noch keine Cluster – warte auf Ledger.</p>
+      <ul class="cluster-list" id="cluster-list" data-i18n-aria="cluster.aria" hidden></ul>
+      <p class="empty" id="cluster-empty" data-i18n="cluster.empty" hidden>No clusters yet – waiting for ledgers.</p>
 
-      <p class="graph-note">Knoten sind öffentlich im Ledger sichtbare Akteure aus der Live-Analyse – Adressen werden vollständig angezeigt, sobald die Bait-Hash-Allowlist geladen ist (Köder-Adressen bleiben über die Hash-Deny-Liste stets verborgen). Klick auf eine Cluster-Karte oder eine Cluster-Bubble öffnet die Cluster-Detailansicht.</p>
+      <p class="graph-note" data-i18n="graph.note">Nodes are actors visible in the public ledger from the live analysis – addresses are shown in full as soon as the bait-hash allowlist is loaded (bait addresses always remain hidden via the hash deny-list). Clicking a cluster card or a cluster bubble opens the cluster detail view.</p>
     </section>
     </div>
 
@@ -143,11 +161,12 @@
   </main>
 
   <footer class="footbar">
-    <span id="last-update">Stand: –</span>
-    <span class="foot-note">Anonymität der Köder: Seeds und Köder-Adressen werden vom Server nie ausgeliefert und vom Client nie gerendert.</span>
+    <span id="last-update">As of: –</span>
+    <span class="foot-note" data-i18n="foot.note">Bait anonymity: seeds and bait addresses are never served by the server and never rendered by the client.</span>
   </footer>
 
   <script src="https://unpkg.com/vis-network@10.1.2/standalone/umd/vis-network.min.js" integrity="sha384-RDdG1CLOxjNlTHh4JYx/rnAueaMHbkBHmeHwrEyljMQw3LF0it4SkuNotIY/FPxD" crossorigin="anonymous"></script>
+  <script type="module" src="i18n.mjs"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

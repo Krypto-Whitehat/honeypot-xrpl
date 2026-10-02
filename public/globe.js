@@ -70,6 +70,8 @@
  * initGlobe passiv (Null-Guard).
  */
 
+import { t, sevText } from './i18n.mjs';
+
 const GLOBE_GL_URL = 'https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js';
 // SRI-Integrität (Lieferketten-Hygiene, Befund 2026-09-30): Beide CDN-
 // Bundles laufen mit Subresource-Integrity — ein kompromittiertes CDN kann
@@ -95,25 +97,22 @@ const ARC_DASH_ANIMATE_MS = 2500;  // wandernde Striche nur ohne prefers-reduced
 const AUTO_ROTATE_SPEED = 0.4;     // autoRotate-Geschwindigkeit (OrbitControls)
 const POV_START = { lat: 20, lng: 0, altitude: 2.2 };
 const SEV_RANK = { info: 1, suspect: 2, malicious: 3 }; // wie SEVERITY_RANK, lib/cluster.mjs:43
-const GLOBE_NOTE = 'Positionen sind deterministisch aus dem Adress-Hash abgeleitet — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar.';
-const GLOBE_NOTE_COUNTRIES = 'Ländergrenzen: Natural Earth (TopoJSON). Länderzuordnung ausschließlich über die Börsen-Registry (Sitzländer der Börsen); Adressen ohne Zuordnung bleiben deterministisch aus dem Adress-Hash platziert — das XRPL-Ledger selbst enthält keine Standortdaten.';
-/* aria-label-Stufen für #globe (Befund 2026-09-30): Das statische Label in
- * index.html (GLOBE_ARIA_BASE) behauptet KEINE Ländergrenzen — erst der
- * nachgewiesene Zustand des Länder-Layers ergänzt sie. GLOBE_ARIA_FAILED
- * hält den Terminalzustand 'failed' (CDN-/Fetch-Fehler, terminal bis
- * Seiten-Reload) ehrlich eingeschränkt; GLOBE_ARIA_BASE gilt für 'loading'.
- * Der Text von GLOBE_ARIA_BASE ist identisch zum aria-label in index.html. */
-const GLOBE_ARIA_BASE = 'Weltkugel der Live-Aktivität; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert';
-const GLOBE_ARIA_COUNTRIES = 'Weltkugel der Live-Aktivität mit Ländergrenzen; Länderzuordnung ausschließlich über die Börsen-Registry, Adressen ohne Zuordnung symbolisch platziert';
-const GLOBE_ARIA_FAILED = 'Weltkugel der Live-Aktivität; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar, Positionen bleiben symbolisch aus dem Adress-Hash abgeleitet';
-const GLOBE_CTX_LOST_NOTE = 'WebGL-Grafikkontext verloren — genau ein Wiederherstellungsversuch wird gestartet …';
+/* Hinweis-/aria-Texte stehen jetzt im i18n-Wörterbuch (Keys globe.*);
+ * GLOBE_ARIA_BASE ist identisch zum data-i18n-aria-Key globe.aria in
+ * index.html (Duplikat-Muster aufgelöst — beide lesen dasselbe Dict). */
+const GLOBE_ARIA_BASE = 'globe.aria';
+const GLOBE_ARIA_COUNTRIES = 'globe.ariaCountries';
+const GLOBE_ARIA_FAILED = 'globe.ariaFailed';
+const GLOBE_NOTE = 'globe.note';
+const GLOBE_NOTE_COUNTRIES = 'globe.noteCountries';
+const GLOBE_CTX_LOST_NOTE = 'globe.ctxLost';
 /* Länder-Layer (Attribution): dezent — Grenzen sichtbar, Fläche transparent */
 const GLOBE_POLYGON_ALTITUDE = 0.006;   // Polygone knapp über der Kugel-Oberfläche
 const GLOBE_POLYGON_FILL = 'rgba(255, 255, 255, 0)'; // neutrale Kappe/Seiten (Bühnen-Weiß, Alpha 0): nur Grenzlinien sichtbar
 const GLOBE_COUNTRY_LABELS_MAX = 12;    // Beschriftung nur der aktivsten Länder (klafterfrei)
 const GLOBE_COUNTRY_REF_ACTIVITY = 20;  // Skalenreferenz: ab 20 Aktivitäten voller Länderpunkt-Radius (log-skaliert)
 const GLOBE_ARC_FLOW_REF_COUNT = 10;    // Skalenreferenz: ab 10 Kanten volle Fluss-Bogen-Strichstärke
-const SEV_TEXT = { malicious: 'maliziös', suspect: 'verdächtig', info: 'Info' }; // deutsche Severity-Wörter für Bogen-Labels
+// SEV_TEXT ersetzt: Bogen-Labels nutzen sevText() aus ./i18n.mjs.
 
 /* FIX-B „Update statt Rebuild": globe.gl baut bei jedem pointsData-/arcsData-/
  * ringsData-Setter alle Szenen-Objekte neu auf; der ~4-s-Takt des Hosts
@@ -146,7 +145,7 @@ const APPLY_MIN_INTERVAL_MS = 10000; // Deckel: max. eine Punkte/Bögen-Anwendun
 const RINGS_TICK_MS = 10000;         // eigener Takt der Puls-Ringe (≤ 10 s), außerhalb der Signatur
 const RING_SOURCE_EXTRA_MS = 60000;  // Ring-Quellen breiter sammeln; der Takt filtert gegen das aktuelle now
 const CTX_RESTORE_GRACE_MS = 3000;   // Frist für webglcontextrestored, danach der eine Neuaufbau-Versuch
-const GLOBE_FALLBACK_NOTE = 'Weltkugel nicht verfügbar (WebGL oder CDN nicht erreichbar) — dieselben Daten stehen in den Cluster-Karten und in der Konten-Tabelle des Drilldowns.';
+const GLOBE_FALLBACK_NOTE = 'globe.fallback';
 
 export function initGlobe(ctx) {
   if (!ctx || typeof ctx.getClusterGraph !== 'function') {
@@ -313,9 +312,9 @@ export function initGlobe(ctx) {
     try {
       container.setAttribute(
         'aria-label',
-        countryLayerActive() ? GLOBE_ARIA_COUNTRIES
+        t(countryLayerActive() ? GLOBE_ARIA_COUNTRIES
           : countryData.state === 'failed' ? GLOBE_ARIA_FAILED
-            : GLOBE_ARIA_BASE
+            : GLOBE_ARIA_BASE)
       );
     } catch { /* DOM nicht schreibbar: statisches Label bleibt, wirft nicht */ }
   }
@@ -385,12 +384,12 @@ export function initGlobe(ctx) {
     if (countryData.state === 'ready') {
       if (buildDone && globe && container) {
         applyCountryLayer();
-        showNote(container, GLOBE_NOTE_COUNTRIES);
+        showNote(container, t(GLOBE_NOTE_COUNTRIES));
         syncGlobeAria(); // Grenzen existieren nachweislich -> aria-label ergänzen
       }
       refresh(); // GENAU EIN Daten-Refresh nach Bereitstellen des Layers
     } else if (countryData.state === 'failed' && buildDone && globe && container) {
-      showNote(container, GLOBE_NOTE); // symbolische Variante: keine Grenzen behaupten
+      showNote(container, t(GLOBE_NOTE)); // symbolische Variante: keine Grenzen behaupten
       syncGlobeAria(); // Terminalzustand: aria-label ehrlich einschränken
     }
   }
@@ -422,12 +421,12 @@ export function initGlobe(ctx) {
         legendEl.className = 'globe-legend';
         const title = document.createElement('p');
         title.className = 'globe-legend-title';
-        title.textContent = 'Länderaktivität';
+        title.textContent = t('globe.legendTitle');
         legendEl.appendChild(title);
         const rows = [
-          ['swatch-sev-malicious', 'Maliziös'],
-          ['swatch-sev-suspect', 'Verdächtig'],
-          ['swatch-sev-info', 'Info'],
+          ['swatch-sev-malicious', sevText('malicious')],
+          ['swatch-sev-suspect', sevText('suspect')],
+          ['swatch-sev-info', sevText('info')],
         ];
         for (const [swatchClass, text] of rows) {
           const row = document.createElement('p');
@@ -443,12 +442,12 @@ export function initGlobe(ctx) {
         legendEl.appendChild(count);
         const src = document.createElement('p');
         src.className = 'globe-legend-src';
-        src.textContent = 'Zuordnung ausschließlich über die Börsen-Registry · Grenzen: Natural Earth (TopoJSON)';
+        src.textContent = t('globe.legendSrc');
         legendEl.appendChild(src);
         container.appendChild(legendEl);
       }
       const countEl = legendEl.querySelector('.globe-legend-count');
-      if (countEl) countEl.textContent = `Adressen ohne Länderzuordnung: ${unassignedCount}`;
+      if (countEl) countEl.textContent = t('globe.legendUnassigned', { n: unassignedCount });
     } catch { /* DOM nicht schreibbar: Legende entfällt, wirft aber nicht */ }
   }
 
@@ -565,7 +564,7 @@ export function initGlobe(ctx) {
       box.setAttribute('role', 'status');
       const p = document.createElement('p');
       p.className = 'graph-note';
-      p.textContent = GLOBE_FALLBACK_NOTE;
+      p.textContent = t(GLOBE_FALLBACK_NOTE);
       box.appendChild(p);
       el.appendChild(box);
     } catch { /* DOM nicht schreibbar: Tab bleibt leer, wirft aber nicht */ }
@@ -734,7 +733,7 @@ export function initGlobe(ctx) {
           color,
           radius: 0.22 + 0.5 * t,
           altitude: 0.02,
-          label: `<strong>${esc(c.name)}</strong> · ${c.activity} ${c.activity === 1 ? 'Aktivität' : 'Aktivitäten'} · ${c.severities.malicious} maliziös · Zufluss: ${inflow} ${inflow === 1 ? 'Kante' : 'Kanten'} · Abfluss: ${outflow} ${outflow === 1 ? 'Kante' : 'Kanten'} · Börsen: ${esc(exchanges)}`,
+          label: `<strong>${esc(c.name)}</strong> · ${c.activity} ${c.activity === 1 ? t('globe.activity1') : t('globe.activityN')} · ${c.severities.malicious} ${sevText('malicious')} · ${t('globe.inflow')}: ${inflow} ${inflow === 1 ? t('globe.edge1') : t('globe.edgeN')} · ${t('globe.outflow')}: ${outflow} ${outflow === 1 ? t('globe.edge1') : t('globe.edgeN')} · ${t('globe.exchanges')}: ${esc(exchanges)}`,
           clusterId: null, // bewusst: onPointClick ist für Länderpunkte ein No-op
         });
       }
@@ -867,7 +866,7 @@ export function initGlobe(ctx) {
           stroke: ARC_STROKE_DEFAULT + (ARC_STROKE_FLAGGED - ARC_STROKE_DEFAULT) * t,
           dashLen: f.worstSeverity === 'malicious' ? ARC_DASH_LEN_FLAGGED : 1,
           dashGap: f.worstSeverity === 'malicious' ? ARC_DASH_GAP_FLAGGED : 0,
-          label: `${esc(f.fromCountry)} → ${esc(f.toCountry)}: ${f.count} ${f.count === 1 ? 'Transaktion' : 'Transaktionen'} · ${SEV_TEXT[f.worstSeverity] || 'Info'} · Börsen: ${esc(f.exchanges.length ? f.exchanges.join(', ') : '–')}`,
+          label: `${esc(f.fromCountry)} → ${esc(f.toCountry)}: ${f.count} ${f.count === 1 ? t('globe.tx1') : t('globe.txN')} · ${sevText(f.worstSeverity)} · ${t('globe.exchanges')}: ${esc(f.exchanges.length ? f.exchanges.join(', ') : '–')}`,
         });
       }
     }
@@ -1128,7 +1127,7 @@ export function initGlobe(ctx) {
     ctxLost = true;
     if (ctxRestoreTried) { terminalContextLoss(); return; } // Budget verbraucht
     syncAnimation(); // pausiert (ctxLost) und stoppt den Ring-Takt
-    if (container) showNote(container, GLOBE_CTX_LOST_NOTE, true);
+    if (container) showNote(container, t(GLOBE_CTX_LOST_NOTE), true);
     if (ctxRestoreTimer) clearTimeout(ctxRestoreTimer);
     ctxRestoreTimer = setTimeout(() => {
       ctxRestoreTimer = 0;
@@ -1185,7 +1184,7 @@ export function initGlobe(ctx) {
     if (el) {
       try { el.innerHTML = ''; } catch { /* egal */ }
       noteEl = null;
-      showNote(el, 'Weltkugel wird neu aufgebaut …');
+      showNote(el, t('globe.rebuild'));
     }
     try {
       if (!el) throw new Error('no-container');
@@ -1240,7 +1239,7 @@ export function initGlobe(ctx) {
     const el = document.getElementById('globe');
     if (!el) return; // Null-Guard: kein #globe im DOM -> initGlobe bleibt passiv
     buildStarted = true;
-    showNote(el, 'Weltkugel wird geladen …');
+    showNote(el, t('globe.loading'));
     // Länder-Layer parallel zur Kugel laden (Lazy beim ersten activate(),
     // fire-and-forget, fail-soft über die Drei-Zustands-Maschine).
     ensureCountryData();
@@ -1405,7 +1404,7 @@ export function initGlobe(ctx) {
       // vor der Notiz, damit der Hinweis den tatsächlichen Zustand trifft);
       // sonst zieht die Fetch-Fortsetzung (ensureCountryData) ihn nach.
       applyCountryLayer();
-      showNote(el, countryLayerActive() ? GLOBE_NOTE_COUNTRIES : GLOBE_NOTE);
+      showNote(el, t(countryLayerActive() ? GLOBE_NOTE_COUNTRIES : GLOBE_NOTE));
       syncGlobeAria(); // aria-label an den tatsächlichen Layer-Zustand koppeln
       // FIX-B: Kontextverlust-Ereignisse am Canvas (Capture-Phase) und
       // Sichtbarkeitsbeobachtung (IntersectionObserver + visibilitychange).

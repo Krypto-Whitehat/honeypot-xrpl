@@ -77,8 +77,13 @@
   cursor: pointer;
 }
 
-.history-members-more summary:hover {
-  border-color: var(--a6-control-line);
+/* Hover nur auf geeignetem Eingabegerät (Astra-6 Motion-Policy), ohne
+   Layoutverschiebung — nur die Linie wird stärker. */
+@media (hover: hover) and (pointer: fine) {
+  .history-members-more summary:hover {
+    border-color: var(--a6-control-line);
+    background: var(--a6-surface);
+  }
 }
 
 .history-members-more[open] summary {
