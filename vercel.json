@@ -1,7 +1,4 @@
 {
-  "crons": [
-    { "path": "/api/advance", "schedule": "*/2 * * * *" }
-  ],
   "rewrites": [
     { "source": "/", "destination": "/public/index.html" },
     { "source": "/index.html", "destination": "/public/index.html" },

@@ -269,22 +269,23 @@ erscheinen als Karte aus dem Event-`txn_count` mit Badge
 „Block nicht analysiert (Stichproben-Kontingent)" — seenLedgers-Dedup schließt
 eine Nachholung aus, das Badge verspricht keine.
 
-**Automatischer Advance-Trigger (Cron):** `vercel.json` enthält
-`"crons": [{ "path": "/api/advance", "schedule": "*/2 * * * *" }]`. Vercel
-triggert den Endpunkt per GET; `api/advance.js` hat kein Method-Gate, der Tick
-läuft. Ohne `GITHUB_HISTORY_TOKEN` bleibt er fail-closed (503) — der Cron ist
-ohne Token harmlos.
+**Automatischer Advance-Trigger (GitHub Actions, 5-min-Takt):**
+`.github/workflows/advance-cron.yml` ruft alle 5 Minuten
+`POST https://honeypot-xrpl.vercel.app/api/advance` auf (GitHub Actions
+`schedule`, kleinste erlaubte Frequenz 5 min; `workflow_dispatch` für
+manuelle Ticks). Kein Actions-Secret nötig — der Endpunkt ist ein öffentlicher
+POST; die GitHub-Token für das Datenrepo liegt ausschließlich als ENV
+`GITHUB_HISTORY_TOKEN` im Vercel-Projekt. Ohne Token antwortet der Endpunkt
+fail-closed mit 503; der Tick bleibt dann harmlos.
 
-**Harte Voraussetzung Plan-Tier (Operator-Entscheidung, nicht stillschweigend):**
-Der Hobby-Plan (dieses Projekt, siehe oben) erlaubt laut Vercel-Doku **nur
-einen Cron, der höchstens einmal pro Tag läuft** — „Expressions that run more
-frequently will fail deployment". `*/2 * * * *` setzt daher ein **Upgrade auf
-Pro/Team** voraus (kostenpflichtig). Alternativen ohne Upgrade: (a) `crons`-
-Block in `vercel.json` entfernen und `/api/advance` manuell/extern triggern
-(POST, z. B. alle 2 min per externem Scheduler — ohne neue Secrets im Repo),
-oder (b) GitHub Actions als Trigger (erfordert den Token als Actions-Secret —
-ein **neues** Secret, nicht im Repo). Der 2-min-Takt (statt 1 min) ist durch
-die unten ausgewiesene Egress-Bilanz erzwungen.
+**Warum kein `vercel.json`-Cron (Befund 2026-10-02):** Ein `*/2 * * * *`-Cron
+in `vercel.json` wurde versucht und **ließ den Vercel-Deploy fehlschlagen** —
+der Hobby-Plan (dieses Projekt, siehe oben) erlaubt laut Vercel-Doku nur
+Cron-Expressions mit höchstens einem Lauf pro Tag: „Expressions that run more
+frequently will fail deployment". Der `crons`-Block wurde daher entfernt.
+Alternativen für höhere Taktung: Upgrade auf Pro/Team (dann ist ein
+Vercel-Cron `*/2` wieder möglich) oder ein externer Scheduler — jeweils ohne
+neue Secrets im Repo.
 
 **ENV-Liste (Vercel):**
 | Variable | Pflicht? | Zweck |
@@ -311,16 +312,16 @@ bleiben deshalb auf der konservativen 700-Units-Obergrenze
 
 | Verbraucher | Kosten |
 |---|---|
-| Cron-Tick `/api/advance` (2-min-Takt, Budget 1 Block = 1 ledger + 6 tx) | 4.900 Units / 2 min = **2.450/min** |
+| Actions-Tick `/api/advance` (5-min-Takt, Budget 1 Block = 1 ledger + 6 tx) | 4.900 Units / 5 min = **980/min** |
 | `/api/ledger`-Snapshot (`MAX_RESOLVE=6`, 7 Commands × 700, 60-s-Cache) | ≤ **4.900/min** |
 | `/api/flow-state` validatedIndex (1 RPC, 60-s-Prozess-Cache) | ≤ **700/min** |
-| **Summe Server-Pfade (Function-Instanzen)** | **8.050 ≤ 10.000** |
+| **Summe Server-Pfade (Function-Instanzen)** | **6.580 ≤ 10.000** |
 | Browser-Client (WSS, `QUOTA_CALLS_PER_MIN = 14` Deckel; Simulation ~13,3 Commands/min) | ≤ **9.800/min** (gemittelt ~9.310/min) |
 
 Auf Vercel teilen sich die Function-Instanzen das Fenster (8.050 ≤ 10.000);
 die Browser-Besucher drosseln sich pro eigener IP selbst auf ≤ 14
 Commands/min (9.800 ≤ 10.000). **Im Lokalbetrieb** (`npm start` + Browser,
-dieselbe Entwickler-IP) addieren sich beide: 8.050 + ~9.310 ≈ 17.400 >
+dieselbe Entwickler-IP) addieren sich beide: 6.580 + ~9.310 ≈ 15.900 >
 10.000 — das Fenster ist dort rechnerisch überschreitbar. Die
 tooBusy-Gravuren federn das ab (clientseitiger Cooldown `app.js:1558-1563`,
 serverseitiger Backoff `api/ledger.js:66-83`), dauerhaft bleibt der lokale
@@ -334,18 +335,18 @@ Walk, `lib/ledger-walk.mjs:40-45`).
 
 **Tradeoff Live-Frische vs. Kommandobudget (ehrlich):** Clientseitig werden
 ~1,8–1,9 von 12,63 Blöcken/min analysiert (≈14–15 %), pro analysiertem Block 6 von
-55–84 Txs (≈7–11 %). Der Server-Walk (2-min-Cron, Budget 1 Block/Tick) hinkt
-~12 Blöcke/min hinter dem Live-Edge her — der Flow-State ist Akkumulator, kein
+55–84 Txs (≈7–11 %). Der Server-Walk (5-min-Actions-Tick, Budget 1 Block/Tick)
+hinkt ~12,4 Blöcke/min hinter dem Live-Edge her — der Flow-State ist Akkumulator, kein
 Live-Graph; die Rückstands-Anzeige im Flow-Host (`validatedIndex − cursor`)
 macht das sichtbar. Sequenzielle tx-Auflösung (`PARALLEL=1`) kostet Latenz
 (Worst case 6 × 8 s pro analysiertem Block); ein Serialisierungsguard in
 `public/app.js` verhindert Kommando-Stapelung bei überlappenden Events.
 Cron-Concurrency-Grenze: Vercel kann überlappende Instanzen starten;
 `lib/history.mjs:486` erlaubt nur EINEN 409-Retry, `mergeFlowState` kann bei
-Parallel-Ticks den State des anderen Ticks überschreiben — durch 2-min-Intervall
+Parallel-Ticks den State des anderen Ticks überschreiben — durch 5-min-Intervall
 + `maxDuration 30 s` (`api/advance.js:64`) unwahrscheinlich, aber dokumentiert.
-Commit-Volumen: 2-min-Cron = bis zu 720 GitHub-Commits/Tag ins Datenrepo
-(Operator-Alternative: 5-min-Takt, 288/Tag, größerer Rückstand).
+Commit-Volumen: 5-min-Actions-Tick = bis zu 288 GitHub-Commits/Tag ins Datenrepo
+(bei Pro-Cron `*/2`: bis zu 720/Tag, kleinerer Rückstand).
 
 ## Hinweise
 
