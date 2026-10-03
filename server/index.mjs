@@ -32,7 +32,11 @@ import {
 } from "../lib/sanitize.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
-import { checkDrainerSweepFromEntries } from "../lib/threats-service.mjs";
+import {
+  checkDrainerSweepFromEntries,
+  getThreatKnowledge,
+  buildCheckCtx,
+} from "../lib/threats-service.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -339,6 +343,31 @@ app.get("/api/block-window", async (req, res) => {
   }
 });
 
+// ---------- Lokale Wissens-Reader (Runde 3: 'eine Semantik, zwei Transporte') ----------
+// getThreatKnowledge/buildCheckCtx laufen lokal über Datei-Reader statt über
+// RPC-Ableitung (deriveThreats) und GitHub-Transport der Vercel-Functions:
+//   readThreats   -> mtime-gepollter Threat-Store data/threats.json (monitor.mjs)
+//   readHistory   -> data/history.json (loadLocalHistory, atomar)
+//   readFlowState -> data/flow-state.json (parseFlowStateText; fehlende Datei
+//                    -> leerer State; Korruption -> Wurf, die Schicht fällt
+//                    fail-open leer aus — getThreatKnowledge:403,419)
+// Dieselbe Resolver-Logik (risk-Union, sources, Registry-Ausschluss in
+// buildCheckCtx) wie in api/check/[address].js und api/account-report.js.
+function localKnowledgeOpts() {
+  return {
+    readThreats: async () => threatsCache,
+    readHistory: async () => ({ list: await loadLocalHistory(HISTORY_FILE) }),
+    readFlowState: async () => {
+      try {
+        return { doc: parseFlowStateText(fs.readFileSync(FLOW_STATE_FILE, "utf8")) };
+      } catch (err) {
+        if (err && err.code === "ENOENT") return { doc: emptyFlowStateDoc() };
+        throw err;
+      }
+    },
+  };
+}
+
 // Generic Bridge für den Konto-Check: die Funktionsdatei gehört dem Account-
 // Agenten (api/account-report.js, Vercel-Stil default-export). Ist sie (noch)
 // nicht vorhanden oder lädt nicht, antwortet der Server ehrlich mit 503.
@@ -346,10 +375,13 @@ app.get("/api/block-window", async (req, res) => {
 // durchgereicht — sonst liefe der Handler mit seiner leeren ENV-Karte und
 // lieferte Köder-Adressen einen vollen Report, während /api/check dieselbe
 // Adresse generisch abweist (Befund 2026-09-29; Muster /api/history oben).
+// Zusätzlich die lokalen Wissens-Reader (Runde 3): ohne sie fiele der
+// Bridge-Handler auf die leere ENV-basierte Threat-Ableitung zurück und
+// verfehlte die persistierten Quellen history/flow-state komplett.
 app.get("/api/account-report", async (req, res) => {
   try {
     const mod = await import("../api/account-report.js");
-    return await mod.default(req, res, { baitLabels });
+    return await mod.default(req, res, { baitLabels, ...localKnowledgeOpts() });
   } catch {
     if (!res.headersSent) res.status(503).json({ error: "Konto-Check auf diesem Server nicht verfügbar." });
     else res.end();
@@ -442,8 +474,15 @@ app.get("/api/check/:address", async (req, res) => {
     } while (marker && entries.length < CHECK_MAX_TX);
     if (marker) truncated = true;
 
-    const threatByAddress = new Map();
-    for (const t of threatsCache) if (t?.address) threatByAddress.set(t.address, t);
+    // Merged Wissen (Runde 3): Threat-Store PLUS persistierte Quellen
+    // (data/history.json Members, data/flow-state.json severityByAddress/
+    // rolesByAddress) über dieselbe Resolver-Logik wie die Vercel-Checks
+    // (getThreatKnowledge mit lokalen Datei-Readern). Die Map ist bereits
+    // registry-bereinigt (Exchange-Registry-Ausschluss in getThreatKnowledge)
+    // — legitime Exchange-Hot-Wallets aus data/history.json werden weder
+    // selfListed noch als malicious-Kontakt gewertet.
+    const knowledgeResult = await getThreatKnowledge(localKnowledgeOpts());
+    const threatByAddress = knowledgeResult.knowledge;
 
     const contacts = [];
     for (const entry of entries) {
@@ -465,6 +504,7 @@ app.get("/api/check/:address", async (req, res) => {
           note: cp.note,
           counterparty: cp.address,
           risk: t.risk ?? "suspect",
+          source: Array.isArray(t.sources) && t.sources.length ? t.sources[0] : "bait",
         });
       }
     }
@@ -493,13 +533,24 @@ app.get("/api/check/:address", async (req, res) => {
       ? checkDrainerSweepFromEntries(entries, addr, touchTime)
       : null;
 
+    const selfListed = threatByAddress.has(addr);
     const result = {
       address: addr,
       network: config.network,
       checkedTxCount: entries.length,
       truncated,
-      selfListed: threatByAddress.has(addr),
-      verdict: contacts.length ? "contact" : entries.length ? "clean" : "unknown",
+      selfListed,
+      // selfListed -> 'bad' VOR der contacts-Verzweigung (Runde 3, identisch
+      // zu checkAddress/lib/account-report.mjs): eine selbst gelistete
+      // Adresse ohne Kontakte war bisher 'clean' und widersprach dem
+      // Konto-Report auf denselben Daten.
+      verdict: selfListed
+        ? "bad"
+        : contacts.length
+          ? "contact"
+          : entries.length
+            ? "clean"
+            : "unknown",
       contacts: contacts.slice(0, 50),
       hint:
         entries.length === 0
@@ -510,39 +561,47 @@ app.get("/api/check/:address", async (req, res) => {
     };
     if (drainerHit) {
       // Vertrag (identisch zu Unit A): drainer=true, sweepRatio, risk,
-      // Reason-Marker "Drainer-Sweep:".
+      // Reason-Marker "Drainer-Sweep:". risk folgt der Fund-Severity des
+      // Detektors (Runde 3, identisch zu checkAddress): 'malicious' nur bei
+      // CreatedNode-belegter Frische, sonst 'suspect' (lib/detector.mjs:641-642)
+      // — vorher eskalierte Unit B JEDEN bestätigten Sweep auf 'malicious'.
       result.drainer = true;
       result.sweepRatio = drainerHit.ratio;
-      result.risk = "malicious";
+      result.risk = drainerHit.severity;
       result.reason = `Drainer-Sweep: frisch finanziert und ${Math.round(drainerHit.ratio * 100)} % der Balance an ein Ziel abgeräumt.`;
       // Best-effort-Append über den BESTEHENDEN lokalen Merge-/Save-Pfad
-      // (atomar via tmp+rename); Persistenzfehler kippen den Check nicht.
-      const touchMs = Date.parse(touchTime);
-      const seenMs = Number.isFinite(touchMs) ? touchMs : 0;
-      try {
-        const existing = await loadLocalHistory(HISTORY_FILE);
-        const merged = mergeHistory(
-          existing,
-          [
-            {
-              members: [addr],
-              label: "Drainer",
-              totalDrops: drainerHit.drops,
-              txCount: entries.length,
-              firstSeen: seenMs,
-              lastSeen: seenMs,
-              rules: ["drainer-sweep"],
-              severity: "malicious",
-              sightings: 1,
-              lastReportedAt: Date.now(),
-            },
-          ],
-          Date.now(),
-          baitLabels
-        );
-        if (merged.changed) await saveLocalHistory(HISTORY_FILE, merged.list);
-      } catch (err) {
-        console.error(`[history] Drainer-Meldung fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+      // (atomar via tmp+rename) — NUR bei Fund-Severity 'malicious'
+      // (Append-Gate, Konsistenz zu lib/history.mjs:40-46: suspect-Funde
+      // bleiben bewusst aus der malicious-History draußen).
+      // Persistenzfehler kippen den Check nicht.
+      if (drainerHit.severity === "malicious") {
+        const touchMs = Date.parse(touchTime);
+        const seenMs = Number.isFinite(touchMs) ? touchMs : 0;
+        try {
+          const existing = await loadLocalHistory(HISTORY_FILE);
+          const merged = mergeHistory(
+            existing,
+            [
+              {
+                members: [addr],
+                label: "Drainer",
+                totalDrops: drainerHit.drops,
+                txCount: entries.length,
+                firstSeen: seenMs,
+                lastSeen: seenMs,
+                rules: ["drainer-sweep"],
+                severity: "malicious",
+                sightings: 1,
+                lastReportedAt: Date.now(),
+              },
+            ],
+            Date.now(),
+            baitLabels
+          );
+          if (merged.changed) await saveLocalHistory(HISTORY_FILE, merged.list);
+        } catch (err) {
+          console.error(`[history] Drainer-Meldung fehlgeschlagen: ${err?.name ?? "Error"}`); // neutral
+        }
       }
     }
     checkCache.set(addr, { time: Date.now(), result });

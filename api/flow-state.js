@@ -120,14 +120,28 @@ const baitLabels = new Map();
 // Rekonstruktion über die Flow-Archiv-Tages-Chunks (replayArchive,
 // lib/flow-state.mjs). from/to sind LEDGER-Indizes. 60-s-Prozess-Cache im
 // Muster des Block-Fenster-Zweigs (:108-115): ein Poll/Minute pro Besucher-
-// Tab erzeugt pro Function-Instanz <= 31 Chunk-Reads, unabhängig von der
-// Besucherzahl. DOKUMENTIERTE GRENZE der Lese-Route: gelesen werden die
-// letzten ARCHIVE_QUERY_DAYS Archiv-Tage (Malicious-Retention 30 d + 1);
-// Registry-verknüpfte Cluster bleiben 180 d archiviert, ihre älteren Tage
-// werden von dieser Route nicht abgefragt (Retention vs. Abfragbarkeit —
-// ehrlich benannt, kein 'vollständig'-Versprechen).
+// Tab bleibt unabhängig von der Besucherzahl gecacht.
+// Lese-Budget (Nachprüfung: das alte Pauschal-Lesen von 31 Tagen pro Aufruf
+// war ungesteuert — jetzt wird RÜCKWÄRTS in Blöcken à ARCHIVE_QUERY_DAYS
+// (31) Tagen gelesen, mit harter Kappe ARCHIVE_MAX_DAY_BLOCKS Blöcken
+// (Default 2 → max. 62 GitHub-Reads pro Aufruf, ENV ARCHIVE_MAX_DAY_BLOCKS
+// überschreibbar). Early-Stop: sobald ein gelesener Archiv-Cluster mit
+// ledgerRange.from <= fromLedger erreicht ist, ist die angefragte Fenster-
+// untergrenze abgedeckt und das Lesen endet sofort (typischer Fall: ein
+// einziger Block). response.truncated = true, wenn die Tages-Kappe erreicht
+// wurde, ohne fromLedger abzudecken (erkennbar am minimalen
+// ledgerRange.from aller gelesenen Blöcke > fromLedger); zusätzlich
+// queryDays = tatsächlich gelesene Tage. DOKUMENTIERTE RESTLÜCKE (ehrlich,
+// kein 'vollständig'-Versprechen): Registry-verknüpfte Cluster bleiben
+// 180 d archiviert, jenseits von ARCHIVE_MAX_DAY_BLOCKS * ARCHIVE_QUERY_DAYS
+// (Default 62 d) sind sie über diese Route nicht erreichbar — die
+// Retention übersteigt die Abfragbarkeit.
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const ARCHIVE_QUERY_DAYS = 31;
+const ARCHIVE_MAX_DAY_BLOCKS = (() => {
+  const n = Number(process.env.ARCHIVE_MAX_DAY_BLOCKS);
+  return Number.isFinite(n) && n >= 1 ? Math.min(6, Math.floor(n)) : 2;
+})();
 const ARCHIVE_CACHE_MS = 60000;
 const archiveCache = new Map(); // key -> { time, body }
 
@@ -167,21 +181,50 @@ async function handleArchive(req, res) {
     return res.status(200).json(cached.body);
   }
   try {
-    const days = [];
-    for (let back = 0; back < ARCHIVE_QUERY_DAYS; back++) {
-      const d = dayOf(now - back * 24 * 60 * 60 * 1000);
-      if (d && !days.includes(d)) days.push(d);
+    // Rückwärts-Lesen in Blöcken à ARCHIVE_QUERY_DAYS Tagen, harte Kappe
+    // ARCHIVE_MAX_DAY_BLOCKS Blöcke. Early-Stop: ein gelesener Archiv-Cluster
+    // mit ledgerRange.from <= fromLedger deckt die Fensteruntergrenze ab.
+    const allDocs = [];
+    let covered = false;
+    let minLedgerFrom = null; // Minimum der ledgerRange.from aller gelesenen Cluster
+    let blocksRead = 0;
+    for (let block = 0; block < ARCHIVE_MAX_DAY_BLOCKS && !covered; block++) {
+      const days = [];
+      for (let back = block * ARCHIVE_QUERY_DAYS; back < (block + 1) * ARCHIVE_QUERY_DAYS; back++) {
+        const d = dayOf(now - back * 24 * 60 * 60 * 1000);
+        if (d && !days.includes(d)) days.push(d);
+      }
+      const docs = await Promise.all(
+        days.map(async (d) => {
+          const { doc } = await readArchiveGitHub(d);
+          return { day: d, doc };
+        })
+      );
+      blocksRead++;
+      allDocs.push(...docs);
+      for (const { doc } of docs) {
+        for (const c of Array.isArray(doc?.docs) ? doc.docs : []) {
+          const f = Number(c?.ledgerRange?.from);
+          if (!Number.isFinite(f)) continue;
+          if (minLedgerFrom === null || f < minLedgerFrom) minLedgerFrom = f;
+          if (f <= from) covered = true;
+        }
+      }
     }
-    const docs = await Promise.all(
-      days.map(async (d) => {
-        const { doc } = await readArchiveGitHub(d);
-        return { day: d, doc };
-      })
-    );
-    const { hops, truncated } = replayArchive(docs, { address, fromLedger: from, toLedger: to });
+    const { hops, truncated } = replayArchive(allDocs, { address, fromLedger: from, toLedger: to });
+    // Tages-Kappe ohne Fensterabdeckung -> truncated (dokumentierte Grenze;
+    // kein Archiv-Dokument erreicht fromLedger, Lesebudget ist erschöpft).
+    const dayCapTruncated = !covered;
     // Bait-Filter (B2, STILL): Hop mit Köder-Endpunkt fällt raus.
     const cleanHops = hops.filter((h) => !baitLabels.has(h.from) && !baitLabels.has(h.to));
-    const body = { address, from, to, hops: cleanHops, truncated };
+    const body = {
+      address,
+      from,
+      to,
+      hops: cleanHops,
+      truncated: truncated || dayCapTruncated,
+      queryDays: blocksRead * ARCHIVE_QUERY_DAYS,
+    };
     archiveCache.set(cacheKey, { time: now, body });
     return res.status(200).json(body);
   } catch (err) {

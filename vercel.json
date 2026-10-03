@@ -23,7 +23,8 @@
     "api/lib-detector.js": { "includeFiles": "lib/**" },
     "api/threats.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
     "api/check/[address].js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
-    "api/advance.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" }
+    "api/advance.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
+    "api/account-report.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" }
   },
   "cleanUrls": true
 }

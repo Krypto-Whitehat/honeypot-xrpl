@@ -79,10 +79,10 @@ import {
   deleteArchiveGitHub,
   ARCHIVE_RETENTION_MALICIOUS_MS,
   ARCHIVE_RETENTION_REGISTRY_MS,
+  hasFraudEvidence,
 } from "../lib/flow-state.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
-import { getPublicThreats } from "../lib/threats-service.mjs";
 import { createRateGate, parseRetryAfterMs } from "../lib/rate-gate.mjs";
 import {
   appendBlockWindow,
@@ -101,7 +101,14 @@ import {
   fetchEntitySnapshots,
   buildEntityLinks,
 } from "../lib/entity-resolve.mjs";
-import { readGitHubContents, writeGitHubContents } from "../lib/history.mjs";
+import {
+  readGitHubContents,
+  writeGitHubContents,
+  readHistoryGitHub,
+  mergeHistory,
+  writeHistoryGitHub,
+} from "../lib/history.mjs";
+import { getThreatKnowledge, buildCheckCtx } from "../lib/threats-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -366,7 +373,14 @@ async function rpc(method, params, tries = 3) {
   throw new Error(`RPC error: throttled${lastHint ? ` (${lastHint})` : ""}`);
 }
 
-// ctx für die Engine: knownBad aus der Honeypot-Präzisionsschicht, Whitelists
+// ctx für die Engine: knownBad aus der Honeypot-Präzisionsschicht UND den
+// persistierten Quellen — merged Wissens-Layer getThreatKnowledge()
+// (deriveThreats + data/history.json-Members + data/flow-state.json
+// severityByAddress, Registry-ausgeschlossen via buildCheckCtx) statt nur
+// getPublicThreats: war die live-Ableitung leer oder der RPC gestört
+// (live gemeldet: /api/threats=[]), verlor die Engine ihre
+// Präzisionsanker, obwohl die persistierte Historie malicious-Cluster enthält
+// (lokal gemessen: 607 history-Members in data/history.json). Whitelists
 // optional aus config.json (Muster api/ledger.js). firstSeenAt wird aus dem
 // persistierten Flow-State geseedet (Cluster-firstSeen pro Adresse): die
 // drainer-sweep-Regel — einzige Frische-Regel mit severity malicious —
@@ -378,19 +392,33 @@ async function rpc(method, params, tries = 3) {
 // Tick-Grenzen Anschluss finden. buildCtx() läuft EINMAL pro Tick (nicht
 // pro Block): ein kalter Threats-Cache (lib/threats-service.mjs, 60-s-TTL)
 // würde sonst pro Block account_tx-Calls feuern — zusätzliche Request-Last.
+// Die merged-Schicht selbst feuert KEINEN honeycluster-Request (nur GitHub-
+// Reads, lib/threats-service.mjs getThreatKnowledge).
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const HISTORY_SEED_MAX = 20000; // Speicher-Obergrenze für firstSeen/history-Seeds
 async function buildCtx(doc) {
   const knownBad = new Set();
+  // Merged Wissen (fail-open je Schicht): live-Ableitung + persistierte
+  // History-Members + Flow-State severityByAddress, Exchange-Registry
+  // ausgeschlossen (buildCheckCtx).
+  let knowledgeResult = { knowledge: new Map(), historyList: null };
   try {
-    for (const t of await getPublicThreats()) {
-      if (t?.address && XRPL_ADDR_RE.test(t.address)) knownBad.add(t.address);
-    }
+    knowledgeResult = await getThreatKnowledge();
   } catch {
-    /* Honeypot-Schicht optional */
+    /* Honeypot-/Persistenz-Schicht optional */
+  }
+  const engineCtx = buildCheckCtx(knowledgeResult);
+  for (const addr of engineCtx.knownBad) {
+    if (typeof addr === "string" && XRPL_ADDR_RE.test(addr)) knownBad.add(addr);
   }
   const firstSeenAt = new Map();
+  for (const [addr, ms] of engineCtx.firstSeenAt) {
+    if (typeof addr === "string" && XRPL_ADDR_RE.test(addr)) firstSeenAt.set(addr, ms);
+  }
   const history = new Map();
+  for (const [addr, entry] of engineCtx.history) {
+    if (typeof addr === "string" && XRPL_ADDR_RE.test(addr)) history.set(addr, entry);
+  }
   const clusters = doc?.state?.clusters && typeof doc.state.clusters === "object" ? doc.state.clusters : {};
   for (const c of Object.values(clusters)) {
     if (!c || typeof c !== "object") continue;
@@ -641,6 +669,54 @@ export default async function handler(req, res) {
     const finalDoc = await writeFlowStateGitHub((fresh) =>
       mergeFlowState(fresh, advanceResult, now)
     );
+    // (iv.5) Live-Cluster in die öffentliche Maliziös-Historie (data/
+    // history.json): bisher war Live-Evidenz dort nie suchbar (?q=) —
+    // history.json wurde nur durch POST /api/history und den Unit-B-Append
+    // gefüllt. Betrugsevidenz-Cluster des finalDoc (hasFraudEvidence,
+    // lib/flow-state.mjs:267) werden über denselben Merge-/Save-Pfad
+    // geschrieben (members bait-gefiltert im mergeHistory-Codec, rules aus
+    // den Fundtypen der Cluster-Funde, firstSeen/lastSeen aus dem Cluster).
+    // Fail-open: ein History-Write-Fehler kippt den Tick nicht (der
+    // Flow-State ist bereits persistiert); ohne Token fail-closed wie oben.
+    {
+      const fraudClusters = [];
+      for (const c of Object.values(finalDoc?.state?.clusters ?? {})) {
+        if (!c || typeof c !== "object") continue;
+        if (!hasFraudEvidence(c)) continue;
+        const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : [])
+          .filter((m) => typeof m === "string" && XRPL_ADDR_RE.test(m) && !baitLabels.has(m));
+        if (!members.length) continue;
+        const rules = new Set();
+        for (const d of Array.isArray(c.mainDrainers) ? c.mainDrainers : []) rules.add("drainer-sweep");
+        for (const ch of Array.isArray(c.peelingChains) ? c.peelingChains : []) {
+          if (Array.isArray(ch?.addresses) && ch.addresses.length) rules.add("peeling-chain");
+        }
+        if (!rules.size) rules.add("known-bad-hit"); // collector-Rolle o. Ä.
+        const fsMs = Date.parse(String(c.firstSeen ?? ""));
+        const lsMs = Date.parse(String(c.lastSeen ?? ""));
+        fraudClusters.push({
+          members,
+          label: typeof c.id === "string" && c.id ? c.id.slice(0, 200) : "Live-Cluster",
+          totalDrops: Number(c.totalDrops) || 0,
+          txCount: Number(c.txCount) || 0,
+          firstSeen: Number.isFinite(fsMs) ? fsMs : 0,
+          lastSeen: Number.isFinite(lsMs) ? lsMs : 0,
+          rules: [...rules],
+          severity: "malicious",
+          sightings: 1,
+          lastReportedAt: now,
+        });
+      }
+      if (fraudClusters.length) {
+        try {
+          await writeHistoryGitHub((fresh) =>
+            mergeHistory(fresh, fraudClusters, now, baitLabels).list
+          );
+        } catch {
+          /* Best-effort: History-Write-Fehler kippt den Tick nicht */
+        }
+      }
+    }
     // (v) Block-Fenster-Tages-Chunks anhängen (Index-Dedup im Codec macht
     // Retry-Ticks idempotent).
     for (const [day, records] of windowByDay) {
@@ -703,6 +779,7 @@ export default async function handler(req, res) {
     // durch denselben rateGate (rpc()). Snapshot-TTL-Dedup: Adressen mit
     // frischem persistiertem Snapshot verbrauchen keinen Request.
     let entityRequests = 0;
+    const fresh = new Map();
     {
       const flagged = new Set();
       for (const c of Object.values(advanceResult.flowState?.clusters ?? {})) {
@@ -731,16 +808,55 @@ export default async function handler(req, res) {
             return out;
           })
         );
-        const fresh = new Map();
         for (const list of results) for (const [addr, snap] of list) fresh.set(addr, snap);
-        if (fresh.size > 0) {
-          await writeEntityGitHub((cur) => {
-            const addresses = { ...(cur.addresses ?? {}) };
-            for (const [addr, snap] of fresh) addresses[addr] = snap;
-            return { updatedAt: now, addresses };
-          });
-        }
       }
+    }
+    // Entity-Layer (Nachprüfung: die tick-gesammelten x-Signale
+    // (entitySignals, :607/:641) waren bisher dead code — die in
+    // lib/block-window.mjs:47 dokumentierte Übernahme 'x überlebt
+    // Pruning via Entity-Tabelle' war nie implementiert; die Tabelle
+    // wurde nur aus account_info-Snapshots geschrieben). Jetzt werden
+    // die aus SetRegularKey/AccountSet abgeleiteten Signale in die
+    // Entity-Tabelle übernommen: regularKey-Signale ergänzen das
+    // Join-Key-Feld regularKey (rk: wird in entityJoinKeys wirksam),
+    // domain-Signale das Anzeige-Metadatum domain (ohne domainVerified
+    // — nie Join-Key, lib/entity-resolve.mjs:220). Werte sind bereits
+    // codec-gefiltert (blockRecord x: base58-geprüft, sanitizeText,
+    // Köder-Filter). Snapshot-lose Adressen erhalten einen minimalen
+    // Eintrag; bestehende account_info-Felder werden nicht überschrieben.
+    // Der Signal-Write liegt bewusst AUSSERHALB des targets/Deadline-Gates:
+    // Signale für bereits tabellierte Adressen dürfen nicht davon abhängen,
+    // ob in diesem Tick account_info-Targets übrig sind (GitHub-Write, kein
+    // RPC — Deadline-Gate gilt nur für die Request-Schleife).
+    const signalByAddr = new Map();
+    for (const s of entitySignals) {
+      if (!s || typeof s.a !== "string" || !XRPL_ADDR_RE.test(s.a)) continue;
+      if (baitLabels.has(s.a) || baitLabels.has(s.v)) continue; // STILL
+      const entry = signalByAddr.get(s.a) ?? {};
+      if (s.k === "regularKey" && XRPL_ADDR_RE.test(s.v)) entry.regularKey = s.v;
+      else if (s.k === "domain" && typeof s.v === "string" && s.v) entry.domain = s.v;
+      signalByAddr.set(s.a, entry);
+    }
+    if (fresh.size > 0 || signalByAddr.size > 0) {
+      await writeEntityGitHub((cur) => {
+        const addresses = { ...(cur.addresses ?? {}) };
+        for (const [addr, snap] of fresh) addresses[addr] = snap;
+        for (const [addr, sig] of signalByAddr) {
+          const old = addresses[addr];
+          if (old) {
+            if (sig.regularKey && !old.regularKey) old.regularKey = sig.regularKey;
+            if (sig.domain && !old.domain) old.domain = sig.domain;
+          } else {
+            addresses[addr] = {
+              regularKey: sig.regularKey ?? null,
+              domain: sig.domain ?? null,
+              domainVerified: false,
+              signers: [],
+            };
+          }
+        }
+        return { updatedAt: now, addresses };
+      });
     }
     // (viii) Replay-Jobs (Kritik 10 + 6): POST-Auslöser schreiben Jobs nach
     // data/replay-jobs.json; der Tick arbeitet sie mit persistiertem Marker

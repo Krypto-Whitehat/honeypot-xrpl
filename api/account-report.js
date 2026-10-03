@@ -11,8 +11,14 @@
 //
 // DATENPFAD: JSON-RPC per fetch (account_tx, binary:false) — KEIN xrpl.js
 // (ERR_REQUIRE_ESM auf Vercel, dokumentiert in lib/threats-service.mjs:31-36).
-// Bedrohungsliste aus getPublicThreats() (lib/threats-service.mjs, sanitisiert);
-// fällt sie aus, läuft der Report mit leerer Liste (Kontakte/knownBad leer).
+// Bedrohungsliste aus getThreatKnowledge() (lib/threats-service.mjs): merged
+// Wissensschicht aus deriveThreats + data/history.json + data/flow-state.json
+// + data/entity-links.json; buildCheckCtx liefert denselben Engine-ctx
+// (knownBad/firstSeenAt/history) wie /api/check und der Live-Walk — der
+// einzige UI-Endpunkt mit Score/Eligibility muss dasselbe Wissen sehen.
+// Fail-open: ohne GITHUB_HISTORY_TOKEN (readGitHubContents wirft 'Token
+// fehlt', lib/history.mjs) und ohne injizierte Reader läuft der Report mit
+// deriveThreats allein — ehrlicher Leerzustand, kein 502.
 //
 // PRIVATSPHÄRE: Die abgefragte Adresse wird NICHT geloggt und NICHT
 // persistiert; der 60-Sekunden-Ergebnis-Cache ist rein im Prozess-Speicher
@@ -27,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAccountReport } from "../lib/account-report.mjs";
-import { getPublicThreats } from "../lib/threats-service.mjs";
+import { getThreatKnowledge, buildCheckCtx } from "../lib/threats-service.mjs";
 
 export const maxDuration = 30; // Präzedenz api/ledger.js:25
 
@@ -109,18 +115,24 @@ async function fetchAccountTxs(account, limit) {
   return { entries: entries.slice(0, limit), truncated: Boolean(marker) };
 }
 
-// Threat-Map für buildAccountReport (getPublicThreats ist bereits sanitisiert;
-// Köder tauchen dort nur als Label und damit als nicht treffbare Schlüssel auf).
-async function threatMap() {
-  const map = new Map();
+// Merged Wissen für buildAccountReport: getThreatKnowledge liefert die Map
+// Adresse -> {risk, reason, firstSeen, sources[], role, severity} aus allen
+// vier Schichten (fail-open je Schicht — ohne Token bleibt sie bei
+// deriveThreats, ehrlicher Leerzustand statt 502). buildCheckCtx(knowledge)
+// liefert den Engine-ctx (knownBad/firstSeenAt/history) mit
+// Exchange-Registry-Ausschluss. opts.readHistory/opts.readFlowState (nur
+// lokale Bridge) injizieren die Datei-Reader des Servers — dieselbe Semantik,
+// anderer Transport.
+async function knowledge(opts = {}) {
   try {
-    for (const t of await getPublicThreats()) {
-      if (t?.address) map.set(t.address, { risk: t.risk, reason: t.reason, firstSeen: t.firstSeen });
-    }
+    return await getThreatKnowledge({
+      readHistory: typeof opts.readHistory === "function" ? opts.readHistory : undefined,
+      readFlowState: typeof opts.readFlowState === "function" ? opts.readFlowState : undefined,
+    });
   } catch {
-    /* Honeypot-Schicht optional — Report läuft mit leerer Liste */
+    /* Honeypot-/Persistenz-Schicht optional — Report läuft mit leerem Wissen */
+    return { knowledge: new Map(), historyList: null };
   }
-  return map;
 }
 
 // hint wie checkAddress (lib/threats-service.mjs:279-284).
@@ -135,7 +147,9 @@ function buildHint(entryCount) {
 }
 
 // Drittes Argument opts nur für die lokale Bridge (Vercel ruft immer mit
-// req, res): opts.baitLabels = Map address->label der Server-Union.
+// req, res): opts.baitLabels = Map address->label der Server-Union;
+// opts.readHistory/opts.readFlowState = Datei-Reader des Servers für die
+// persistierten Schichten (data/history.json, data/flow-state.json).
 export default async function handler(req, res, opts = {}) {
   try {
     if (req.method !== "GET") {
@@ -160,7 +174,9 @@ export default async function handler(req, res, opts = {}) {
       return res.status(200).json(cached.body);
     }
 
-    const threatsByAddress = await threatMap();
+    const knowledgeResult = await knowledge(opts);
+    const threatsByAddress = knowledgeResult.knowledge;
+    const engineCtx = buildCheckCtx(knowledgeResult);
     let report;
     try {
       const { entries, truncated } = await fetchAccountTxs(address, CHECK_MAX_TX);
@@ -172,6 +188,9 @@ export default async function handler(req, res, opts = {}) {
         truncated,
         checkedTxCount: entries.length,
         hint: buildHint(entries.length),
+        knownBad: engineCtx.knownBad,
+        firstSeenAt: engineCtx.firstSeenAt,
+        history: engineCtx.history,
       });
     } catch (err) {
       const msg = String(err?.data?.error ?? err?.message ?? err);
@@ -194,6 +213,9 @@ export default async function handler(req, res, opts = {}) {
           truncated: false,
           checkedTxCount: 0,
           hint: "Adresse ist ungültig oder das Konto existiert nicht auf dem konfigurierten Netzwerk.",
+          knownBad: engineCtx.knownBad,
+          firstSeenAt: engineCtx.firstSeenAt,
+          history: engineCtx.history,
         });
       } else {
         return res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${msg}` });
