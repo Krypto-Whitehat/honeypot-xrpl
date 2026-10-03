@@ -79,11 +79,13 @@ import {
 let buildClusterGraph = null;
 let txRecordFromEntry = null;
 let flowPathsFn = null;
+let detectPeelingChainsFn = null;
 import('/lib/cluster.mjs')
   .then((m) => {
     buildClusterGraph = typeof m.buildClusterGraph === 'function' ? m.buildClusterGraph : null;
     txRecordFromEntry = typeof m.txRecordFromEntry === 'function' ? m.txRecordFromEntry : null;
     flowPathsFn = typeof m.flowPaths === 'function' ? m.flowPaths : null;
+    detectPeelingChainsFn = typeof m.detectPeelingChains === 'function' ? m.detectPeelingChains : null;
   })
   .catch(() => { /* Cluster-Funktion offline (z. B. 404); Live-Feed läuft weiter */ });
 
@@ -991,6 +993,22 @@ function clusterCardHtml(c, index) {
       .map((e) => ({ from: String(e.from), to: String(e.to) }));
     chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges, { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
   }
+  // Persistierte Peeling-Ketten der Server-View (Kritik 4): die Flusskette
+  // zeigt sie zusätzlich, wenn vorhanden — Kettenreihenfolge Seed→…→Ende,
+  // Brückenknoten als Relay gezeichnet (sie erhalten bewusst keine eigene
+  // Rolle im Graphen, nur die Ketten-Position).
+  if (Array.isArray(c.peelingChains) && c.peelingChains.length) {
+    const bridgeSet = new Set();
+    for (const ch of c.peelingChains) for (const b of ch?.bridges ?? []) bridgeSet.add(String(b));
+    const peelingPaths = c.peelingChains
+      .filter((ch) => Array.isArray(ch?.addresses) && ch.addresses.length >= 2)
+      .map((ch) => ch.addresses.map((a) => ({
+        id: String(a),
+        role: (c.roles && c.roles[String(a)]) || (bridgeSet.has(String(a)) ? 'relay' : 'unknown'),
+      })));
+    const peelingHtml = flowChainHtml(peelingPaths, { maxChips: 12 });
+    if (peelingHtml) chainInner = chainInner ? `${chainInner}<span class="chain-path-sep" aria-hidden="true">·</span>${peelingHtml}` : peelingHtml;
+  }
   const chainHtml = chainInner
     ? `<div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${chainInner}</div>`
     : '';
@@ -1702,6 +1720,10 @@ function applyFlowStateView(view) {
       distinctAccounts: Number(c?.distinctAccounts) || 0,
       firstSeen: c?.firstSeen ?? null,
       lastSeen: c?.lastSeen ?? null,
+      // Persistierte Peeling-Ketten der Server-View (projectFlowStateView,
+      // lib/flow-state.mjs): durchgereicht an Karten-Flusskette und
+      // Drilldown-Graph-Kontext.
+      peelingChains: Array.isArray(c?.peelingChains) ? c.peelingChains : [],
     };
   });
   const nodes = [];
@@ -2030,6 +2052,7 @@ async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
   }
 
   // Cluster-Schicht: rollendes Fenster + Neuberechnung pro validiertem Ledger.
+  const blockRecords = [];
   if (txRecordFromEntry && buildClusterGraph) {
     for (const e of entries) {
       // closeIso (Ledger-Ebene) als Fallback: Entries ohne eigenes close_time
@@ -2039,6 +2062,7 @@ async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
       // Köder-Endpunkte (account ODER destination) erreichen das Fenster nie —
       // clientseitiges Pendant zum Serverfilter über baitLabels.
       if (await recordTouchesBait(rec)) continue;
+      blockRecords.push(rec);
       txWindow.push(rec);
       if (txWindow.length > TX_WINDOW_CAP) txWindow.splice(0, txWindow.length - TX_WINDOW_CAP);
     }
@@ -2050,6 +2074,33 @@ async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
       if (f.severity === 'malicious') await offerKnownBadCandidate(f.address);
     }
     await rebuildClusterGraph();
+  }
+
+  // Peeling-Ketten im Live-Pfad (Kritik 4): ohne diese Funde bliebe der
+  // Regelfilter 'peeling-chain' (buildRuleFilter aus RULE_CATALOG) immer leer —
+  // logEntries werden ausschließlich über registerFindings aus Analyse-Funden
+  // gefüllt. detectPeelingChains läuft pro Live-Ledger auf den txRecords +
+  // Fund-Adressen; Ketten werden als Fund (Seed-Adresse, severity 'suspect')
+  // ins Analyse-Log geschrieben. Kein Schuldnachweis.
+  if (detectPeelingChainsFn && blockRecords.length && visibleFindings.length) {
+    let chains = [];
+    try {
+      chains = detectPeelingChainsFn(blockRecords, visibleFindings, {});
+    } catch {
+      chains = [];
+    }
+    for (const ch of chains) {
+      const ratios = ch.hops.map((h) => h.ratio).filter((r) => typeof r === 'number');
+      const avgPct = ratios.length ? Math.round((ratios.reduce((s, r) => s + r, 0) / ratios.length) * 100) : null;
+      visibleFindings.push({
+        ruleId: 'peeling-chain',
+        severity: 'suspect',
+        address: ch.seed,
+        note: `Peeling-Kette: ${ch.hopsCount} gestaffelte Hops${avgPct != null ? ` (Ø ${avgPct} % Weiterleitung)` : ''} über ${ch.bridges.length} ungeflaggte Relays.`,
+        noteKey: 'peeling-chain',
+        noteParams: { hops: ch.hopsCount, ratio: avgPct },
+      });
+    }
   }
 
   finishBlockCard(card, visibleFindings, ledgerTxCount, entries.length);

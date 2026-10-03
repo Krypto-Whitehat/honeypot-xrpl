@@ -137,7 +137,11 @@ function sortedExchanges(set) {
 // (nach trim) entspricht, werden ÜBERSPRUNGEN. Rückgabe:
 // { ok: byAddress.size > 0, entries: RegistryEntry[], byAddress: Map }
 // RegistryEntry = { address, exchange, country, countryCode (uppercased),
-// kind, confidence } — Strings getrimmt, nicht-Strings -> ''.
+// kind, confidence, tier ('hot'|'cold'|''), requireDestTag (boolean),
+// signers (Array), lastTxLedger (number|null), activeWithin7d (boolean|null) }
+// — Strings getrimmt, nicht-Strings -> ''. Die Neu-Felder (Grenze 4) sind
+// optional: ältere Bestände ohne tier liefern tier '' (kein Reklassi-
+// fizierungs-Effekt in aggregateCountryFlows).
 export function parseExchangeRegistry(raw) {
   const empty = { ok: false, entries: [], byAddress: new Map() };
   let list = null;
@@ -153,6 +157,8 @@ export function parseExchangeRegistry(raw) {
     if (!item || typeof item !== "object") continue;
     const address = trimTo(item.address);
     if (!XRPL_ADDRESS_RE.test(address)) continue;
+    const tierRaw = trimTo(item.tier);
+    const lastTx = Number(item.lastTxLedger);
     const entry = {
       address,
       exchange: trimTo(item.exchange),
@@ -160,6 +166,11 @@ export function parseExchangeRegistry(raw) {
       countryCode: trimTo(item.countryCode).toUpperCase(),
       kind: trimTo(item.kind),
       confidence: trimTo(item.confidence),
+      tier: tierRaw === "hot" || tierRaw === "cold" ? tierRaw : "",
+      requireDestTag: item.requireDestTag === true,
+      signers: Array.isArray(item.signers) ? item.signers.map((s) => trimTo(s)).filter(Boolean) : [],
+      lastTxLedger: Number.isFinite(lastTx) ? lastTx : null,
+      activeWithin7d: item.activeWithin7d === true || item.activeWithin7d === false ? item.activeWithin7d : null,
     };
     entries.push(entry);
     byAddress.set(address, entry); // Duplikat-Adresse: letzter gewinnt
@@ -302,7 +313,11 @@ export function matchCountry(countryName, countryIndex) {
 //   flows: CountryFlow[] — Aggregat je (fromCountry, toCountry)-Paar;
 //       Sortierung count desc, fromCountry asc, toCountry asc (null vor
 //       Namen): { fromCountry: string|null, toCountry: string|null, count,
-//       severities, worstSeverity, exchanges }. NULL-SEITIGE FLOWS
+//       severities, worstSeverity, exchanges }. Kanten mit ENDHOP auf einen
+//       Registry-Eintrag der tier 'cold' (Grenze 4) sind Custody-Umbuchungen,
+//       keine Off-Ramps — sie stehen in custodyFlows (gleiche Struktur),
+//       nicht in flows. Eintrag ohne tier: unverändertes Verhalten.
+//       NULL-SEITIGE FLOWS
 //       (null -> Land, Land -> null) sind ZÄHLDATEN (Off-Ramp-Statistik):
 //       sie haben per Definition keinen darstellbaren Bogen auf der
 //       null-Seite; ihre Kanten werden vom Consumer als Per-Edge-Bögen
@@ -315,6 +330,8 @@ export function matchCountry(countryName, countryIndex) {
 //       Kante (beide Endpunkte am Centroid), ein Mitzählen als Zufluss
 //       UND Abfluss hätte einen Fluss von außen behauptet, der nicht
 //       existiert (Befund 2026-09-30).
+//   custodyFlows: CountryFlow[] — Custody-Umbuchungen (Endhop tier 'cold'),
+//       gleiche Struktur/Sortierung wie flows, eigene Liste (Grenze 4).
 //   unassigned: { addresses: Anzahl Nodes ohne assignedByAddress-Eintrag,
 //       edges: Anzahl Kanten ohne attribuierten Endpunkt mit gematchtem
 //       Land }.
@@ -360,6 +377,10 @@ export function aggregateCountryFlows(input) {
       exchange: entry.exchange,
       kind: entry.kind,
       confidence: entry.confidence,
+      // tier MUSS mitgeführt werden: die Cold-Tier-Reklassifizierung unten
+      // liest toInfo.tier — ohne dieses Feld wäre custodyFlows im
+      // Produktionspfad immer leer (von der Nachprüfung aufgedeckt).
+      tier: entry.tier,
       centroid: match.centroid,
       noPolygon: match.noPolygon,
     });
@@ -382,7 +403,15 @@ export function aggregateCountryFlows(input) {
   }
 
   // Fluss-Aggregation über Kanten (Map-Lookups je Endpunkt).
+  // COLD-TIER-REKLASSIFIZIERUNG (Grenze 4): eine Kante, deren ENDHOP
+  // (Ziel-Endpunkt) ein Registry-Eintrag mit tier 'cold' ist, ist eine
+  // Custody-Umbuchung (Verwahr-/Cold-Wallet-Einzahlung), KEIN Off-Ramp im
+  // Sinne einer Auszahlung an eine Hot-Börse. Sie wird in custodyFlows
+  // aggregiert statt in flows — die Globe-/Attributions-View differenziert
+  // Hot-Off-Ramp gegen Cold-Custody. Eintrag ohne tier ('') ändert das
+  // Verhalten nicht (rückwärtskompatibel zu älteren Beständen).
   const flowAcc = new Map();
+  const custodyAcc = new Map();
   let unassignedEdges = 0;
   for (const edge of edges) {
     if (!edge || typeof edge !== "object") continue;
@@ -413,7 +442,8 @@ export function aggregateCountryFlows(input) {
     const key = `${fromCountry === null ? "\u0000" : fromCountry}\u0001${
       toCountry === null ? "\u0000" : toCountry
     }`;
-    let acc = flowAcc.get(key);
+    const target = toInfo && toInfo.tier === "cold" ? custodyAcc : flowAcc;
+    let acc = target.get(key);
     if (!acc) {
       acc = {
         fromCountry,
@@ -422,7 +452,7 @@ export function aggregateCountryFlows(input) {
         severities: { malicious: 0, suspect: 0, info: 0 },
         exchanges: new Set(),
       };
-      flowAcc.set(key, acc);
+      target.set(key, acc);
     }
     acc.count += 1;
     acc.severities[severity] += 1;
@@ -448,26 +478,33 @@ export function aggregateCountryFlows(input) {
     }))
     .sort((a, b) => b.activity - a.activity || compareCountryAsc(a.name, b.name));
 
-  const flows = [...flowAcc.values()]
-    .map((acc) => ({
-      fromCountry: acc.fromCountry,
-      toCountry: acc.toCountry,
-      count: acc.count,
-      severities: acc.severities,
-      worstSeverity: worstSeverityOf(acc.severities),
-      exchanges: sortedExchanges(acc.exchanges),
-    }))
-    .sort(
-      (a, b) =>
-        b.count - a.count ||
-        compareCountryAsc(a.fromCountry, b.fromCountry) ||
-        compareCountryAsc(a.toCountry, b.toCountry)
-    );
+  const mapAndSortFlows = (accMap) =>
+    [...accMap.values()]
+      .map((acc) => ({
+        fromCountry: acc.fromCountry,
+        toCountry: acc.toCountry,
+        count: acc.count,
+        severities: acc.severities,
+        worstSeverity: worstSeverityOf(acc.severities),
+        exchanges: sortedExchanges(acc.exchanges),
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          compareCountryAsc(a.fromCountry, b.fromCountry) ||
+          compareCountryAsc(a.toCountry, b.toCountry)
+      );
+
+  const flows = mapAndSortFlows(flowAcc);
+  // Custody-Umbuchungen (Endhop tier 'cold') — gleiche Struktur wie flows,
+  // eigene Liste: die View zeichnet sie nicht als Off-Ramp-Bogen.
+  const custodyFlows = mapAndSortFlows(custodyAcc);
 
   return {
     assignedByAddress,
     countries,
     flows,
+    custodyFlows,
     unassigned: { addresses: unassignedAddresses, edges: unassignedEdges },
   };
 }

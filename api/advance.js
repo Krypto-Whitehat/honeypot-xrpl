@@ -70,6 +70,15 @@ import {
   readFlowStateGitHub,
   writeFlowStateGitHub,
   mergeFlowState,
+  archiveFromFlowState,
+  archiveDayOf,
+  appendArchiveDoc,
+  pruneArchiveDocs,
+  readArchiveGitHub,
+  writeArchiveGitHub,
+  deleteArchiveGitHub,
+  ARCHIVE_RETENTION_MALICIOUS_MS,
+  ARCHIVE_RETENTION_REGISTRY_MS,
 } from "../lib/flow-state.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
@@ -80,11 +89,19 @@ import {
   blockRecord,
   dayOf,
   flaggedEdgesFrom,
+  entitySignalsFrom,
   pruneBlockWindowDocs,
   readBlockWindowGitHub,
   writeBlockWindowGitHub,
   deleteBlockWindowGitHub,
 } from "../lib/block-window.mjs";
+import {
+  readEntityGitHub,
+  writeEntityGitHub,
+  fetchEntitySnapshots,
+  buildEntityLinks,
+} from "../lib/entity-resolve.mjs";
+import { readGitHubContents, writeGitHubContents } from "../lib/history.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -120,6 +137,91 @@ export const FETCH_PARALLEL = 4; // 4/0,708 s ≈ 5,7 req/s < 10/s steady
 // Latenzgrenze ~140 Blöcke/Tick) und mit Headroom über dem 5-min-Bedarf
 // (63–77 Blöcke bei 12,6–15,3 Blöcke/min). ENV ADVANCE_BUDGET überschreibt.
 export const DEFAULT_BUDGET = 100;
+// Entity-Layer-Cap (Grenze 3): account_info-Calls pro Tick nach dem Block-
+// Walk. Budget-Bilanz (doku, lib/advance-batch.test.mjs):
+//   worstCaseTickRequests(100) + REQUESTS_PER_TICK_CAP(40) + ENTITY_TICK_CAP(20)
+//   + seedCursorIfFresh (1 Request, NUR bei frischem Cursor) <= 250.
+// Die GitHub-Retention-Calls (Block-Fenster/Archiv-Löschung, unten) gehören
+// NICHT ins honeycluster-Budget — sie laufen gegen die GitHub-Contents-API.
+export const ENTITY_TICK_CAP = 20;
+// Replay-Cap (Grenze 2): account_tx-Calls pro Tick für persistierte Replay-
+// Jobs (data/replay-jobs.json).
+export const REPLAY_TICK_CAP = 40;
+
+// ---------- Replay-Jobs (data/replay-jobs.json im Daten-Repo) ----------
+// { jobs: [ { address, fromLedger, toLedger, marker: {ledger, seq}|null,
+//             status: 'pending'|'done', updatedAt } ] }
+// Marker = fortgeschrittener account_tx-Paging-Zustand (ledger_index_max +
+// seq); wird nach Erreichen von toLedger entfernt. Codec-Muster
+// lib/flow-state.mjs:101-118 (Dokument, Korruption wirft).
+export const REPLAY_JOBS_FILE_PATH = "data/replay-jobs.json";
+
+function normalizeReplayJobsDoc(doc) {
+  let updatedAt = null;
+  if (doc && doc.updatedAt !== null && doc.updatedAt !== undefined && doc.updatedAt !== "") {
+    const n = Number(doc.updatedAt);
+    if (Number.isFinite(n)) updatedAt = n;
+  }
+  const jobs = [];
+  for (const j of Array.isArray(doc?.jobs) ? doc.jobs : []) {
+    if (!j || typeof j !== "object" || Array.isArray(j)) continue;
+    const address = typeof j.address === "string" && j.address ? j.address : null;
+    if (!address) continue;
+    const fromLedger = Number(j.fromLedger);
+    const toLedger = Number(j.toLedger);
+    const marker =
+      j.marker && typeof j.marker === "object" && !Array.isArray(j.marker)
+        ? {
+            ledger: Number.isFinite(Number(j.marker.ledger)) ? Number(j.marker.ledger) : null,
+            seq: Number.isFinite(Number(j.marker.seq)) ? Number(j.marker.seq) : null,
+          }
+        : null;
+    const status = j.status === "done" ? "done" : "pending";
+    const upd = Number(j.updatedAt);
+    jobs.push({
+      address,
+      fromLedger: Number.isFinite(fromLedger) ? fromLedger : null,
+      toLedger: Number.isFinite(toLedger) ? toLedger : null,
+      marker,
+      status,
+      updatedAt: Number.isFinite(upd) ? upd : null,
+    });
+  }
+  return { updatedAt, jobs };
+}
+
+export function serializeReplayJobsDoc(doc) {
+  return JSON.stringify(normalizeReplayJobsDoc(doc));
+}
+
+export function parseReplayJobsText(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Replay-Jobs-Bestand nicht parsebar (korrumpiert) — kein Überschreiben.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Replay-Jobs-Bestand hat unerwartetes Format — kein Überschreiben.");
+  }
+  return normalizeReplayJobsDoc(parsed);
+}
+
+const replayJobsCodec = { serialize: serializeReplayJobsDoc, parse: parseReplayJobsText };
+
+// Pure: Job-Liste um einen neuen Replay-Job ergänzen (Adress-Dedup: gleiche
+// Adresse + gleiches Fenster -> existing gewinnt; sonst anhängen).
+export function mergeReplayJob(jobsDoc, { address, fromLedger, toLedger }, now) {
+  const base = normalizeReplayJobsDoc(jobsDoc);
+  const jobs = [...base.jobs];
+  const idx = jobs.findIndex(
+    (j) => j.address === address && j.fromLedger === fromLedger && j.toLedger === toLedger
+  );
+  const job = { address, fromLedger, toLedger, marker: null, status: "pending", updatedAt: now };
+  if (idx >= 0) jobs[idx] = { ...jobs[idx], status: "pending", updatedAt: now };
+  else jobs.push(job);
+  return { updatedAt: now, jobs };
+}
 
 // Pure: Worst-Case-Request-Anzahl eines Advance-Ticks. expand:true liefert
 // alle Tx-Objekte im ledger-Kommando -> GENAU 1 Request pro Block (kein
@@ -182,7 +284,30 @@ export function seedCursor(validatedIndex, lookbackBlocks) {
 // Walks und persistiert den Partial-Fortschritt (ledger-walk.mjs).
 let tickDeadline = null;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Test-Seams (Kritik 3): Handler-Tests gegen Fixture-rpc und injizierbare
+// Uhr, ohne Live-Netzwerk/Live-Wall-Clock. Muster lib/threats-service.mjs:66-68.
+// setRpcForTests(fn): rpc() delegiert an rpcImpl (Default: Produktions-rpc).
+// setClockForTests(fn): tickDeadline/Sleep über injizierbare Uhr — fn ist
+// entweder eine now()-Funktion oder ein Objekt { now, sleep }.
+let rpcImpl = null;
+let clockImpl = () => Date.now();
+let sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function setRpcForTests(fn) {
+  rpcImpl = typeof fn === "function" ? fn : null;
+}
+
+export function setClockForTests(fn) {
+  if (typeof fn === "function") {
+    clockImpl = fn;
+  } else if (fn && typeof fn === "object") {
+    if (typeof fn.now === "function") clockImpl = fn.now;
+    if (typeof fn.sleep === "function") sleepImpl = fn.sleep;
+  } else {
+    clockImpl = () => Date.now();
+    sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms));
+  }
+}
 
 // Rate-Gate pro Request (honeycluster 10/s, Burst 50, Start 20): jeder
 // rpc()-Call erwirbt vor dem fetch. Parallelität im Block-Fetch wird dadurch
@@ -198,6 +323,9 @@ const rateGate = createRateGate({ ratePerSec: REQUESTS_PER_SEC });
 // Restbudget (a.D. warf !res.ok sofort und advance() deutete den Wurf als
 // Walk-Ende).
 async function rpc(method, params, tries = 3) {
+  // Seam (Kritik 3): Tests injizieren eine Fixture-rpc; Produktion läuft den
+  // realen HTTPS-Pfad unter dem Rate-Gate.
+  if (rpcImpl) return rpcImpl(method, params);
   let lastHint = null;
   for (let i = 0; i < tries; i++) {
     await rateGate.acquire(1);
@@ -212,10 +340,10 @@ async function rpc(method, params, tries = 3) {
       const msg = `HTTP ${res.status}`;
       lastHint = msg;
       const delay = backoffDelayMs(i, parseRetryAfterMs(res.headers.get("retry-after")));
-      if (tickDeadline != null && Date.now() + delay > tickDeadline) {
+      if (tickDeadline != null && clockImpl() + delay > tickDeadline) {
         throw new Error(`RPC ${msg} — Quota-Fenster übersteigt Restlaufzeit.`);
       }
-      await sleep(delay);
+      await sleepImpl(delay);
       continue;
     }
     if (!res.ok) throw new Error(`RPC HTTP ${res.status}`);
@@ -224,12 +352,12 @@ async function rpc(method, params, tries = 3) {
       const msg = String(data.result?.error_message || data.result.error);
       lastHint = msg;
       const delay = backoffDelayMs(i, parseRetryWindowMs(data.result));
-      if (tickDeadline != null && Date.now() + delay > tickDeadline) {
+      if (tickDeadline != null && clockImpl() + delay > tickDeadline) {
         throw new Error(
           `RPC error: ${data.result.error} (${msg}) — Quota-Fenster übersteigt Restlaufzeit.`
         );
       }
-      await sleep(delay);
+      await sleepImpl(delay);
       continue;
     }
     if (data?.result?.error) throw new Error(`RPC error: ${data.result.error}`);
@@ -388,13 +516,54 @@ export default async function handler(req, res) {
   if (!hasPersistence()) {
     return res.status(503).json({ error: "Advance-Persistenz derzeit nicht verfügbar." });
   }
+  // Replay-Auslöser (Kritik 10): die drei Cron-Workflows POSTen ohne Body
+  // (advance-cron.yml/-b/-c, concurrency-group advance-tick) — ein ENV-Modus
+  // würde den Live-Cursor stillstellen. Replay ist daher ein POST-Auslöser:
+  // {mode:'replay', address, from, to} schreibt einen Job in
+  // data/replay-jobs.json und löst den normalen Tick aus (Job wird in
+  // (viii) mit persistiertem Marker abgearbeitet). Ohne Body bleibt der
+  // Live-Walk unverändert.
+  if (req?.body?.mode === "replay" && typeof req.body.address === "string") {
+    const address = req.body.address;
+    if (!XRPL_ADDR_RE.test(address) || baitLabels.has(address)) {
+      return res.status(400).json({ error: "Ungültige Replay-Adresse." });
+    }
+    const fromLedger = Number(req.body.from);
+    const toLedger = Number(req.body.to);
+    if (!Number.isFinite(fromLedger) || !Number.isFinite(toLedger) || fromLedger > toLedger) {
+      return res.status(400).json({ error: "Ungültiges Replay-Fenster (from/to)." });
+    }
+    try {
+      const fresh = await readGitHubContents(REPLAY_JOBS_FILE_PATH, replayJobsCodec);
+      await writeGitHubContents(
+        (cur) => mergeReplayJob(cur ?? { jobs: [] }, { address, fromLedger, toLedger }, Date.now()),
+        REPLAY_JOBS_FILE_PATH,
+        replayJobsCodec
+      );
+    } catch (err) {
+      const status = err?.status === 429 ? 503 : 502;
+      return res.status(status).json({ error: "Replay-Job nicht persistierbar." });
+    }
+    // Der Job wird im Tick abgearbeitet: weiter zum normalen Advance.
+  }
   const now = Date.now();
   const budget = budgetOf();
-  tickDeadline = Date.now() + MAX_DURATION_MS - GUARD_MARGIN_MS;
+  tickDeadline = clockImpl() + MAX_DURATION_MS - GUARD_MARGIN_MS;
   try {
     // (i) persistierten Cursor + Flow-State lesen (readFlowStateGitHub liefert
     // {doc, sha} — hier wird das Dokument dekonstruiert, nicht der Wrapper).
     const { doc } = await readFlowStateGitHub();
+    // (i.2) Entity-Tabelle lesen (Grenze 3): Snapshots + Join-Keys für die
+    // Union im Walk und das x-Feld im Block-Fenster. Read-Fehler ist optional
+    // — der Tick läuft ohne Entity-Layer weiter (fail-open für diesen Layer,
+    // fail-closed bleibt die Persistenz selbst).
+    let entityDoc = null;
+    try {
+      entityDoc = (await readEntityGitHub()).doc;
+    } catch {
+      /* Entity-Layer optional */
+    }
+    const entityAddresses = new Set(Object.keys(entityDoc?.addresses ?? {}));
     // (ii) Engine-Kontext EINMAL pro Tick (siehe buildCtx-Kommentar):
     // firstSeenAt/history werden aus dem persistierten Flow-State geseedet.
     const ctx = await buildCtx(doc);
@@ -404,8 +573,10 @@ export default async function handler(req, res) {
     // (iii) Advance über das ENV-Budget; Fetcher mit Parallelität
     // FETCH_PARALLEL (4/0,7 s ≈ 5,7 req/s < 10/s steady, pro Request durch
     // den Rate-Gate gekappt). Der Wrapper sammelt die Block-Fenster-Zeilen
-    // pro UTC-Tag (Persistenz-Schicht des Block-Fensters).
+    // pro UTC-Tag (Persistenz-Schicht des Block-Fensters) und die Entity-
+    // Signale (x-Feld: SetRegularKey/AccountSet überleben so das Pruning).
     const windowByDay = new Map(); // day -> records[]
+    const entitySignals = [];
     const advanceResult = await advance({
       cursor,
       budget,
@@ -420,12 +591,18 @@ export default async function handler(req, res) {
             block.findings,
             baitLabels
           );
+          // x nur für Adressen, die bereits in der Entity-Tabelle oder
+          // geflaggt sind (Köder-Filter/sanitizeText im Codec).
+          const allowed = new Set(entityAddresses);
+          for (const f of block.findings) if (typeof f?.address === "string") allowed.add(f.address);
+          const signals = entitySignalsFrom(block.transactions, allowed, baitLabels);
           const rec = blockRecord(
             {
               index: idx,
               closeTimeIso: block.closeIso,
               txCount: block.txCount ?? block.transactions.length,
               flagged,
+              entity: signals,
             },
             baitLabels
           );
@@ -433,12 +610,32 @@ export default async function handler(req, res) {
             if (!windowByDay.has(day)) windowByDay.set(day, []);
             windowByDay.get(day).push(rec);
           }
+          for (const s of signals) entitySignals.push(s);
         }
         return block;
       },
       flowState: doc.state,
-      opts: { parallel: FETCH_PARALLEL },
+      opts: {
+        parallel: FETCH_PARALLEL,
+        entityLinks: entityDoc ? buildEntityLinks(entityDoc) : null,
+      },
     });
+    // (iii.5) Archiv VOR mergeFlowState (Grenze 2): mergeFlowState pruned
+    // intern (lib/flow-state.mjs:140) — archiviert wird auf
+    // advanceResult.flowState, exakt nach dem pruneFlowState-Prädikat
+    // (dasselbe Prädikat, keine Differenzrechnung gegen finalDoc).
+    const archiveDocs = archiveFromFlowState(advanceResult.flowState, now).map((d) => ({
+      ...d,
+      archivedAt: now,
+    }));
+    if (archiveDocs.length) {
+      const day = archiveDayOf(now) ?? dayOf(now);
+      if (day) {
+        await writeArchiveGitHub(day, (fresh) =>
+          appendArchiveDoc({ ...fresh, updatedAt: now }, archiveDocs)
+        );
+      }
+    }
     // (iv) Persistenz des Flow-State-Ergebnisses (Merge ausschließlich im
     // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs).
     const finalDoc = await writeFlowStateGitHub((fresh) =>
@@ -472,12 +669,134 @@ export default async function handler(req, res) {
         if (d !== staleDay) await deleteBlockWindowGitHub(d);
       }
     }
+    // (vi.5) Archiv-Retention (Kritik 6): eigene Retention 30 d (malicious)
+    // / 180 d (registry-verknüpft), Tageslöschung exakt im Muster der Block-
+    // Fenster-Löschung oben (deleteGitHubFile ist 404-sicher). Gelesen werden
+    // die Retentionsgrenzen selbst (30/180 Tage zurück) plus ein Tag
+    // Nachholpuffer — Archiv-Tage dazwischen sind per Definition noch nicht
+    // veraltet und brauchen keinen Read. GitHub-Reads, kein honeycluster-
+    // Request (Budget-Ausnahme, dokumentiert).
+    {
+      const archiveDays = [];
+      for (const back of [
+        0, 1, 2,
+        Math.ceil(ARCHIVE_RETENTION_MALICIOUS_MS / (24 * 60 * 60 * 1000)),
+        Math.ceil(ARCHIVE_RETENTION_MALICIOUS_MS / (24 * 60 * 60 * 1000)) + 1,
+        Math.ceil(ARCHIVE_RETENTION_REGISTRY_MS / (24 * 60 * 60 * 1000)),
+        Math.ceil(ARCHIVE_RETENTION_REGISTRY_MS / (24 * 60 * 60 * 1000)) + 1,
+      ]) {
+        const d = dayOf(now - back * 24 * 60 * 60 * 1000);
+        if (d && !archiveDays.includes(d)) archiveDays.push(d);
+      }
+      const { staleDays: archiveStale } = pruneArchiveDocs(
+        await Promise.all(
+          archiveDays.map((d) => readArchiveGitHub(d).then(({ doc: dd }) => ({ day: d, doc: dd })))
+        ),
+        now
+      );
+      for (const d of archiveStale) await deleteArchiveGitHub(d);
+    }
+    // (vii) Entity-Layer (Grenze 3): account_info pro geflaggter Adresse,
+    // parallel 4, Cap ENTITY_TICK_CAP, deadline-geprüft gegen tickDeadline
+    // (Muster :215-217; nutzbare Zeit maxDuration 30 s − GUARD_MARGIN_MS
+    // 5000; 100 Blöcke à ~0,7 s bei parallel 4 ≈ 17,5 s Rest). Requests
+    // durch denselben rateGate (rpc()). Snapshot-TTL-Dedup: Adressen mit
+    // frischem persistiertem Snapshot verbrauchen keinen Request.
+    let entityRequests = 0;
+    {
+      const flagged = new Set();
+      for (const c of Object.values(advanceResult.flowState?.clusters ?? {})) {
+        for (const m of Array.isArray(c?.memberAddresses) ? c.memberAddresses : []) {
+          if (typeof m === "string" && XRPL_ADDR_RE.test(m) && !baitLabels.has(m)) flagged.add(m);
+        }
+      }
+      const targets = [...flagged].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).slice(0, ENTITY_TICK_CAP);
+      if (targets.length && clockImpl() < tickDeadline) {
+        const queue = [...targets];
+        const results = await Promise.all(
+          Array.from({ length: Math.min(4, queue.length) }, async () => {
+            const out = [];
+            while (queue.length) {
+              if (clockImpl() >= tickDeadline) break; // Deadline: Partial persistieren
+              const batch = queue.splice(0, 4);
+              const { snapshots, requests } = await fetchEntitySnapshots(rpc, batch, {
+                cap: ENTITY_TICK_CAP,
+                existing: entityDoc ?? undefined,
+                baitLabels,
+                now,
+              });
+              entityRequests += requests;
+              for (const [addr, snap] of snapshots) out.push([addr, snap]);
+            }
+            return out;
+          })
+        );
+        const fresh = new Map();
+        for (const list of results) for (const [addr, snap] of list) fresh.set(addr, snap);
+        if (fresh.size > 0) {
+          await writeEntityGitHub((cur) => {
+            const addresses = { ...(cur.addresses ?? {}) };
+            for (const [addr, snap] of fresh) addresses[addr] = snap;
+            return { updatedAt: now, addresses };
+          });
+        }
+      }
+    }
+    // (viii) Replay-Jobs (Kritik 10 + 6): POST-Auslöser schreiben Jobs nach
+    // data/replay-jobs.json; der Tick arbeitet sie mit persistiertem Marker
+    // ab (account_tx gegen honeycluster mit ledger_index_min/max — Datums-
+    // filter wird auf diesem Server ignoriert, Recherche-Input), Cap
+    // REPLAY_TICK_CAP Requests/Tick. Marker wird nach Erreichen von toLedger
+    // entfernt.
+    let replayProcessed = 0;
+    {
+      const jobsDoc = await readGitHubContents(REPLAY_JOBS_FILE_PATH, replayJobsCodec);
+      const jobs = (jobsDoc.doc?.jobs ?? []).filter((j) => j.status !== "done");
+      if (jobs.length) {
+        let requests = 0;
+        for (const job of jobs) {
+          if (requests >= REPLAY_TICK_CAP || clockImpl() >= tickDeadline) break;
+          const toLedger = Number.isFinite(job.toLedger) ? job.toLedger : null;
+          if (toLedger == null) continue;
+          const fromLedger = Number.isFinite(job.fromLedger) ? job.fromLedger : 0;
+          const maxLedger = Math.min(toLedger, fromLedger + 500); // Fenster pro Tick
+          try {
+            const res = await rpc("account_tx", {
+              account: job.address,
+              ledger_index_min: fromLedger,
+              ledger_index_max: maxLedger,
+              binary: false,
+              forward: true,
+              limit: 20,
+            });
+            requests += 1;
+            const reached = maxLedger >= toLedger && !res?.marker;
+            await writeGitHubContents(
+              (cur) => {
+                const base = normalizeReplayJobsDoc(cur);
+                const list = base.jobs.map((j) => {
+                  if (j.address !== job.address || j.fromLedger !== job.fromLedger || j.toLedger !== job.toLedger) return j;
+                  if (reached) return { ...j, status: "done", marker: null, updatedAt: now };
+                  return { ...j, marker: { ledger: maxLedger, seq: (j.marker?.seq ?? 0) + 1 }, updatedAt: now };
+                });
+                return { updatedAt: now, jobs: list };
+              },
+              REPLAY_JOBS_FILE_PATH,
+              replayJobsCodec
+            );
+            replayProcessed += 1;
+          } catch {
+            /* Replay-Fehler: Job bleibt hängen (Marker unverändert), Tick läuft weiter */
+          }
+        }
+      }
+    }
     const flaggedTxTotal = [...windowByDay.values()]
       .flat()
       .reduce((s, r) => s + (Array.isArray(r.f) ? r.f.length : 0), 0);
     return res.status(200).json({
       cursor: finalDoc.cursor,
-      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}`,
+      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}, Archiv-Zeilen: ${archiveDocs.length}, Entity-Snapshots: ${entityRequests}, Replay-Jobs: ${replayProcessed}`,
     });
   } catch (err) {
     // Read-/Write-Fehler (409-Retry scheitert, 403/429, Netzwerk) -> kein

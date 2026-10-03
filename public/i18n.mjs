@@ -270,6 +270,7 @@ export const DICT = {
     'globe.edgeN': 'edges',
     'globe.inflow': 'inflow',
     'globe.outflow': 'outflow',
+    'globe.custody': 'custody',
     'globe.exchanges': 'exchanges',
     'globe.tx1': 'transaction',
     'globe.txN': 'transactions',
@@ -391,6 +392,7 @@ export const DICT = {
     'rule.payment-burst': 'Payment burst (airdrop distribution)',
     'rule.offer-spam': 'Offer spam (OfferCreate cascades without fill)',
     'rule.wash-self-transfer': 'Self-Transfer Washing',
+    'rule.peeling-chain': 'Peeling chain (staged forwarding 60–90 %)',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Known-malicious address involved ({type}).',
@@ -407,6 +409,7 @@ export const DICT = {
     'note.payment-burst': '{n} payments to different targets, {tiny} of them tiny (airdrop distribution pattern).',
     'note.airdrop-trustset-spam': '{n} TrustSets with tiny limit from different accounts to issuer {issuer} in one ledger.',
     'note.wash-self-transfer': '{n} self-payments in one ledger (volume washing).',
+    'note.peeling-chain': 'Peeling chain: {hops} staged hops (avg {ratio} % forwarding).',
     'note.fake-nft-fraud-fee': 'NFTokenMint with usurious transfer fee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer to the same target {addr} in one ledger.',
   },
@@ -640,6 +643,7 @@ export const DICT = {
     'globe.edgeN': 'Kanten',
     'globe.inflow': 'Zufluss',
     'globe.outflow': 'Abfluss',
+    'globe.custody': 'Custody',
     'globe.exchanges': 'Börsen',
     'globe.tx1': 'Transaktion',
     'globe.txN': 'Transaktionen',
@@ -761,6 +765,7 @@ export const DICT = {
     'rule.payment-burst': 'Zahlungs-Burst (Airdrop-Verteilung)',
     'rule.offer-spam': 'Offer-Spam (OfferCreate-Kaskaden ohne Fill)',
     'rule.wash-self-transfer': 'Washing — Selbsttransfer (Volumenerzeugung)',
+    'rule.peeling-chain': 'Peeling-Kette (gestaffelte Weiterleitung 60–90 %)',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Bekannt-maliziöse Adresse beteiligt ({type}).',
@@ -777,6 +782,7 @@ export const DICT = {
     'note.payment-burst': '{n} Zahlungen an verschiedene Ziele, davon {tiny} winzig (Airdrop-Verteilungsmuster).',
     'note.airdrop-trustset-spam': '{n} TrustSets mit winzigem Limit von verschiedenen Konten auf Issuer {issuer} in einem Ledger.',
     'note.wash-self-transfer': '{n} Selbstzahlungen in einem Ledger (Volumen-Washing).',
+    'note.peeling-chain': 'Peeling-Kette: {hops} gestaffelte Hops (Ø {ratio} % Weiterleitung).',
     'note.fake-nft-fraud-fee': 'NFTokenMint mit Wucher-TransferFee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer auf dasselbe Ziel {addr} in einem Ledger.',
   },

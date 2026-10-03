@@ -45,7 +45,12 @@
 // Cache wäre dieser Endpunkt ein ungedeckter dritter Egress-Verbraucher im
 // geteilten 10.000-Units-Fenster (Bilanz im README). Fehler/Timeout -> null
 // (ehrlicher Leerzustand im Client, kein 502 — der State ist trotzdem gültig).
-import { readFlowStateGitHub, projectFlowStateView } from "../lib/flow-state.mjs";
+import {
+  readFlowStateGitHub,
+  projectFlowStateView,
+  readArchiveGitHub,
+  replayArchive,
+} from "../lib/flow-state.mjs";
 import {
   readBlockWindowGitHub,
   projectBlockWindow,
@@ -99,6 +104,91 @@ export function resetValidatedCacheForTests() {
 
 // Fail-closed: Persistenz erfordert den Token (nur aus ENV).
 const hasPersistence = () => Boolean(process.env.GITHUB_HISTORY_TOKEN);
+
+// Bait-Labels für die Archiv-Replay-Filterung (Muster api/ledger.js:41-46 —
+// Adressen nur aus ENV, nie in dieser Datei): Köder-Endpunkte in rekonstruier-
+// ten Hops fallen STILL raus (B2).
+const baitLabels = new Map();
+(process.env.BAIT_ADDRESSES || "")
+  .split(",")
+  .map((a) => a.trim())
+  .filter(Boolean)
+  .forEach((addr, i) => baitLabels.set(addr, `HP-${i + 1}`));
+
+// ---------- Archiv-Zweig (route=archive, Grenze 2) ----------
+// GET /api/flow-state?route=archive&address=…&from=…&to=… — Rückwärts-
+// Rekonstruktion über die Flow-Archiv-Tages-Chunks (replayArchive,
+// lib/flow-state.mjs). from/to sind LEDGER-Indizes. 60-s-Prozess-Cache im
+// Muster des Block-Fenster-Zweigs (:108-115): ein Poll/Minute pro Besucher-
+// Tab erzeugt pro Function-Instanz <= 31 Chunk-Reads, unabhängig von der
+// Besucherzahl. DOKUMENTIERTE GRENZE der Lese-Route: gelesen werden die
+// letzten ARCHIVE_QUERY_DAYS Archiv-Tage (Malicious-Retention 30 d + 1);
+// Registry-verknüpfte Cluster bleiben 180 d archiviert, ihre älteren Tage
+// werden von dieser Route nicht abgefragt (Retention vs. Abfragbarkeit —
+// ehrlich benannt, kein 'vollständig'-Versprechen).
+const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+const ARCHIVE_QUERY_DAYS = 31;
+const ARCHIVE_CACHE_MS = 60000;
+const archiveCache = new Map(); // key -> { time, body }
+
+// Test-Helfer (lib/flow-state-validated.test.mjs-Muster): Cache zurücksetzen.
+export function resetArchiveCacheForTests() {
+  archiveCache.clear();
+}
+
+async function handleArchive(req, res) {
+  const address = String(req?.query?.address ?? "").trim();
+  if (!XRPL_ADDR_RE.test(address)) {
+    return res.status(400).json({ error: "Ungültige Adresse." });
+  }
+  const from = Number(req?.query?.from);
+  const to = Number(req?.query?.to);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) {
+    return res.status(400).json({ error: "Ungültiges Fenster (from/to als Ledger-Indizes)." });
+  }
+  if (baitLabels.has(address)) {
+    // generisch — kein Oracle (Muster threats-service checkAddress)
+    return res.status(400).json({ error: "Ungültige Adresse." });
+  }
+  if (!hasPersistence()) {
+    return res.status(200).json({
+      address,
+      from,
+      to,
+      hops: [],
+      truncated: false,
+      reason: "Persistenz nicht konfiguriert",
+    });
+  }
+  const cacheKey = `${address}|${from}|${to}`;
+  const now = Date.now();
+  const cached = archiveCache.get(cacheKey);
+  if (cached && now - cached.time < ARCHIVE_CACHE_MS) {
+    return res.status(200).json(cached.body);
+  }
+  try {
+    const days = [];
+    for (let back = 0; back < ARCHIVE_QUERY_DAYS; back++) {
+      const d = dayOf(now - back * 24 * 60 * 60 * 1000);
+      if (d && !days.includes(d)) days.push(d);
+    }
+    const docs = await Promise.all(
+      days.map(async (d) => {
+        const { doc } = await readArchiveGitHub(d);
+        return { day: d, doc };
+      })
+    );
+    const { hops, truncated } = replayArchive(docs, { address, fromLedger: from, toLedger: to });
+    // Bait-Filter (B2, STILL): Hop mit Köder-Endpunkt fällt raus.
+    const cleanHops = hops.filter((h) => !baitLabels.has(h.from) && !baitLabels.has(h.to));
+    const body = { address, from, to, hops: cleanHops, truncated };
+    archiveCache.set(cacheKey, { time: now, body });
+    return res.status(200).json(body);
+  } catch (err) {
+    const status = err?.status === 429 ? 503 : 502;
+    return res.status(status).json({ error: "Flow-Archiv nicht erreichbar." });
+  }
+}
 
 // ---------- Block-Fenster-Zweig (route=block-window) ----------
 // Ehemals api/block-window.js (entfernt: Hobby-Limit 12 Functions).
@@ -189,6 +279,10 @@ export default async function handler(req, res) {
   // Routen-Weiche: /api/block-window wird per Rewrite hierher gemappt.
   if (String(req?.query?.route ?? "").trim() === "block-window") {
     return handleBlockWindow(req, res);
+  }
+  // Dritte Route: Archiv-Rückwärtssuche (Grenze 2, ohne neue Function).
+  if (String(req?.query?.route ?? "").trim() === "archive") {
+    return handleArchive(req, res);
   }
   if (!hasPersistence()) {
     // Ohne Persistenz gibt es keinen Cursor, gegen den validatedIndex sinnvoll

@@ -706,17 +706,26 @@ export function initGlobe(ctx) {
     // toCountry === Name, O = Summe count mit fromCountry === Name; die
     // null-seitigen Off-Ramp-Flows (null->Land, Land->null) sind ausdrück-
     // lich ZÄHLDATEN und fließen genau hier ein (definierter Konsument).
+    // CUSTODY (Grenze 4): attribution.custodyFlows (Endhop tier 'cold',
+    // public/attribution.mjs:497) sind Umbuchungen in Verwahr-/Cold-Wallets,
+    // KEINE Off-Ramps — sie werden NICHT in die I/O-Summen gemischt, sondern
+    // als eigener Custody-Zähler am Länderpunkt ausgewiesen (definierter
+    // Konsument der Hot-Off-Ramp-vs-Cold-Custody-Differenzierung).
     const labels = [];
     if (attribution) {
       const centroidByName = new Map();
       const inflowByCountry = new Map();
       const outflowByCountry = new Map();
+      const custodyByCountry = new Map();
       for (const c of attribution.countries) {
         if (isUsableCentroid(c.centroid)) centroidByName.set(c.name, c.centroid);
       }
       for (const f of attribution.flows) {
         if (f.toCountry) inflowByCountry.set(f.toCountry, (inflowByCountry.get(f.toCountry) || 0) + f.count);
         if (f.fromCountry) outflowByCountry.set(f.fromCountry, (outflowByCountry.get(f.fromCountry) || 0) + f.count);
+      }
+      for (const f of attribution.custodyFlows ?? []) {
+        if (f.toCountry) custodyByCountry.set(f.toCountry, (custodyByCountry.get(f.toCountry) || 0) + f.count);
       }
       for (const c of attribution.countries) {
         if (!isUsableCentroid(c.centroid)) continue;
@@ -726,6 +735,7 @@ export function initGlobe(ctx) {
           Math.log10(1 + Math.max(0, c.activity)) / Math.log10(1 + GLOBE_COUNTRY_REF_ACTIVITY)));
         const inflow = inflowByCountry.get(c.name) || 0;
         const outflow = outflowByCountry.get(c.name) || 0;
+        const custody = custodyByCountry.get(c.name) || 0;
         const exchanges = c.exchanges.length ? c.exchanges.join(', ') : '–';
         points.push({
           lat: c.centroid[0],
@@ -733,7 +743,7 @@ export function initGlobe(ctx) {
           color,
           radius: 0.22 + 0.5 * t,
           altitude: 0.02,
-          label: `<strong>${esc(c.name)}</strong> · ${c.activity} ${c.activity === 1 ? t('globe.activity1') : t('globe.activityN')} · ${c.severities.malicious} ${sevText('malicious')} · ${t('globe.inflow')}: ${inflow} ${inflow === 1 ? t('globe.edge1') : t('globe.edgeN')} · ${t('globe.outflow')}: ${outflow} ${outflow === 1 ? t('globe.edge1') : t('globe.edgeN')} · ${t('globe.exchanges')}: ${esc(exchanges)}`,
+          label: `<strong>${esc(c.name)}</strong> · ${c.activity} ${c.activity === 1 ? t('globe.activity1') : t('globe.activityN')} · ${c.severities.malicious} ${sevText('malicious')} · ${t('globe.inflow')}: ${inflow} ${inflow === 1 ? t('globe.edge1') : t('globe.edgeN')} · ${t('globe.outflow')}: ${outflow} ${outflow === 1 ? t('globe.edge1') : t('globe.edgeN')}${custody > 0 ? ` · ${t('globe.custody')}: ${custody} ${custody === 1 ? t('globe.edge1') : t('globe.edgeN')}` : ''} · ${t('globe.exchanges')}: ${esc(exchanges)}`,
           clusterId: null, // bewusst: onPointClick ist für Länderpunkte ein No-op
         });
       }
