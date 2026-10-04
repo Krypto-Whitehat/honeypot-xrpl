@@ -374,6 +374,29 @@ export function initHistory(ctx) {
       }
       currentClusters = Array.isArray(body?.clusters) ? body.clusters : [];
       state = currentClusters.length ? 'ready' : 'empty';
+      // Hash-Priming der Mitglieder-Adressen (Befund 2026-10-04, Muster
+      // account-check.js renderReport / globe.js): isFullShownAddr entscheidet
+      // synchron aus dem addrHashCache des Hosts — die Cluster aus
+      // GET /api/history werden vom Live-Priming (primeAddrHashes, nur
+      // Cluster-Graph) nie erfasst, blieben also trotz geladener
+      // Bait-Allowlist in der Kurzform. Fail-closed: ohne ctx.hashOf oder bei
+      // Priming-Fehlern bleibt die Kurzform. Cap 4000 Adressen je Refresh
+      // (Host-Cache ADDR_HASH_CACHE_MAX = 10000, LRU). Nach diesem Priming
+      // nutzen Such-Re-Render und 60-s-Timer dieselben Cache-Einträge; der
+      // Timer-Refresh primt ein neues currentClusters erneut.
+      if (typeof host.hashOf === 'function') {
+        const targets = new Set();
+        for (const c of currentClusters) {
+          for (const m of Array.isArray(c?.members) ? c.members : []) {
+            const a = String(m ?? '').trim();
+            if (a) targets.add(a);
+          }
+        }
+        const list = [...targets].slice(0, 4000);
+        try {
+          await Promise.all(list.map((a) => host.hashOf(a)));
+        } catch { /* Priming fehlgeschlagen: fail-closed Kurzform bleibt */ }
+      }
       // Bereits persistierte Schlüssel gelten als gesehen — vermeidet
       // Doppel-Meldungen desselben Clusters im nächsten onClusterRebuild.
       loadSeen();

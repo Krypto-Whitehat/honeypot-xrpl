@@ -163,6 +163,7 @@ import('./history.js')
         displayAddr: displayFindingAddr,
         isFullShownAddr,
         isDeniedAddr,
+        hashOf,
         shortAddr,
         esc,
         fmtXrp,
