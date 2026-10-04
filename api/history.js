@@ -88,7 +88,13 @@ async function handleGet(req, res) {
     } catch {
       return res.status(502).json({ error: "Historie nicht erreichbar." });
     }
-    getCache = { time: Date.now(), clusters, updatedAt: Date.now() };
+    // Fix 2026-10-04: updatedAt ist der Bestandstand (max lastReportedAt über
+    // die sanitizierten Cluster, null bei leerem Bestand) — nicht die Uhr des
+    // Lesevorgangs. readHistoryGitHub liefert {list,sha} ohne Dokument-
+    // updatedAt (lib/history.mjs:483); Date.now() suggerierte einen
+    // Schreibzeitpunkt, den es auf dieser Route nie gab.
+    const updatedAt = clusters.reduce((m, c) => Math.max(m, Number(c?.lastReportedAt) || 0), 0) || null;
+    getCache = { time: Date.now(), clusters, updatedAt };
   }
   return res.status(200).json({
     clusters: searchHistory(getCache.clusters, req.query?.q),

@@ -718,10 +718,20 @@ export default async function handler(req, res) {
       }
     }
     // (v) Block-Fenster-Tages-Chunks anhängen (Index-Dedup im Codec macht
-    // Retry-Ticks idempotent).
+    // Retry-Ticks idempotent). Fix 2026-10-04: nur Zeilen mit Index <=
+    // advanceResult.newCursor — die Parallel-Runde bricht am null
+    // (lib/ledger-walk.mjs:80-90), der Fetcher aber hatte Zeilen für Blöcke
+    // NACH der Lücke bereits gesammelt (live: Fensterzeile 107403037 gegen
+    // Cursor 107403034). rec.i trägt den Index (lib/block-window.mjs:253-257),
+    // appendBlockWindow dedupt nach rec.i (lib/block-window.mjs:288-302) —
+    // ein Nachhol-Tick schreibt die gefilterten Zeilen idempotent nach.
+    const windowKept = new Map();
     for (const [day, records] of windowByDay) {
+      const kept = records.filter((r) => r.i <= advanceResult.newCursor);
+      if (!kept.length) continue;
+      windowKept.set(day, kept);
       await writeBlockWindowGitHub(day, (fresh) =>
-        appendBlockWindow({ ...fresh, updatedAt: now }, records)
+        appendBlockWindow({ ...fresh, updatedAt: now }, kept)
       );
     }
     // (vi) Retention: der Tag, der seit dem letzten Tick neu aus dem 7-Tage-
@@ -907,7 +917,9 @@ export default async function handler(req, res) {
         }
       }
     }
-    const flaggedTxTotal = [...windowByDay.values()]
+    // Geflaggte Txs nur aus der tatsächlich geschriebenen Menge (windowKept,
+    // Fix 2026-10-04 — konsistent zum gefilterten Fenster-Write oben).
+    const flaggedTxTotal = [...windowKept.values()]
       .flat()
       .reduce((s, r) => s + (Array.isArray(r.f) ? r.f.length : 0), 0);
     return res.status(200).json({

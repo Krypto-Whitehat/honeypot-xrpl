@@ -218,7 +218,10 @@ export default async function handler(req, res, opts = {}) {
           history: engineCtx.history,
         });
       } else {
-        return res.status(502).json({ error: `Ledger-Abfrage fehlgeschlagen: ${msg}` });
+        // Fix 2026-10-04: generische Meldung statt Upstream-Detail-Interpolation
+        // (Konsistenz zu lib/threats-service.mjs:905, api/check/[address].js:13).
+        // msg bleibt für die actMalformed-Erkennung oben in Gebrauch.
+        return res.status(502).json({ error: "Ledger-Abfrage fehlgeschlagen." });
       }
     }
 

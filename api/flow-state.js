@@ -39,8 +39,9 @@
 //
 // validatedIndex (Neu 2026-10-02): der aktuell validierte Ledger-Index — die
 // Referenz für die Rückstands-Anzeige des Flow-Hosts (validatedIndex − cursor).
-// EIN rpc ledger_index:'validated'-Call (Muster api/ledger.js:131) mit 60-s-
-// Prozess-Cache (Muster api/ledger.js:50, 122-124): begrenzt die Kosten auf
+// EIN rpc ledger_index:'validated'-Call (Muster api/ledger.js:131) mit
+// Prozess-Cache (60 s Erfolg / 10 s Fehler, Fix 2026-10-04; Muster
+// api/ledger.js:50, 122-124): begrenzt die Kosten auf
 // <= 1 RPC/Minute pro warmem Prozess, unabhängig von der Besucherzahl — ohne
 // Cache wäre dieser Endpunkt ein ungedeckter dritter Egress-Verbraucher im
 // geteilten 10.000-Units-Fenster (Bilanz im README). Fehler/Timeout -> null
@@ -65,15 +66,21 @@ export const maxDuration = 30;
 const RPC_URL =
   process.env.RPC_URL ||
   (process.env.WSS_URL || "wss://honeycluster.io").replace(/^wss:/, "https:");
-const VALIDATED_CACHE_MS = 60000; // 60-s-Cache wie api/ledger.js:50
-let validatedCache = null;        // { time, index } — nur im Prozess-Speicher
+const VALIDATED_CACHE_MS = 60000; // 60-s-Erfolgs-Cache wie api/ledger.js:50
+// Fix 2026-10-04: getrennte TTLs — ein Fehler (null) durfte den Endpunkt
+// nicht 60 s im Leerzustand einfrieren (live: ein gestörter Upstream
+// zementierte validatedIndex=null eine volle Minute pro Instanz). 10 s
+// Negativ-TTL begrenzt das RPC-Hämmern, ohne den Leerzustand zu zementieren.
+const VALIDATED_NEGATIVE_CACHE_MS = 10000;
+let validatedCache = null;        // { time, index, ttl } — nur im Prozess-Speicher
 
-// Aktuelles validiertes Ledger-Index (1 Call, cached; Fehler -> null, ebenfalls
-// kurz gecacht, damit ein fehlschlagender Endpunkt nicht jede Anfrage erneut
-// einen RPC kosten lässt). Exportiert für Fixture-Tests (lib/flow-state-validated.test.mjs)
+// Aktuelles validiertes Ledger-Index (1 Call, Cache: 60 s Erfolg / 10 s
+// Fehler; Fehler -> null, ebenfalls kurz gecacht, damit ein fehlschlagender
+// Endpunkt nicht jede Anfrage erneut einen RPC kosten lässt). Exportiert für
+// Fixture-Tests (lib/flow-state-validated.test.mjs)
 // — Handler-intern unverändert nur über fetch auf globalThis.
 export async function fetchValidatedIndex() {
-  if (validatedCache && Date.now() - validatedCache.time < VALIDATED_CACHE_MS) {
+  if (validatedCache && Date.now() - validatedCache.time < validatedCache.ttl) {
     return validatedCache.index;
   }
   let index = null;
@@ -91,7 +98,7 @@ export async function fetchValidatedIndex() {
   } catch {
     /* null -> ehrlicher Leerzustand im Client */
   }
-  validatedCache = { time: Date.now(), index };
+  validatedCache = { time: Date.now(), index, ttl: index == null ? VALIDATED_NEGATIVE_CACHE_MS : VALIDATED_CACHE_MS };
   return index;
 }
 

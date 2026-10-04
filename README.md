@@ -141,6 +141,17 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed). Bedient von der Function `api/flow-state.js` (Zweig `route=block-window`) via Rewrite — Hobby-Limit: max. 12 Serverless Functions pro Deployment |
 | `GET /…`           | statische Files aus `public/` |
 
+**Datenquellen der Endpunkte (Doku 2026-10-04):** `/api/threats`, `/api/stats`
+und `/api/graph` zeigen die **live abgeleitete** Köder-Historie
+(`deriveThreats` in `lib/threats-service.mjs` — `account_tx` gegen die
+Köder-Konten); `/api/flow-state`, `/api/block-window` und `/api/history`
+zeigen den **persistierten** Server-Walk (`data/flow-state.json`,
+`data/block-window/`, `data/history.json` im GitHub-Datenrepo). Die Zählung
+kann deshalb zwischen beiden Seiten abweichen (live-Ableitung ohne Walk-
+Pruning vs. akkumulierter Walk). Ein Umbau von threats/stats/graph auf den
+merged Wissens-Layer `getThreatKnowledge` wäre eine Produktentscheidung mit
+neuer öffentlicher Semantik — als Follow-up vorgesehen, nicht umgesetzt.
+
 ## Suche und Selbst-Check
 
 - **Suchfeld** (Dashboard, Tabelle „Maliziöse Adressen"): Community-Mitglieder
@@ -381,6 +392,31 @@ teilen `concurrency: advance-tick` (`cancel-in-progress: false`); zusätzlich
 erlaubt `lib/history.mjs` nur EINEN 409-Retry pro Write. Commit-Volumen:
 Tick alle ~100 s = bis zu ~864 Flow-State-Commits/Tag plus 1 Block-Fenster-
 Commit pro Tick (Tages-Chunks, ≤ ~2,4 MB/Datei).
+
+## Flow-Archiv (jenseits des 7-Tage-Fensters)
+
+Der Flow-State wird im Advance-Tick beschnitten (7-Tage-Fenster,
+`lib/flow-state.mjs`). **Vor** dem Pruning archiviert `archiveFromFlowState`
+die Cluster, die das Prädikat verlieren, als Tages-Chunks
+`data/flow-archive/<YYYY-MM-DD>.json` (`api/advance.js`, Schritt (iii.5)) —
+Betrugsevidenz bleibt rückwärts lesbar, obwohl sie aus dem Live-State fällt.
+Reine Benign-Cluster werden nicht archiviert.
+
+- **Retention:** 30 Tage für malicious-Cluster, 180 Tage für
+  registry-verknüpfte Cluster (`ARCHIVE_RETENTION_MALICIOUS_MS` /
+  `ARCHIVE_RETENTION_REGISTRY_MS`, `lib/flow-state.mjs`); Tages-Chunks löscht
+  der Advance-Tick im Muster des Block-Fensters (404-sicher).
+- **Rückwärts-Lesen:** `GET /api/flow-state?route=archive&address=…&from=…&to=…`
+  (Zweig in `api/flow-state.js`, keine eigene Function — Hobby-Limit 12
+  Serverless Functions) rekonstruiert Hops über `replayArchive`;
+  Köder-Endpunkte fallen STILL raus (B2).
+- **Lese-Fenster:** rückwärts in Blöcken à 31 Tagen mit harter Kappe von
+  2 Blöcken → max. 62 Tage / 62 GitHub-Reads pro Aufruf (`ARCHIVE_QUERY_DAYS`
+  / `ARCHIVE_MAX_DAY_BLOCKS`, ENV `ARCHIVE_MAX_DAY_BLOCKS` überschreibbar,
+  Kappe 6); `truncated: true` signalisiert die Kappe ohne Fensterabdeckung.
+- **Dokumentierte Restlücke (ehrlich):** die Retention (180 d) übersteigt
+  die Abfragbarkeit (62 d) — ältere registry-verknüpfte Cluster sind über
+  diese Route nicht erreichbar.
 
 ## Hinweise
 
