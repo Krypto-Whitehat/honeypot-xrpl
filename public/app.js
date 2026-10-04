@@ -102,6 +102,11 @@ import('./drilldown.js')
         isFullShownAddr,
         displayAddr: displayFindingAddr,
         isDeniedAddr,
+        // Asynchrone Deny-Prüfung für den JSON-Export des Modals: die synchrone
+        // isDeniedAddr verneint ungehashte Adressen (LRU-Kappung möglich) — der
+        // Export muss erst hashen, dann prüfen (fail-closed für ungeprüfte
+        // Adressen, Kritik 2026-10-04).
+        isDeniedAddrAsync,
         shortAddr,
         esc,
         fmtXrp,
@@ -584,9 +589,9 @@ const EDGE_DEFAULT = '#62626b';
 // 1px abgedunkelter Tintenrand je Rolle.
 const ROLE_COLORS = {
   source: {
-    background: '#1d4ed8', border: '#1e3a8a',
-    highlight: { background: '#3b63d9', border: '#1e3a8a' },
-    hover: { background: '#3b63d9', border: '#1e3a8a' },
+    background: '#16305c', border: '#0f2445',
+    highlight: { background: '#2a4a7c', border: '#0f2445' },
+    hover: { background: '#2a4a7c', border: '#0f2445' },
   },
   drainer: {
     background: '#b3261e', border: '#7f1d1d',
@@ -594,14 +599,14 @@ const ROLE_COLORS = {
     hover: { background: '#d03b33', border: '#7f1d1d' },
   },
   collector: {
-    background: '#9a5b00', border: '#713f12',
-    highlight: { background: '#b8760f', border: '#713f12' },
-    hover: { background: '#b8760f', border: '#713f12' },
+    background: '#b45309', border: '#7c3a06',
+    highlight: { background: '#c96a1f', border: '#7c3a06' },
+    hover: { background: '#c96a1f', border: '#7c3a06' },
   },
   relay: {
-    background: '#62626b', border: '#3f3f46',
-    highlight: { background: '#7d7d86', border: '#3f3f46' },
-    hover: { background: '#7d7d86', border: '#3f3f46' },
+    background: '#0f766e', border: '#115e59',
+    highlight: { background: '#1a8d84', border: '#115e59' },
+    hover: { background: '#1a8d84', border: '#115e59' },
   },
   unknown: {
     background: '#f0f0f2', border: '#62626b',
@@ -626,6 +631,17 @@ const CLUSTER_NODE_PROPERTIES = {
   font: { color: '#141416', size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', multi: false },
   shapeProperties: { borderRadius: 12, borderDashes: false },
 };
+
+// Zwei-Zeilen-Knotenlabel (B2): volle Adresse nur bei isFullShownAddr (Allowlist
+// geladen, kein Deny-Treffer — dasselbe Gate wie displayFindingAddr, 1454-1458);
+// bei voller Adresse Umbruch nach Zeichen 24 (vis-network 10.1.2 rendert '\n'
+// im Label), sonst unverändert shortAddr (275-278) wie bisher. Die Kurzfassung
+// bleibt in den dokumentierten Fail-closed-Zuständen erhalten.
+function graphLabel(id) {
+  const s = String(id ?? '');
+  if (s && isFullShownAddr(s)) return s.length > 24 ? `${s.slice(0, 24)}\n${s.slice(24)}` : s;
+  return shortAddr(s);
+}
 
 const PHYSICS_LIVE = {
   enabled: true,
@@ -725,10 +741,12 @@ function updateRawGraph(cg) {
 
   const nextNodes = rawNodes.map((n) => {
     const role = ROLE_COLORS[n.role] ? n.role : 'unknown';
-    // Knotenlabel IMMER Kurzform: vis-network zeichnet Canvas-Label ohne
-    // Umbruch/maxWidth — die volle Adresse klebte am Graph-Rand (Design-Fix).
-    // Die volle Anzeige bleibt im title-Tooltip (displayFindingAddr-Politik).
-    const label = shortAddr(n.id);
+    // Knotenlabel (B2): volle Adresse bei geladener Allowlist und Nicht-Treffer
+    // auf der Deny-Liste — sonst Kurzform wie bisher (displayFindingAddr-Gate,
+    // fail-closed). Volle Adressen werden nach Zeichen 24 umgebrochen
+    // (graphLabel), damit sie nicht einzeilig am Graph-Rand kleben; das
+    // title-Tooltip bleibt displayFindingAddr.
+    const label = graphLabel(n.id);
     return {
       id: String(n.id),
       label,
@@ -779,8 +797,10 @@ function clusterBubbleLabel(c) {
 }
 
 function clusterBubbleTitle(c) {
+  // B4: kein .slice(0, 8) mehr — die volle Liste läuft durch
+  // displayFindingAddr (volle Adresse bei geladener Allowlist und
+  // Nicht-Treffer auf der Deny-Liste, sonst Kurzform; Gate unverändert).
   const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : [])
-    .slice(0, 8)
     .map(displayFindingAddr)
     .join(', ');
   return `${c.label ?? t('cluster.labelDefault')}: ${members}`;
@@ -1048,7 +1068,15 @@ function clusterCardHtml(c, index) {
 function renderClusterList(clusters) {
   const listEl = document.getElementById('cluster-list');
   const emptyEl = document.getElementById('cluster-empty');
+  // A7: Export-Button für die Clusterliste — Sichtbarkeit folgt direkt dem
+  // Cluster-Bestand (nicht setGraphTab: das steigt bei !network aus (900) und
+  // wird von Data-Ticks (rebuildClusterGraph/applyFlowStateView) gar nicht
+  // aufgerufen). hidden=true ohne Cluster — Export nur bei Cluster-Gates.
+  const dlBtn = document.getElementById('cluster-list-download');
+  const dlNote = document.getElementById('cluster-list-note');
   const arr = Array.isArray(clusters) ? clusters : [];
+  if (dlBtn) dlBtn.hidden = arr.length === 0;
+  if (dlNote) dlNote.hidden = arr.length === 0;
   const inClusterTab = activeGraphTab === 'cluster';
   if (!arr.length) {
     listEl.innerHTML = '';
@@ -1059,6 +1087,135 @@ function renderClusterList(clusters) {
   emptyEl.hidden = true;
   listEl.innerHTML = arr.map((c, i) => clusterCardHtml(c, i)).join('');
   listEl.hidden = !inClusterTab;
+}
+
+/* A6 — Export der gesamten Cluster-Liste (Blob-Download, kein api/-Endpunkt):
+ * lastClusterGraph.clusters (WSS-Pfad rebuildClusterGraph bzw. Flow-State-Pfad
+ * applyFlowStateView). Jede Adresse (members, edges-Enden, peelingChains —
+ * letztere nur im Flow-State-View, lib/flow-state.mjs; in lib/cluster.mjs gibt
+ * es sie nicht, grep 0 Treffer) wird vor dem Export asynchron durch
+ * isDeniedAddrAsync geprüft; verweigerte Adressen entfallen ersatzlos. Der
+ * WSS-Pfad filtert Köder bereits beim Neubau (rebuildClusterGraph), der Export
+ * prüft trotzdem erneut, weil die Deny-Liste serverseitig alle 5 s rotiert. */
+async function exportClusterList() {
+  const clusters = lastClusterGraph && Array.isArray(lastClusterGraph.clusters) ? lastClusterGraph.clusters : [];
+  if (!clusters.length) return;
+  const out = [];
+  for (const c of clusters) {
+    const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : []).map(String);
+    // Kanten je Cluster: die Server-View trägt c.edges (applyFlowStateView);
+    // der WSS-Pfad (lib/cluster.mjs) führt Kanten nur global im Graph — sie
+    // werden wie in clusterCardHtml gegen die Mitglieder gefiltert.
+    const memberSet = new Set(members);
+    const rawEdges = Array.isArray(c.edges) && c.edges.length
+      ? c.edges
+      : (lastClusterGraph && Array.isArray(lastClusterGraph.edges) ? lastClusterGraph.edges : [])
+        .filter((e) => memberSet.has(String(e.from ?? '')) && memberSet.has(String(e.to ?? '')));
+    const edges = rawEdges.map((e) => ({
+      from: String(e.from ?? ''),
+      to: String(e.to ?? ''),
+      txHash: e.txHash != null ? String(e.txHash) : null,
+      closeTime: e.closeTime != null ? String(e.closeTime) : null,
+      type: String(e.type ?? ''),
+    })).filter((e) => e.from && e.to);
+    const chains = (Array.isArray(c.peelingChains) ? c.peelingChains : [])
+      .map((ch) => ({
+        seed: String(ch?.seed ?? ''),
+        addresses: (Array.isArray(ch?.addresses) ? ch.addresses : []).map(String),
+        bridges: (Array.isArray(ch?.bridges) ? ch.bridges : []).map(String),
+        hopsCount: Number(ch?.hopsCount ?? 0) || 0,
+      }))
+      .filter((ch) => ch.addresses.length >= 2);
+    // Deny-Nachprüfung je Adresse (async — hashen dann prüfen):
+    const denied = new Set();
+    const addrs = new Set(members);
+    for (const e of edges) { addrs.add(e.from); addrs.add(e.to); }
+    for (const ch of chains) { addrs.add(ch.seed); for (const a of ch.addresses) addrs.add(a); }
+    for (const a of addrs) {
+      if (await isDeniedAddrAsync(a)) denied.add(a);
+    }
+    const rolesByAddress = {};
+    const severityByAddress = {};
+    // Rollenquelle: Server-View trägt rolesByAddress, der WSS-Pfad
+    // (lib/cluster.mjs) führt dieselbe Adresse->Rolle-Tafel als c.roles.
+    for (const [a, role] of Object.entries(c.rolesByAddress ?? c.roles ?? {})) {
+      if (!denied.has(a)) rolesByAddress[a] = String(role);
+    }
+    for (const [a, sev] of Object.entries(c.severityByAddress ?? {})) {
+      if (!denied.has(a)) severityByAddress[a] = String(sev);
+    }
+    out.push({
+      cluster: { id: c.id, label: c.label ?? null },
+      totalDrops: Number(c.totalDrops ?? 0) || 0,
+      txCount: Number(c.txCount ?? 0) || 0,
+      distinctAccounts: Number(c.distinctAccounts ?? 0) || 0,
+      firstSeen: c.firstSeen ?? null,
+      lastSeen: c.lastSeen ?? null,
+      members: members.filter((a) => !denied.has(a)),
+      rolesByAddress,
+      severityByAddress,
+      edges: edges.filter((e) => !denied.has(e.from) && !denied.has(e.to)),
+      peelingChains: chains
+        .map((ch) => ({ ...ch, addresses: ch.addresses.filter((a) => !denied.has(a)) }))
+        .filter((ch) => ch.addresses.length >= 2),
+    });
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    source: t('export.source'),
+    note: t('export.clusterNote'),
+    clusterCount: out.length,
+    clusters: out,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `honeypot-xrpl-cluster-list-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* C2 — PNG-Export des vis-network-Graphen (Canvas-zu-PNG, kein api/-Endpunkt):
+ * vis-network rendert in einen Canvas unter #graph. vis-networks eigene
+ * getCanvas() (10.1.2) wird bevorzugt, DOM-Fallback #graph canvas — die
+ * API-Verfügbarkeit ist in dieser Session nicht ausgeführt, beide Pfade sind
+ * guardiert. Der vis-Canvas hat transparenten Hintergrund: vor dem Export auf
+ * ein weißes Ziel (Bühnenfarbe --a6-graph-canvas) gezeichnet, sonst wäre das
+ * PNG schwarz. Weltkugel (#globe) und Modal-3D sind WebGL-Canvas ohne
+ * preserveDrawingBuffer (grep 0 Treffer in globe.js) — ein Export würde schwarz
+ * ausfallen; er ist bewusst NUR für das vis-Netz vorgesehen. */
+function exportGraphPng() {
+  const stage = document.getElementById('graph');
+  if (!stage) return;
+  let src = null;
+  try {
+    if (network && typeof network.getCanvas === 'function') src = network.getCanvas();
+  } catch { /* getCanvas nicht verfügbar: DOM-Fallback unten */ }
+  if (!src || typeof src.toBlob !== 'function') src = stage.querySelector('canvas');
+  if (!src || typeof src.toBlob !== 'function') return; // kein exportierbarer Canvas
+  const w = src.width || 0;
+  const h = src.height || 0;
+  if (!w || !h) return;
+  const target = document.createElement('canvas');
+  target.width = w;
+  target.height = h;
+  const ctx2d = target.getContext('2d');
+  if (!ctx2d) return;
+  ctx2d.fillStyle = '#ffffff';
+  ctx2d.fillRect(0, 0, w, h);
+  ctx2d.drawImage(src, 0, 0);
+  target.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `honeypot-xrpl-graph-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/png');
 }
 
 function bindGraph() {
@@ -1087,6 +1244,10 @@ function bindGraph() {
       if (card) { e.preventDefault(); openFromCard(card); }
     }
   });
+  // A6/C1: Export-Buttons im Graph-Panel-Head (außerhalb der role="tablist" —
+  // die Tablist-Struktur #tab-live/#tab-cluster/#tab-globe bleibt unverändert).
+  document.getElementById('cluster-list-download').addEventListener('click', () => { void exportClusterList(); });
+  document.getElementById('graph-png').addEventListener('click', exportGraphPng);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1522,14 +1683,25 @@ function buildRuleFilter() {
     .join('');
 }
 
-function downloadLog() {
+async function downloadLog() {
+  // B6: Adressen im exportierten JSON zusätzlich durch die asynchrone
+  // Deny-Prüfung (isDeniedAddrAsync, hashen dann prüfen) — displayFindingAddr
+  // allein genügt nicht, weil bei nicht geladener Allowlist die Kurzform
+  // exportiert würde, die Deny-Liste aber serverseitig alle 5 s rotiert.
+  // Verweigerte Adressen werden ersatzlos entfernt (nicht maskiert); der
+  // count-Feld spiegelt den gefilterten Bestand.
+  const kept = [];
+  for (const e of logEntries) {
+    if (await isDeniedAddrAsync(e.address)) continue;
+    kept.push(e);
+  }
   const payload = {
     exportedAt: new Date().toISOString(),
     source: t('export.source'),
     network: document.getElementById('stat-network').textContent,
     note: t('export.note'),
-    count: logEntries.length,
-    entries: logEntries.map((e) => ({
+    count: kept.length,
+    entries: kept.map((e) => ({
       time: new Date(e.t).toISOString(),
       ledgerIndex: e.ledgerIndex,
       ruleId: e.ruleId,

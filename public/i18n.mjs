@@ -168,6 +168,9 @@ export const DICT = {
     /* app.js — Log-Export */
     'export.source': 'Honeypot XRPL – live ledger analysis log',
     'export.note': 'Addresses in full where the bait-hash allowlist is loaded and the address is not on the deny-list; otherwise short form. Bait addresses are never exported. Full attribution via ledgerIndex on the public ledger.',
+    'export.clusterList': 'Download cluster list as JSON',
+    'export.clusterNote': 'Only addresses not on the internal protection list are exported.',
+    'graph.downloadPng': 'Download as PNG',
 
     /* app.js — Live-Status */
     'net.mainnet': 'XRPL Mainnet (honeycluster.io)',
@@ -251,6 +254,7 @@ export const DICT = {
     'modal.loading3d': 'Loading 3D view …',
     'modal.fallback2d': '3D view not available – 2D fallback view (vis-network).',
     'modal.noGraph': 'No graph available – details in role distribution, flow chain and accounts table.',
+    'modal.downloadJson': 'Download as JSON',
 
     /* globe.js */
     'globe.note': 'Positions are derived deterministically from the address hash – the XRPL ledger contains no location data. The globe is a symbolic activity view; country assignment via the exchange registry is currently unavailable.',
@@ -541,6 +545,9 @@ export const DICT = {
     /* app.js — Log-Export */
     'export.source': 'Honeypot XRPL – Live-Ledger-Analyse-Log',
     'export.note': 'Adressen vollständig, sofern die Bait-Hash-Allowlist geladen ist und die Adresse nicht auf der Deny-Liste steht; sonst Kurzform. Köder-Adressen werden nie exportiert. Vollständige Zuordnung über ledgerIndex auf dem öffentlichen Ledger möglich.',
+    'export.clusterList': 'Clusterliste als JSON herunterladen',
+    'export.clusterNote': 'Exportiert werden nur Adressen, die nicht auf der internen Schutzliste stehen.',
+    'graph.downloadPng': 'Als PNG herunterladen',
 
     /* app.js — Live-Status */
     'net.mainnet': 'XRPL Mainnet (honeycluster.io)',
@@ -624,6 +631,7 @@ export const DICT = {
     'modal.loading3d': '3D-Ansicht wird geladen …',
     'modal.fallback2d': '3D-Ansicht nicht verfügbar – 2D-Ausweichansicht (vis-network).',
     'modal.noGraph': 'Kein Graph verfügbar – Detaildaten in Rollen-Verteilung, Flusskette und Konten-Tabelle.',
+    'modal.downloadJson': 'Als JSON herunterladen',
 
     /* globe.js */
     'globe.note': 'Positionen sind deterministisch aus dem Adress-Hash abgeleitet — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar.',

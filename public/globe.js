@@ -696,7 +696,11 @@ export function initGlobe(ctx) {
         color,
         radius: 0.16 + Math.min(0.64, t * 0.13),
         altitude: 0.012 + Math.min(0.1, t * 0.02),
-        label: esc(displayAddr(id)),
+        // B10: Label-Inhalt in einen span mit Klasse gehüllt — globe.gl rendert
+        // pointLabel/arcLabel als HTML in eine klassenlose CSS2D-Div; ohne
+        // eigenes Element greift keine Wrap-Regel (Kritik 2026-10-04). Die
+        // Wrap-Regel steht in globe.css (#globe .globe-addr-label).
+        label: `<span class="globe-addr-label">${esc(displayAddr(id))}</span>`,
         clusterId: n.clusterId != null ? String(n.clusterId) : null,
       });
     }
@@ -826,7 +830,7 @@ export function initGlobe(ctx) {
         // durchgezogen; 0 wäre dagegen fast unsichtbar (Bundle-nachgeprüft).
         dashLen: flagged ? ARC_DASH_LEN_FLAGGED : 1,
         dashGap: flagged ? ARC_DASH_GAP_FLAGGED : 0,
-        label: `${esc(displayAddr(from))} → ${esc(displayAddr(to))}`,
+        label: `<span class="globe-addr-label">${esc(displayAddr(from))} → ${esc(displayAddr(to))}</span>`,
       });
       // Puls-Ring-Quellen: Kanten mit closeTime im erweiterten Fenster
       // (RING_WINDOW_MS + Takt-Vorlauf). Die Aggregation (Farbe nach

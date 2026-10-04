@@ -308,6 +308,23 @@ body.cluster-modal-open {
 
 .cluster-table-dash { color: var(--a6-muted); }
 
+/* ---------------- JSON-Export des Clusters (A1/A5) ----------------
+   Der Button steht als letztes Kind in aside.cluster-modal-side (nach der
+   Konten-Tabelle) — nicht direktes Kind von .cluster-modal-body, dessen
+   2-Spalten-Grid sonst gebrochen würde. Erbt den .download-btn-Stil aus
+   style.css (inkl. forced-colors-Regel); hidden, solange kein Export-Payload
+   existiert (drilldown.js A4). */
+.cluster-modal-export {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.cluster-json-download { flex: 0 1 auto; }
+
+.cluster-export-note { margin: 0; }
+
 /* ---------------- Adress-Aktionen (Kopieren + xrplcharts-Link) ---------- */
 
 .addr-actions {

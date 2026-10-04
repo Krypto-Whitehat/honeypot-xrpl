@@ -153,6 +153,19 @@ function shortAddr(addr) {
   return s.length > 8 ? s.slice(0, 8) : s;
 }
 
+// B9 — SVG-Label-Helfer: ein <text> kann per CSS nicht umbrechen. Bei einer
+// vollen XRPL-Adresse (Base58-Muster) wird sie in zwei <tspan>-Zeilen
+// (je ≤ 24 Zeichen, x gleich, dy 9) gespalten — der Knoten-<title> zeigt
+// bereits unverändert die volle Rohadresse, die Kurzform bleibt für alles,
+// was nicht wie eine XRPL-Adresse aussieht.
+const FH_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+function nodeLabelSvg(addr) {
+  const s = String(addr ?? '');
+  if (!FH_ADDR_RE.test(s)) return esc(shortAddr(s));
+  if (s.length <= 24) return esc(s);
+  return `<tspan x="__X__" dy="0">${esc(s.slice(0, 24))}</tspan><tspan x="__X__" dy="9">${esc(s.slice(24))}</tspan>`;
+}
+
 // Kanten-Identität (Dedup/Label-Selektion) — wie edgeIdentity (lib/ledger-walk.mjs).
 function edgeIdentity(e) {
   return [e?.from ?? '', e?.to ?? '', e?.txHash ?? '', e?.ledgerSeq ?? ''].join('\u0000');
@@ -250,7 +263,8 @@ function renderFlowGraph(graph) {
       const lx = Math.round((p[0] + (dx / len) * 13) * 100) / 100;
       const ly = Math.round((p[1] + (dy / len) * 13) * 100) / 100;
       const anchor = dx > 8 ? 'start' : dx < -8 ? 'end' : 'middle';
-      label = '<text x="' + lx + '" y="' + (ly + 3) + '" font-size="8" fill="#141416" text-anchor="' + anchor + '">' + esc(shortAddr(nd.id)) + '</text>';
+      const labelInner = nodeLabelSvg(nd.id).replaceAll('__X__', String(lx));
+      label = '<text x="' + lx + '" y="' + (ly + 3) + '" font-size="8" fill="#141416" text-anchor="' + anchor + '">' + labelInner + '</text>';
     }
     parts.push('<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + GNODE_R + '" fill="' + fill + '" stroke="#17171b" stroke-width="1"><title>' + title + '</title></circle>' + label);
   }

@@ -43,6 +43,14 @@
   --a6-on-accent: #141416;
   --a6-accent-soft: #fff0e6;
 
+  /* Neue Brand-Tokens (D3, nur ergänzt): Referenz-Palette Blau/Teal/Amber auf
+     der weißen lab_graphite-Basis. --a6-accent bleibt für bestehende
+     Konsumenten (.download-btn inkl. history-host.html #fh-refresh,
+     forced-colors) unangetastet — keine globale Umbenennung. */
+  --a6-brand-blue: #16305c;
+  --a6-brand-teal: #0f766e;
+  --a6-brand-amber: #b45309;
+
   /* Raster (Astra-6): Gutter skaliert mit der Viewportbreite; main,
      view-nav und Hero-Bühne teilen sich dieselbe Breitenformel —
      max 2400px (Nutzer-Vorgabe; überschreibt den Skill-Default 90rem). */
@@ -72,15 +80,17 @@
   --a6-edge-neutral: #62626b;
   --a6-edge-ink: #141416;
 
-  /* Rollen-Farbcodierung source/drainer/collector/relay */
-  --a6-role-source: #1d4ed8;
-  --a6-role-source-border: #1e3a8a;
+  /* Rollen-Farbcodierung source/drainer/collector/relay — D7: identisch zu
+     ROLE_COLORS in public/app.js (Fragmentierung behoben; JS-Werte =
+     CSS-Werte). Drainer bleibt die Maliz-Signal-Tinte. */
+  --a6-role-source: #16305c;
+  --a6-role-source-border: #0f2445;
   --a6-role-drainer: #b3261e;
   --a6-role-drainer-border: #7f1d1d;
-  --a6-role-collector: #9a5b00;
-  --a6-role-collector-border: #713f12;
-  --a6-role-relay: #62626b;
-  --a6-role-relay-border: #3f3f46;
+  --a6-role-collector: #b45309;
+  --a6-role-collector-border: #7c3a06;
+  --a6-role-relay: #0f766e;
+  --a6-role-relay-border: #115e59;
 
   /* Eine Akzentfarbe je Schweregrad — bestehende Semantik 1:1 weiterverwendet */
   --a6-sev-malicious: #b3261e;
@@ -611,7 +621,7 @@ main {
 
 #graph {
   width: 100%;
-  height: 520px;
+  height: 1040px; /* C3: verdoppelt von 520 px — zwei Zeilen-Labels brauchen Raum */
   background:
     radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--a6-graph-canvas);
@@ -710,11 +720,12 @@ main {
   border: 1px solid rgba(20, 20, 22, 0.25);
 }
 
-/* Rollen-Swatches (Legende + Chips) */
-.swatch-source { background: #1d4ed8; border-radius: 50%; }
-.swatch-drainer { background: #b3261e; border-radius: 50%; }
-.swatch-collector { background: #9a5b00; border-radius: 50%; }
-.swatch-relay { background: #62626b; border-radius: 50%; }
+/* Rollen-Swatches (Legende + Chips) — D7: dieselben Werte wie ROLE_COLORS
+   (app.js) und --a6-role-* (oben); unknown bleibt #f0f0f2 mit Randton. */
+.swatch-source { background: var(--a6-role-source); border-radius: 50%; }
+.swatch-drainer { background: var(--a6-role-drainer); border-radius: 50%; }
+.swatch-collector { background: var(--a6-role-collector); border-radius: 50%; }
+.swatch-relay { background: var(--a6-role-relay); border-radius: 50%; }
 .swatch-unknown { background: #f0f0f2; border-color: #62626b; border-radius: 50%; }
 .swatch-cluster { background: #ffffff; border: 1px solid #17171b; }
 
@@ -773,11 +784,19 @@ main {
 
 .cluster-card:active { transform: translateY(0); }
 
-/* Linkes Band = dominante Rolle des Clusters */
-.cluster-card.role-source { border-left-color: #1d4ed8; }
-.cluster-card.role-drainer { border-left-color: #b3261e; }
-.cluster-card.role-collector { border-left-color: #9a5b00; }
-.cluster-card.role-relay { border-left-color: #62626b; }
+/* D2 (nur ergänzt): 1px Rand in Brand-Tinte — die Hover-Regel
+   (translateY(-2px) + Schatten, analog .download-btn) und der 10px-Radius
+   (var(--a6-r-md)) bestehen bereits und bleiben; keine Selektoren entfernt. */
+.cluster-card { border-color: rgba(22, 48, 92, 0.30); }
+
+/* Linkes Band = dominante Rolle des Clusters — Kritik-Nachbesserung: die
+   Rollen-Hex stehen nicht mehr hardcoded da, sie folgen denselben Werten wie
+   ROLE_COLORS (app.js) und --a6-role-* (sonst bliebe die Fragmentierung
+   teilweise bestehen). */
+.cluster-card.role-source { border-left-color: var(--a6-role-source); }
+.cluster-card.role-drainer { border-left-color: var(--a6-role-drainer); }
+.cluster-card.role-collector { border-left-color: var(--a6-role-collector); }
+.cluster-card.role-relay { border-left-color: var(--a6-role-relay); }
 .cluster-card.role-unknown { border-left-color: var(--a6-control-line); }
 
 .cluster-head {
@@ -801,6 +820,10 @@ main {
   word-break: break-all;
   min-inline-size: 0;
 }
+
+/* D2 (nur ergänzt): Label-Ton auf Brand-Blau (Ink statt Akzentfläche);
+   Typografie und Umbruchregeln oben bleiben unverändert. */
+.cluster-label { color: var(--a6-brand-blue); }
 
 .cluster-roles {
   display: flex;
@@ -858,6 +881,7 @@ main {
   font-family: var(--a6-mono);
   font-size: 12px;
   min-inline-size: 0; /* Kette darf schrumpfen, Chips umbrechen statt überlaufen */
+  overflow-wrap: anywhere; /* B7 (neue Zeile): volle Adressen brechen, Container wie Kette */
 }
 
 .chain-node {
@@ -879,25 +903,25 @@ main {
 }
 
 .chain-node.chain-source {
-  border-color: rgba(29, 78, 216, 0.35);
-  color: #1d4ed8;
+  border-color: var(--a6-role-source-border);
+  color: var(--a6-role-source);
 }
 
 .chain-node.chain-drainer {
-  border-color: rgba(179, 38, 30, 0.5);
-  color: #b3261e;
+  border-color: var(--a6-role-drainer-border);
+  color: var(--a6-role-drainer);
   background: var(--a6-error-soft);
 }
 
 .chain-node.chain-collector {
-  border-color: rgba(154, 91, 0, 0.4);
-  color: #9a5b00;
+  border-color: var(--a6-role-collector-border);
+  color: var(--a6-role-collector);
   background: var(--a6-warn-soft);
 }
 
 .chain-node.chain-relay {
-  border-color: var(--a6-control-line);
-  color: var(--a6-muted);
+  border-color: var(--a6-role-relay-border);
+  color: var(--a6-role-relay);
 }
 
 /* Unbekannte Rolle in der Flusskette: wie der Rollen-Swatch #f0f0f2 mit
@@ -979,8 +1003,8 @@ main {
   border-radius: inherit;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 95% 0%, rgba(255, 178, 107, 0.20), transparent 55%),
-    radial-gradient(ellipse at 0% 100%, rgba(78, 88, 112, 0.07), transparent 60%);
+    radial-gradient(ellipse at 95% 0%, rgba(22, 48, 92, 0.10), transparent 55%),
+    radial-gradient(ellipse at 0% 100%, rgba(15, 118, 110, 0.08), transparent 60%);
 }
 
 .hx-stage-copy {
@@ -1025,6 +1049,14 @@ main {
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
   box-shadow: var(--a6-e1);
+}
+
+/* D1 (nur ergänzt): 1px Rand in Brand-Blau-Tinte und dezenter Karten-Schatten
+   — die KPI-Pills folgen damit der neuen Referenz-Palette; bestehende
+   Selektoren und IDs (#hx-kpi-malicious/-suspect/-txs) bleiben. */
+.hx-kpi {
+  border-color: rgba(22, 48, 92, 0.35);
+  box-shadow: var(--a6-e1), 0 1px 2px rgba(22, 48, 92, 0.06);
 }
 
 .hx-kpi-value {
@@ -1103,7 +1135,7 @@ main {
 @media (max-width: 900px) {
   .stats { margin-left: 0; width: 100%; }
   .stat { flex: 1 1 100px; min-width: 96px; }
-  #graph { height: 400px; }
+  #graph { height: 800px; } /* C3: 400 -> 800 (verdoppelt) */
   .legend { margin-left: 0; }
   .live-stats { margin-left: 0; width: 100%; }
   .live-controls { margin-left: 0; width: 100%; }
@@ -1132,7 +1164,7 @@ main {
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
   .hx-stage { margin-top: 14px; }
-  #graph { height: 320px; }
+  #graph { height: 640px; } /* C3: 320 -> 640 (verdoppelt) */
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
   .log-list { max-height: 340px; }
@@ -1149,7 +1181,8 @@ main {
   }
   .graph-tab,
   .cluster-card,
-  .lang-btn { transform: none !important; }
+  .lang-btn,
+  .download-btn { transform: none !important; }
 }
 
 @media (forced-colors: active) {

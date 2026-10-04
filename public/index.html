@@ -140,6 +140,13 @@
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
         <h2 id="graph-title" data-i18n="graph.title">Activity Graph</h2>
+        <!-- Export-Buttons (A6/C1): bewusst innerhalb des panel-head, aber
+             AUSSERHALB von div.graph-tabs role="tablist" unten — die
+             Tablist-Aria-Struktur (#tab-live/#tab-cluster/#tab-globe) bleibt
+             unverändert. Labels per data-i18n (applyStatic, auch bei
+             hx:langchange). -->
+        <button type="button" class="download-btn" id="cluster-list-download" data-i18n="export.clusterList" hidden>Download cluster list as JSON</button>
+        <button type="button" class="download-btn" id="graph-png" data-i18n="graph.downloadPng">Download as PNG</button>
         <div class="legend" data-i18n-aria="legend.aria">
           <span class="legend-item"><span class="swatch swatch-source"></span><span data-i18n="legend.source">Source</span></span>
           <span class="legend-item"><span class="swatch swatch-drainer"></span><span data-i18n="legend.drainer">Drainer</span></span>
@@ -169,6 +176,8 @@
 
       <ul class="cluster-list" id="cluster-list" data-i18n-aria="cluster.aria" hidden></ul>
       <p class="empty" id="cluster-empty" data-i18n="cluster.empty" hidden>No clusters yet – waiting for ledgers.</p>
+      <!-- A8: ehrlicher Export-Hinweis (Fail-closed-Realität, app.js:309-313) -->
+      <p class="graph-note cluster-export-note" id="cluster-list-note" data-i18n="export.clusterNote" hidden>Only addresses not on the internal protection list are exported.</p>
 
       <p class="graph-note" data-i18n="graph.note">Nodes are actors visible in the public ledger from the live analysis – addresses are shown in full as soon as the bait-hash allowlist is loaded (bait addresses always remain hidden via the hash deny-list). Clicking a cluster card or a cluster bubble opens the cluster detail view.</p>
     </section>

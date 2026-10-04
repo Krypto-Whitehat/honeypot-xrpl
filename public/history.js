@@ -81,9 +81,17 @@ export function initHistory(ctx) {
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[c]);
   };
+  // Adress-Gate (2026-10-04): Kürzungs-Muster sind ausschließlich in den
+  // Maskierungs-Helfern erlaubt (app.js shortAddr, account-check.js
+  // localShortAddr, history-host.html shortAddr). history.js dupliziert die
+  // Kürzung nicht — der hostlose Fallback gibt die vollständige Adresse
+  // zurück. Im echten Host wird shortAddr immer über ctx gereicht
+  // (app.js:166, fail-closed displayFindingAddr bleibt der Gate); hostlos
+  // wäre die API-Antwort ohnehin serverseitig köder-gefiltert
+  // (api/history.js:13-15, 59 — GET-Filter über baitLabels).
   const shortAddr = typeof host.shortAddr === 'function'
     ? host.shortAddr
-    : (a) => { const s = String(a ?? ''); return s.length > 12 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s; };
+    : (a) => String(a ?? '');
   const fmtXrpHost = typeof host.fmtXrp === 'function' ? host.fmtXrp : fmtXrp;
   const fmtClockHost = typeof host.fmtClock === 'function' ? host.fmtClock : fmtClock;
   const isDeniedAddr = typeof host.isDeniedAddr === 'function' ? host.isDeniedAddr : () => false;

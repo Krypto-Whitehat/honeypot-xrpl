@@ -43,6 +43,13 @@ export function initClusterDrilldown(ctx) {
   const displayAddr = ctx.displayAddr;
   const isFullShownAddr = ctx.isFullShownAddr;
   const isDeniedAddr = ctx.isDeniedAddr;
+  // Asynchrone Deny-Prüfung für den JSON-Export (Kritik 2026-10-04): die
+  // synchrone isDeniedAddr verneint ungehashte Adressen (LRU-Kappung des
+  // addrHashCache möglich) — der Export darf keine ungeprüfte Adresse als
+  // Volladresse liefern, also wird vor dem Export gehasht und dann geprüft
+  // (Host-Funktion isDeniedAddrAsync, app.js). Fallback ohne Host-Funktion:
+  // synchrone isDeniedAddr (Anzeige-Maske displayAddr greift zusätzlich).
+  const isDeniedAddrAsync = typeof ctx.isDeniedAddrAsync === 'function' ? ctx.isDeniedAddrAsync : null;
   const flowPaths = ctx.flowPaths;
   const fmtXrp = ctx.fmtXrp;
   const fmtClock = ctx.fmtClock;
@@ -54,6 +61,17 @@ export function initClusterDrilldown(ctx) {
   // 2D-Canvas-Label in Kurzform (Design-Fix): shortAddr kommt bereits im ctx
   // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
   const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
+
+  // Zwei-Zeilen-Graphlabel (B8, Muster B2 in app.js): volle Adresse nur bei
+  // isFullShownAddr (Allowlist geladen, kein Deny-Treffer), sonst unverändert
+  // Kurzform. Bei voller Adresse wird ein Zeilenumbruch nach Zeichen 24
+  // eingefügt — vis-network rendert '\n' im Knotenlabel (Label-Clipping bei
+  // 25–35 Zeichen langen Base58-Adressen war der Ausgangspunkt).
+  const graphLabel = (id) => {
+    const s = String(id ?? '');
+    if (s && isFullShownAddr(s)) return s.length > 24 ? `${s.slice(0, 24)}\n${s.slice(24)}` : s;
+    return shortAddrFn(id);
+  };
 
   const num = (v) => fmtNum(v);
   // Rollen-Beschriftung übersetzt über die Legenden-Keys (EN: Collector,
@@ -79,6 +97,14 @@ export function initClusterDrilldown(ctx) {
   let fg3dResizeObs = null;     // ResizeObserver der 3D-Bühne
   let vis2d = null;             // 2D-Ausweich-Instanz
   const highlightSet = new Set();
+
+  // Export-Payload (A3/A4): Cluster-Rohobjekt aus dem letzten Vollrender —
+  // wird ausschließlich in render() gesetzt und in openCluster/close/
+  // clearToEmptyState gelöscht. Der Download-Button ist hidden, solange kein
+  // Payload existiert; der Export hängt damit an denselben Cluster-Gates wie
+  // die Anzeige. exportToken guardiert überlappende async Nachprüfungen.
+  let exportPayload = null;
+  let exportToken = 0;
 
   /* Modal-Lebenszyklus (Symptom 3, Diagnose 2026-09-30): cluster.id ist
    * instabil — sie wird aus dem alphabetisch kleinsten Mitglied gebildet
@@ -166,6 +192,16 @@ export function initClusterDrilldown(ctx) {
             <section class="cluster-modal-timeline" aria-label="${esc(t('modal.timelineAria'))}"></section>
             <section class="cluster-modal-chain" aria-label="${esc(t('modal.chainAria'))}"></section>
             <section class="cluster-modal-table" aria-label="${esc(t('modal.tableAria'))}"></section>
+            <!-- JSON-Export des Clusters (A1): als letztes Kind der Side-Spalte
+                 (nicht direktes Kind von .cluster-modal-body — das 2-Spalten-Grid
+                 würde durch ein weiteres Kind gebrochen). Label initial per t()
+                 und zusätzlich data-i18n, damit applyStatic bei hx:langchange
+                 (app.js) den Text in der neuen Sprache setzt — das Digest-Gate
+                 in render() überspringt ein Retranslate sonst möglicherweise. -->
+            <div class="cluster-modal-export">
+              <button type="button" class="download-btn cluster-json-download" id="cluster-json-download" data-i18n="modal.downloadJson" hidden>${esc(t('modal.downloadJson'))}</button>
+              <p class="graph-note cluster-export-note" data-i18n="export.clusterNote" hidden>${esc(t('export.clusterNote'))}</p>
+            </div>
           </aside>
         </div>
       </div>`;
@@ -174,6 +210,8 @@ export function initClusterDrilldown(ctx) {
 
     overlay.querySelector('.cluster-modal-backdrop').addEventListener('click', close);
     overlay.querySelector('.cluster-modal-close').addEventListener('click', close);
+    // A2: Klick auf den JSON-Download — Handler ruft den Blob-Export auf.
+    overlay.querySelector('#cluster-json-download').addEventListener('click', downloadClusterJson);
     document.addEventListener('keydown', (e) => {
       if (!isOpen) return;
       if (e.key === 'Escape') { e.preventDefault(); close(); return; }
@@ -195,8 +233,10 @@ export function initClusterDrilldown(ctx) {
   }
 
   function getFocusables() {
+    // D8: !el.disabled ergänzt — ein deaktivierter Download-Button darf den
+    // Tab-Fokustrap nicht blockieren (hidden/deaktivierte Elemente scheiden aus).
     return [...surface.querySelectorAll('button, a[href], [tabindex="0"]')]
-      .filter((el) => !el.hidden && el.offsetParent !== null);
+      .filter((el) => !el.hidden && !el.disabled && el.offsetParent !== null);
   }
 
   function trapFocus(e) {
@@ -226,6 +266,8 @@ export function initClusterDrilldown(ctx) {
     snapshot = null;
     staleShown = false;
     originMembers = null; // Fallback-ANKER neu einfrieren (Befund 2026-09-30)
+    exportPayload = null; // A4: Export-Grundlage gilt nur für den nächsten Vollrender
+    exportToken += 1;     // laufende async-Nachprüfung verwerfen
     clearTakeoverNotice();
     const staleNote = overlay.querySelector('.cluster-modal-stale');
     if (staleNote) staleNote.hidden = true;
@@ -251,6 +293,8 @@ export function initClusterDrilldown(ctx) {
     isOpen = false;
     currentClusterId = null;
     originMembers = null; // Anker verfällt mit dem Modal (neues Öffnen friert neu)
+    exportPayload = null; // A4: kein Export über die Lebensdauer des Modals hinaus
+    exportToken += 1;
     clearTakeoverNotice();
     renderToken += 1;
     overlay.hidden = true;
@@ -362,6 +406,14 @@ export function initClusterDrilldown(ctx) {
     snapshot = null;
     staleShown = false;
     clearTakeoverNotice(); // Übernahme-Hinweis hat seinen Cluster verloren
+    // A4: Total-Leerung löscht auch die Export-Grundlage; Button und Hinweis
+    // bleiben verborgen, bis ein erfolgreicher Vollrender sie wieder setzt.
+    exportPayload = null;
+    exportToken += 1;
+    const dlBtn = overlay.querySelector('#cluster-json-download');
+    if (dlBtn) dlBtn.hidden = true;
+    const dlNote = overlay.querySelector('.cluster-export-note');
+    if (dlNote) dlNote.hidden = true;
     const note = overlay.querySelector('.cluster-modal-stale');
     if (note) note.hidden = true;
     els.titleEl.textContent = t('cluster.labelDefault');
@@ -457,7 +509,9 @@ export function initClusterDrilldown(ctx) {
     const visibleNodes = (typeof isDeniedAddr === 'function')
       ? allNodes.filter((n) => !isDeniedAddr(String(n.id)))
       : allNodes;
-    const clusterNodes = visibleNodes.filter((n) => n.clusterId === cluster.id);
+    // let statt const: die asynchrone Deny-Nachprüfung vor dem Export- Gate
+    // kann clusterNodes nachträglich um Deny-Treffer verkleinern.
+    let clusterNodes = visibleNodes.filter((n) => n.clusterId === cluster.id);
     const nodeIds = new Set(clusterNodes.map((n) => String(n.id)));
     // Fallback-ANKER einfrieren (Befund 2026-09-30): Mitglieder des originär
     // geöffneten Clusters bei der ERSTEN erfolgreichen Renderung nach
@@ -465,7 +519,39 @@ export function initClusterDrilldown(ctx) {
     // darf der Fallback später gegen ihn matchen — so ist der Anker stets der
     // vom Nutzer geöffnete Cluster, nicht ein Zwischen-Snapshot.
     if (!originMembers) originMembers = new Set(nodeIds);
-    const clusterEdges = allEdges.filter((e) => nodeIds.has(String(e.from)) && nodeIds.has(String(e.to)));
+    // let: die asynchrone Deny-Nachprüfung kann Kanten verwerfen, deren Ende
+    // aus der sichtbaren Knotenmenge fallen.
+    let clusterEdges = allEdges.filter((e) => nodeIds.has(String(e.from)) && nodeIds.has(String(e.to)));
+
+    // Export-Grundlage (A3/A4) VOR dem Änderungs-Gate aufbauen (Kritik
+    // 2026-10-04): identischer Inhalt überspringt das Vollrender, aber der
+    // Payload muss auch dann aktuell und deny-geprüft bleiben. Asynchrone
+    // Nachprüfung gegen die AKTUELLE Deny-Liste (rotiert serverseitig alle
+    // 5 s): verweigerte Adressen werden ersatzlos entfernt; ungehashte
+    // Adressen werden vorher gehasht (isDeniedAddrAsync füllt den
+    // addrHashCache des Hosts). Ohne Host-Funktion greift der sync
+    // isDeniedAddr (Defense-in-Depth wie oben).
+    if (isDeniedAddrAsync) {
+      try {
+        const denied = new Set();
+        for (const a of nodeIds) {
+          if (await isDeniedAddrAsync(a)) denied.add(a);
+        }
+        if (denied.size) {
+          for (const a of denied) nodeIds.delete(a);
+          clusterNodes = clusterNodes.filter((n) => !denied.has(String(n.id)));
+          // Kanten gegen die GEFILTERTE Knotenmenge neu schneiden: ein Ende
+          // darf nie als Phantom-Knoten in Graph oder Export landen.
+          clusterEdges = clusterEdges.filter((e) => nodeIds.has(String(e.from)) && nodeIds.has(String(e.to)));
+        }
+      } catch { /* Nachprüfung fehlgeschlagen: Payload bleibt auf sync gefilterter Basis */ }
+      if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
+    }
+    exportPayload = buildExportPayload(cluster, clusterNodes, clusterEdges);
+    const dlBtnEl = overlay.querySelector('#cluster-json-download');
+    if (dlBtnEl) dlBtnEl.hidden = false;
+    const dlNoteEl = overlay.querySelector('.cluster-export-note');
+    if (dlNoteEl) dlNoteEl.hidden = false;
 
     // Änderungs-Gate: identischer Inhalt wie beim letzten Vollrender → nur
     // einen eventuellen Alterungszustand lösen und zurück (kein Re-Render,
@@ -502,6 +588,97 @@ export function initClusterDrilldown(ctx) {
     endStaleState();
     if (takeoverPending) showTakeoverNotice();
     await renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token, cluster.id);
+  }
+
+  /* ---------------- JSON-Export des Clusters (A3/A5) ----------------
+   * Payload aus dem Vollrender: Cluster-Kopf, Metriken, Mitglieder (nur nicht
+   * verweigerte Adressen), Rollen und Schweregrade je Adresse, Kanten (from/
+   * to/txHash/closeTime/type) und — nur in der Server-View vorhanden — die
+   * Peeling-Ketten (lib/flow-state.mjs; in lib/cluster.mjs existieren sie
+   * nicht, grep 0 Treffer). Ein 'rules'-Feld (ruleId/noteKey) wird NICHT
+   * exportiert: kein Cluster-Objekt beider Pfade führt es (per grep belegt) —
+   * erfundene Felder wären ein Verstoß gegen die Ehrlichkeitsregel.
+   * Der Download folgt exakt dem etablierten Blob-Muster aus downloadLog
+   * (app.js): Blob -> createObjectURL -> temporäres <a download> -> revoke
+   * nach 2 s. Kein api/-Endpunkt (api/ umfasst bereits 12 Funktionen —
+   * Vercel-Hobby-Limit, null Spielraum). */
+  function buildExportPayload(cluster, clusterNodes, clusterEdges) {
+    const rolesByAddress = {};
+    const severityByAddress = {};
+    for (const n of clusterNodes) {
+      const a = String(n.id);
+      rolesByAddress[a] = roleLabels[n.role] ? n.role : 'unknown';
+      severityByAddress[a] = String(n.severity ?? 'info');
+    }
+    const chains = (Array.isArray(cluster.peelingChains) ? cluster.peelingChains : [])
+      .map((ch) => ({
+        seed: String(ch?.seed ?? ''),
+        addresses: (Array.isArray(ch?.addresses) ? ch.addresses : []).map(String),
+        bridges: (Array.isArray(ch?.bridges) ? ch.bridges : []).map(String),
+        hopsCount: Number(ch?.hopsCount ?? 0) || 0,
+      }))
+      .filter((ch) => ch.addresses.length >= 2);
+    return {
+      cluster: { id: cluster.id, label: cluster.label ?? null },
+      totalDrops: Number(cluster.totalDrops ?? 0) || 0,
+      txCount: Number(cluster.txCount ?? 0) || 0,
+      distinctAccounts: Number(cluster.distinctAccounts ?? 0) || 0,
+      firstSeen: cluster.firstSeen ?? null,
+      lastSeen: cluster.lastSeen ?? null,
+      members: clusterNodes.map((n) => String(n.id)),
+      rolesByAddress,
+      severityByAddress,
+      edges: clusterEdges.map((e) => ({
+        from: String(e.from),
+        to: String(e.to),
+        txHash: e.txHash != null ? String(e.txHash) : null,
+        closeTime: e.closeTime != null ? String(e.closeTime) : null,
+        type: String(e.type ?? ''),
+      })),
+      peelingChains: chains,
+      exportAt: new Date().toISOString(),
+    };
+  }
+
+  async function downloadClusterJson() {
+    if (!exportPayload) return; // Button ist ohne Payload ohnehin hidden
+    const token = ++exportToken;
+    let payload = exportPayload;
+    // Nachprüfung gegen die AKTUELLE Deny-Liste (rotiert serverseitig alle
+    // 5 s): verweigerte Adressen entfallen ersatzlos — Maskierung statt
+    // Entfernen wäre ein Leak der Kurzform-Zuordnung.
+    if (isDeniedAddrAsync) {
+      try {
+        const denied = new Set();
+        const addrs = new Set(payload.members);
+        for (const e of payload.edges) { addrs.add(e.from); addrs.add(e.to); }
+        for (const ch of payload.peelingChains) { addrs.add(ch.seed); for (const a of ch.addresses) addrs.add(a); }
+        for (const a of addrs) {
+          if (await isDeniedAddrAsync(a)) denied.add(a);
+        }
+        if (denied.size) {
+          payload = {
+            ...payload,
+            members: payload.members.filter((a) => !denied.has(a)),
+            rolesByAddress: Object.fromEntries(Object.entries(payload.rolesByAddress).filter(([a]) => !denied.has(a))),
+            severityByAddress: Object.fromEntries(Object.entries(payload.severityByAddress).filter(([a]) => !denied.has(a))),
+            edges: payload.edges.filter((e) => !denied.has(e.from) && !denied.has(e.to)),
+            peelingChains: payload.peelingChains
+              .map((ch) => ({ ...ch, addresses: ch.addresses.filter((a) => !denied.has(a)) }))
+              .filter((ch) => ch.addresses.length >= 2),
+          };
+        }
+      } catch { /* Nachprüfung fehlgeschlagen: Payload bleibt auf render-gefilterter Basis */ }
+      if (token !== exportToken) return; // Payload wurde unterdessen ersetzt
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `cluster-${String(payload.cluster.id ?? '').replace(/[^A-Za-z0-9_-]/g, '_')}-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
   function clusterSeverity(cluster, clusterNodes) {
@@ -837,7 +1014,7 @@ export function initClusterDrilldown(ctx) {
       const role = roleColors[n.role] ? n.role : 'unknown';
       return {
         id: String(n.id),
-        label: shortAddrFn(n.id),
+        label: graphLabel(n.id), // B8: Zwei-Zeilen-Helfer wie B2 (voll nur bei isFullShownAddr)
         title: `${displayAddr(n.id)} (${roleLabelText(role)})`,
         shape: 'dot',
         size: 14,
