@@ -70,15 +70,18 @@ import {
   readFlowStateGitHub,
   writeFlowStateGitHub,
   mergeFlowState,
+  effectiveClusterCap,
   archiveFromFlowState,
   archiveDayOf,
   appendArchiveDoc,
+  capArchiveDoc,
   pruneArchiveDocs,
   readArchiveGitHub,
   writeArchiveGitHub,
   deleteArchiveGitHub,
   ARCHIVE_RETENTION_MALICIOUS_MS,
   ARCHIVE_RETENTION_REGISTRY_MS,
+  ARCHIVE_MAX_BYTES,
   hasFraudEvidence,
 } from "../lib/flow-state.mjs";
 import { analyzeLedger } from "../lib/detector.mjs";
@@ -86,6 +89,8 @@ import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { createRateGate, parseRetryAfterMs } from "../lib/rate-gate.mjs";
 import {
   appendBlockWindow,
+  capBlockWindow,
+  BLOCK_WINDOW_MAX_BYTES,
   blockRecord,
   dayOf,
   flaggedEdgesFrom,
@@ -98,6 +103,8 @@ import {
 import {
   readEntityGitHub,
   writeEntityGitHub,
+  capEntityDoc,
+  ENTITY_MAX_BYTES,
   fetchEntitySnapshots,
   buildEntityLinks,
 } from "../lib/entity-resolve.mjs";
@@ -580,7 +587,27 @@ export default async function handler(req, res) {
   try {
     // (i) persistierten Cursor + Flow-State lesen (readFlowStateGitHub liefert
     // {doc, sha} — hier wird das Dokument dekonstruiert, nicht der Wrapper).
-    const { doc } = await readFlowStateGitHub();
+    const { doc, sha } = await readFlowStateGitHub();
+    // (i.1) Seed-Guard (Wisch-Zyklus-Sperre, VOR buildCtx und VOR
+    // seedCursorIfFresh — auf dem Guard-Pfad läuft kein RPC): cursor <= 0 mit
+    // Fortschritt (Cluster oder blocksProcessedTotal > 0) heißt "Cursor
+    // verloren, Daten da" — Seeding würde den Bestand auf Live-Edge-Kursor
+    // überschreiben und die Cluster im nächsten Pruning still vernichten.
+    // Seeden erlaubt: cursor <= 0 ohne jeglichen Fortschritt (legaler
+    // Init-Fall — der 404-Anlege-Fall sha===null wird von readFlowStateGitHub
+    // zum fortschrittslosen Leerdokument normalisiert, und eine 0-Byte-Datei
+    // ist am Handler von einem cursor-0-Leerdokument nicht unterscheidbar;
+    // beides ist datensicher zu seeden, nichts kann verloren gehen).
+    // Gesperrt: cursor <= 0 MIT Fortschritt — auch gegen einen hypothetischen
+    // sha-losen Bestand mit Daten (die Sperre ist die sichere Kante der
+    // Plan-Regel). Antwort 502 (NICHT 503): die Cron-Workflows akzeptieren
+    // nur 200/503 als grün (advance-cron.yml:41, -b:30, -c:30) — ein
+    // dauerhafter Guard-Fall macht jeden Run sichtbar rot.
+    const hasProgress =
+      Object.keys(doc.state?.clusters ?? {}).length > 0 || Number(doc.state?.blocksProcessedTotal) > 0;
+    if (Number(doc.cursor) <= 0 && hasProgress) {
+      return res.status(502).json({ error: "Flow-State-Bestand ohne Cursor — Seeding verweigert." });
+    }
     // (i.2) Entity-Tabelle lesen (Grenze 3): Snapshots + Join-Keys für die
     // Union im Walk und das x-Feld im Block-Fenster. Read-Fehler ist optional
     // — der Tick läuft ohne Entity-Layer weiter (fail-open für diesen Layer,
@@ -648,11 +675,20 @@ export default async function handler(req, res) {
         entityLinks: entityDoc ? buildEntityLinks(entityDoc) : null,
       },
     });
+    // (iii.4) Effektiver Cluster-Cap EINMAL pro Tick (Byte-Cap
+    // FLOW_STATE_MAX_BYTES, lib/flow-state.mjs): der Bestand darf die 1-MiB-
+    // Contents-Grenze nicht wieder überschreiten (live: 1.125.252 B ->
+    // content_len 0 -> Wisch-Zyklus). DERSSELBE Cap füttert
+    // archiveFromFlowState UND mergeFlowState (Archiv-Kopplung: was der Cap
+    // aus dem Bestand wirft, wird im selben Tick archiviert — Betrugsevidenz
+    // bleibt im data/flow-Archiv erhalten, lib/flow-state.mjs
+    // archiveFromFlowState Kappungs-Zweig).
+    const clusterCap = effectiveClusterCap(advanceResult.flowState, now);
     // (iii.5) Archiv VOR mergeFlowState (Grenze 2): mergeFlowState pruned
-    // intern (lib/flow-state.mjs:140) — archiviert wird auf
-    // advanceResult.flowState, exakt nach dem pruneFlowState-Prädikat
-    // (dasselbe Prädikat, keine Differenzrechnung gegen finalDoc).
-    const archiveDocs = archiveFromFlowState(advanceResult.flowState, now).map((d) => ({
+    // intern — archiviert wird auf advanceResult.flowState, exakt nach dem
+    // pruneFlowState-Prädikat (dasselbe Prädikat, keine Differenzrechnung
+    // gegen finalDoc).
+    const archiveDocs = archiveFromFlowState(advanceResult.flowState, now, { maxClusters: clusterCap }).map((d) => ({
       ...d,
       archivedAt: now,
     }));
@@ -660,14 +696,15 @@ export default async function handler(req, res) {
       const day = archiveDayOf(now) ?? dayOf(now);
       if (day) {
         await writeArchiveGitHub(day, (fresh) =>
-          appendArchiveDoc({ ...fresh, updatedAt: now }, archiveDocs)
+          capArchiveDoc(appendArchiveDoc({ ...fresh, updatedAt: now }, archiveDocs), ARCHIVE_MAX_BYTES)
         );
       }
     }
     // (iv) Persistenz des Flow-State-Ergebnisses (Merge ausschließlich im
-    // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs).
+    // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs) — mit
+    // demselben Cap wie das Archiv (iii.4).
     const finalDoc = await writeFlowStateGitHub((fresh) =>
-      mergeFlowState(fresh, advanceResult, now)
+      mergeFlowState(fresh, advanceResult, now, { maxClusters: clusterCap })
     );
     // (iv.5) Live-Cluster in die öffentliche Maliziös-Historie (data/
     // history.json): bisher war Live-Evidenz dort nie suchbar (?q=) —
@@ -730,8 +767,12 @@ export default async function handler(req, res) {
       const kept = records.filter((r) => r.i <= advanceResult.newCursor);
       if (!kept.length) continue;
       windowKept.set(day, kept);
+      // Byte-Cap im Live-Write-Apply (NICHT in appendBlockWindow — der
+      // Restore-Pfad und die Append-Tests laufen bewusst ungekappt):
+      // 2026-10-03.json wuchs auf 1.205.513 B, 2026-10-04.json wurde real
+      // gewischt (ae6c6492 1.163.338 B -> c36d0b24 295.237 B).
       await writeBlockWindowGitHub(day, (fresh) =>
-        appendBlockWindow({ ...fresh, updatedAt: now }, kept)
+        capBlockWindow(appendBlockWindow({ ...fresh, updatedAt: now }, kept), BLOCK_WINDOW_MAX_BYTES)
       );
     }
     // (vi) Retention: der Tag, der seit dem letzten Tick neu aus dem 7-Tage-
@@ -865,7 +906,11 @@ export default async function handler(req, res) {
             };
           }
         }
-        return { updatedAt: now, addresses };
+        // Präventiver Byte-Cap (ENTITY_MAX_BYTES): Adressen über Cap nach
+        // Snapshot-Alter raus (ältester snapshotAt zuerst) — dieselbe
+        // >1-MiB-Contents-Lücke wie flow-state/block-window (live heute:
+        // entity-links.json 16.926 B, trimmt also nichts Bestehendes).
+        return capEntityDoc({ updatedAt: now, addresses }, ENTITY_MAX_BYTES);
       });
     }
     // (viii) Replay-Jobs (Kritik 10 + 6): POST-Auslöser schreiben Jobs nach

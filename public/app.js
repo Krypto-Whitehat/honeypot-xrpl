@@ -908,6 +908,11 @@ function setGraphTab(tab) {
     graphEl.hidden = true;
     listEl.hidden = true;
     emptyEl.hidden = true;
+    // PNG-Export ist bewusst nur fürs vis-Netz vorgesehen (Weltkugel ist ein
+    // WebGL-Canvas ohne preserveDrawingBuffer — der Export wäre schwarz und
+    // exportGraphPng early-returnt still): auf der Weltkugel wird der Button
+    // versteckt statt still no-op.
+    document.getElementById('graph-png').hidden = true;
     if (globeMod && typeof globeMod.activate === 'function') globeMod.activate();
     return;
   }
@@ -918,6 +923,7 @@ function setGraphTab(tab) {
   globeEl.hidden = true;
   if (globeMod && typeof globeMod.deactivate === 'function') globeMod.deactivate();
   graphEl.hidden = false;
+  document.getElementById('graph-png').hidden = false; // vis-Bühne: Export wieder sichtbar
   if (!network) return; // vis offline: Bühnenwechsel genügt, Fehlermeldung bleibt sichtbar
   requestAnimationFrame(() => { try { network.resize(); } catch { /* egal */ } });
   if (tab === 'cluster') {
@@ -2018,7 +2024,14 @@ function setFeedMode(mode) {
     document.getElementById('feed-chart').hidden = true;
     document.getElementById('block-feed').innerHTML = '';
     feedVisibleCount = FEED_INITIAL;
-    document.getElementById('feed-empty').hidden = false;
+    // Leer-Text zurück auf den Live-Key: renderWindowFeed hat 'feed.serverEmpty'
+    // bzw. 'feed.persistOff' geschrieben — ohne Reset stünde im Live-Modus der
+    // Server-Text (data-i18n mitgeschrieben, damit applyStatic bei
+    // Sprachwechsel den passenden Key erwischt — Gegenstück app.js:1842-1846).
+    const liveEmptyEl = document.getElementById('feed-empty');
+    liveEmptyEl.setAttribute('data-i18n', 'feed.empty');
+    liveEmptyEl.textContent = t('feed.empty');
+    liveEmptyEl.hidden = false;
     setConn(false, t('conn.liveInit'));
     connectLive();
   }
