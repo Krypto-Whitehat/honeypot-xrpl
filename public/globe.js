@@ -72,19 +72,20 @@
 
 import { t, sevText } from './i18n.mjs';
 
-const GLOBE_GL_URL = 'https://unpkg.com/globe.gl@2.46.2/dist/globe.gl.min.js';
-// SRI-Integrität (Lieferketten-Hygiene, Befund 2026-09-30): Beide CDN-
-// Bundles laufen mit Subresource-Integrity — ein kompromittiertes CDN kann
-// den Bundle-Inhalt nicht unbemerkt tauschen. Hashes über die exakten Bytes
-// der gepinnten URLs (globe.gl: 1.885.160 Bytes, wie oben im Modul-Kommentar
-// dokumentiert), Format sha384-Base64. crossorigin="anonymous" ist zu SRI
-// Pflicht (CORS-Modus); unpkg sendet Access-Control-Allow-Origin: *.
+// Lokales Vendoren (Performance-Umbau 2026-10-05): die Bundles liegen unter
+// public/vendor/ und werden same-origin ausgeliefert (vercel.json Rewrites
+// /vendor/*). Die sha384-Hashes stammen von den gepinnten unpkg-URLs und
+// wurden vor dem Vendoren gegen die exakten Bytes verifiziert (globe.gl:
+// 1.885.160 B, topojson-client: 7.169 B) — SRI bleibt bestehen, ein
+// manipuliertes Auslieferungs-Glied wird vom Browser verworfen.
+const GLOBE_GL_URL = 'vendor/globe.gl.min.js';
 const GLOBE_GL_INTEGRITY = 'sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT';
-const TOPOJSON_URL = 'https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js'; // GEPINNT mit Patch: die ungepatchte @3-URL leitet auf unpkg um
+const TOPOJSON_URL = 'vendor/topojson-client.min.js'; // vendorte Version: topojson-client@3.1.0 (die ungepatchte @3-URL leitete auf unpkg um)
 const TOPOJSON_INTEGRITY = 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67';
 const EXCHANGE_REGISTRY_URL = '/data/exchange-registry.json'; // same-origin (express.static, server/index.mjs)
 const COUNTRIES_URL = '/data/countries-50m.json';             // Natural-Earth-TopoJSON (241 Länder)
 const GLOBE_MAX_ARCS = 300;        // Deckel: zuletzt 300 Kanten (Analogon CLUSTER_MAX_EDGES, app.js:106)
+const GLOBE_MAX_POINTS = 300;      // Deckel: die 300 schwersten Punkte nach Drops-Summe (Diagnose: unbegrenzte Punkte → 0,2 fps beim Aufbau)
 const RING_WINDOW_MS = 30000;      // Puls-Ringe nur für Kanten mit closeTime jünger als 30 s
 const RING_REPEAT_MS = 1200;       // ringRepeatPeriod laut Plan
 const RING_MAX_RADIUS_DEG = 5;     // Ring-Radius in Grad (Kugel-Oberfläche)
@@ -702,8 +703,20 @@ export function initGlobe(ctx) {
         // Wrap-Regel steht in globe.css (#globe .globe-addr-label).
         label: `<span class="globe-addr-label">${esc(displayAddr(id))}</span>`,
         clusterId: n.clusterId != null ? String(n.clusterId) : null,
+        _drops: drops, // nur für den GLOBE_MAX_POINTS-Deckel unten, wird entfernt
       });
     }
+
+    // GLOBE_MAX_POINTS-Deckel (gleiches Muster wie GLOBE_MAX_ARCS): unbegrenzte
+    // Punkte kosteten beim Aufbau 0,2 fps (Diagnose). Behalten werden die
+    // schwersten Punkte nach Drops-Summe, deterministischer Tiebreak über
+    // lat/lng; der interne _drops-Wert wird vor der Übergabe an globe.gl
+    // entfernt.
+    if (points.length > GLOBE_MAX_POINTS) {
+      points.sort((a, b) => (b._drops - a._drops) || (a.lat - b.lat) || (a.lng - b.lng));
+      points.length = GLOBE_MAX_POINTS;
+    }
+    for (const p of points) delete p._drops;
 
     // LÄNDERPUNKTE und LABELS (aus countries[]): Zufluss/Abfluss (I/O) zählt
     // die Kugel selbst aus flows[] — I = Summe count aller Flows mit

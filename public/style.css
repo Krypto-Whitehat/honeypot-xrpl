@@ -259,9 +259,10 @@ html, body {
   scroll-margin-block-start: 84px;
 }
 
-/* Dashboard-View: Console-Raster. Ab 1024 px zwei Spalten — links Feed- und
-   Log-Panel untereinander, rechts die Graph-Bühne; darunter einspaltig wie
-   zuvor. Die Panels bleiben Kinder neutraler Spaltencontainer — ohne eigene
+/* Dashboard-View: Console-Raster — bewusst einspaltig in ALLEN Breakpoints:
+   Feed- und Log-Panel oben, die Graph-Bühne full-width darunter. Die frühere
+   Zweispaltig-Regel ab 1024 px ist entfernt; der Graph braucht die volle
+   Breite. Die Panels bleiben Kinder neutraler Spaltencontainer — ohne eigene
    Rhythmus-Regel klebten ihre 1px-Ink-Borders aneinander (Astra-6
    lab_graphite: Borders dürfen nicht verschmelzen). Der View übernimmt
    denselben Achsabstand wie main (22 px), also denselben Token-Abstand, den
@@ -279,13 +280,6 @@ html, body {
   flex-direction: column;
   gap: 22px;
   min-inline-size: 0; /* Grid-Kind darf schrumpfen, damit Inhalte umbrechen */
-}
-
-@media (min-width: 1024px) {
-  .console-grid {
-    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-    align-items: start;
-  }
 }
 
 /* ---------------- Panels ---------------- */
@@ -663,7 +657,8 @@ main {
 
 #graph {
   width: 100%;
-  height: 1040px; /* C3: verdoppelt von 520 px — zwei Zeilen-Labels brauchen Raum */
+  height: 720px; /* full-width-Bühne: Höhe von 1040 px auf 720 px gesenkt;
+                    Höhenleiter 720 → 640 (≤1024) → 560 (≤900) → 480 (≤560) */
   background:
     radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--a6-graph-canvas);
@@ -1183,13 +1178,19 @@ main {
 
 /* ---------------- Responsiv ---------------- */
 
+/* Konsistente Graph-Höhenleiter: 720 px (Basis) → 640 px (≤1024) →
+   560 px (≤900) → 480 px (≤560). */
+@media (max-width: 1024px) {
+  #graph { height: 640px; }
+}
+
 @media (max-width: 900px) {
   .stats { margin-left: 0; width: 100%; }
   .stat { flex: 1 1 100px; min-width: 96px; }
   /* Status-Chips bleiben kompakt und wachsen nicht auf KPI-Kartenbreite. */
   .stat-network,
   .stat-last { flex: 0 1 auto; }
-  #graph { height: 800px; } /* C3: 400 -> 800 (verdoppelt) */
+  #graph { height: 560px; } /* Höhenleiter: 720 → 640 → 560 */
   .legend { margin-left: 0; }
   .live-stats { margin-left: 0; width: 100%; }
   .live-controls { margin-left: 0; width: 100%; }
@@ -1218,7 +1219,7 @@ main {
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
   .hx-stage { margin-top: 14px; }
-  #graph { height: 640px; } /* C3: 320 -> 640 (verdoppelt) */
+  #graph { height: 480px; } /* Höhenleiter-Endstufe: 720 → 640 → 560 → 480 */
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
   .log-list { max-height: 340px; }

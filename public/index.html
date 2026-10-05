@@ -85,9 +85,9 @@
 
   <main>
     <div id="view-dashboard" role="tabpanel" aria-labelledby="view-tab-dashboard">
-      <!-- Console-Raster (ab 1024 px zwei Spalten): links Feed- und Log-Panel
-           untereinander, rechts die Graph-Bühne. Unterhalb des Breakpoints
-           einspaltig wie zuvor. Alle Panel-IDs/Klassen unverändert; das
+      <!-- Console-Raster (einspaltig in allen Breakpoints): Feed- und
+           Log-Panel oben, die Graph-Bühne full-width darunter. Alle
+           Panel-IDs/Klassen unverändert; das
            Analyse-Log ist vom Feed-Panel in ein eigenes Panel umgezogen
            (Markup-IDs #log-title/#log-severity/#log-rule/#log-download/
            #analysis-log/#log-empty bleiben). -->
@@ -106,16 +106,17 @@
         </div>
       </div>
 
-      <!-- Modus-Auswahl (Standard: Historie = Server-Fenster via GET
-           /api/block-window + GET /api/flow-state, 60-s-Polling, kein
-           Besucher-WSS). Live ist Opt-in: direkter WSS zu honeycluster.io,
+      <!-- Modus-Auswahl (Standard: Live = direkter WSS zu honeycluster.io,
            ein ledger-Kommando pro Block über den lib-Rate-Limiter, ohne
-           Stichproben-Sampling. -->
+           Stichproben-Sampling; Fail-closed-Fallback auf das Server-Fenster
+           via GET /api/block-window + GET /api/flow-state, 60-s-Polling,
+           wenn der Rate-Limiter nicht erreichbar ist). Archiv = das
+           persistierte Server-Fenster. -->
       <div class="feed-controls">
         <span class="filter-label" id="mode-label" data-i18n="mode.label">Data source</span>
         <div class="graph-tabs feed-mode-tabs" role="tablist" aria-labelledby="mode-label">
-          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-history" aria-selected="true" data-i18n="mode.history" data-i18n-title="mode.historyAria" title="Show the persisted block window (24 h / 3 d / 7 d) from the server">History</button>
-          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-live" aria-selected="false" data-i18n="mode.live" data-i18n-title="mode.liveAria" title="Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling">Live</button>
+          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-history" aria-selected="false" data-i18n="mode.archive" data-i18n-title="mode.archiveAria" title="Show the persisted block window (24 h / 3 d / 7 d) from the server">Archive</button>
+          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-live" aria-selected="true" data-i18n="mode.live" data-i18n-title="mode.liveAria" title="Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling">Live</button>
         </div>
         <label class="filter-label" for="feed-range" data-i18n="range.label">Window</label>
         <select id="feed-range" class="filter-select">
@@ -219,7 +220,11 @@
     <span class="foot-note" data-i18n="foot.note">Bait anonymity: seeds and bait addresses are never served by the server and never rendered by the client.</span>
   </footer>
 
-  <script src="https://unpkg.com/vis-network@10.1.2/standalone/umd/vis-network.min.js" integrity="sha384-RDdG1CLOxjNlTHh4JYx/rnAueaMHbkBHmeHwrEyljMQw3LF0it4SkuNotIY/FPxD" crossorigin="anonymous"></script>
+  <!-- vis-network wird nicht mehr eager geladen: app.js injiziert das lokale
+       Bundle (vendor/vis-network.min.js, gleicher sha384-Hash) lazy beim
+       ersten vis-Bedarf — die Seite ist damit ohne das 652-kB-Bundle
+       bedienbar. Kein Preload im Head: schwere Vendoren kommen erst nach
+       dem Erstanstrich (app.js, requestIdleCallback). -->
   <script type="module" src="i18n.mjs"></script>
   <script type="module" src="app.js"></script>
 </body>

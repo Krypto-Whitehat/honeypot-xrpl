@@ -3,8 +3,13 @@
 /* Honeypot XRPL – Frontend (ESM-Modul)
  *
  * Hauptansicht: BLOCK-FEED + AKTEUR-CLUSTERING, zweimodig (API-Vertrag v2,
- * 2026-10-02):
- *   - STANDARD 'history' (Serverdaten, KEIN automatischer Besucher-WSS):
+ * 2026-10-02; Live-Standard-Tilt 2026-10-05):
+ *   - STANDARD 'live' (direkter WSS, über den lib-Rate-Limiter gated):
+ *     Sobald lib/rate-gate.mjs eintrifft und der Nutzer nicht selbst gewählt
+ *     hat, kippt die Importkette auf Live (Tilt). Fail-closed: ist das Gate
+ *     nicht erreichbar, bleibt 'history' Standard (Server-Fenster).
+ *   - Fallback/Archiv 'history' (Serverdaten, kein Besucher-WSS; Knopf
+ *     'Archiv' im Feed-Panel, Haupt-Tab 'Historie' bleibt der View-Zugang):
  *     GET /api/block-window?range=24h|3d|7d liefert Stunden-Rollups
  *     (buckets) + geflaggte Blockdetails im Volltext (flagged) — der Feed
  *     zeigt die geflaggten Blöcke des Fensters, der Stundenchart die
@@ -14,7 +19,7 @@
  *     Polling 60 s, sichtbarkeits-gated; Fail-closed-200 ohne Persistenz
  *     wird als ehrlicher Leerzustand dargestellt (reason-Vergleich bleibt
  *     roh — Protokollwert, Muster public/history.js:361).
- *   - OPT-IN 'live' (Modus-Auswahl im Live-Panel): direkter WSS auf
+ *   - 'live' (Standard-Modus, Modus-Auswahl im Feed-Panel): direkter WSS auf
  *     wss://honeycluster.io (offiziell gelisteter Full-History-Server,
  *     config.json:3). Abo streams:['ledger'] liefert nur Header; pro Block
  *     wird GENAU EIN "ledger"-Kommando (transactions:true, expand:true)
@@ -53,15 +58,32 @@
 
 import { analyzeLedger, ruleCatalog } from '/lib/detector.mjs';
 /* Rate-Gate (lib/rate-gate.mjs via /lib-Whitelist api/lib-detector.js:16):
- * DOM-freier Token-Bucket für den Opt-in-LIVE-Modus. Dynamischer Import mit
+ * DOM-freier Token-Bucket für den LIVE-Modus. Dynamischer Import mit
  * Null-Guard — ohne Gate startet der Live-Modus NICHT (fail-closed,
- * Konsole-Meldung), der Server-Standardbetrieb bleibt unberührt. */
+ * Konsole-Meldung), der Server-Betrieb bleibt unberührt.
+ * Live ist heute der STANDARD-Feed-Modus: Sobald das Gate eintrifft, wird
+ * auf Live gekippt (Tilt), sofern der Nutzer noch keinen Knopf gedrückt hat
+ * (feedModeUserChoice). Fällt der Gate-Import, bleibt der Server-Modus
+ * (history) Standard — dokumentiertes Fail-closed. */
 let rateGateFactory = null;
+let feedModeUserChoice = false;    // Nutzer-Klick vor Gate-Eintreffen: kein Tilt mehr
 import('/lib/rate-gate.mjs')
   .then((m) => {
     rateGateFactory = typeof m.createRateGate === 'function' ? m.createRateGate : null;
+    if (!feedModeUserChoice) void setFeedMode('live');
   })
-  .catch(() => { /* Gate offline (z. B. 404): Live-Modus bleibt gesperrt */ });
+  .catch(() => {
+    /* Gate offline (z. B. 404): Live-Modus bleibt gesperrt, Server-Modus
+     * (feedMode 'history') bleibt Standard. KEIN setFeedMode('history') —
+     * bei feedMode='history' early-returnt setFeedMode (if (target ===
+     * feedMode) return) und die im Markup auf Live stehende aria-selected
+     * würde nie zurückgesetzt (UI zeigte 'Live' ausgewählt bei Modus
+     * history, Archiv-Klick No-op). Deshalb aria-Direktsync nach dem
+     * Muster der aria-Zeilen in setFeedMode. */
+    document.getElementById('feed-mode-history').setAttribute('aria-selected', 'true');
+    document.getElementById('feed-mode-live').setAttribute('aria-selected', 'false');
+    console.warn(t('log.consoleLiveUnavailable'));
+  });
 /* i18n: statischer Import (durch vercel.json-Rewrite /i18n.mjs gedeckt).
  * EN/DE ist damit vor dem ersten Render garantiert initialisiert; ein 404
  * von /i18n.mjs würde das ganze Modul stoppen — bewusst die konsistentere
@@ -198,11 +220,11 @@ import('./account-check.js')
   })
   .catch(() => { /* Konto-Check offline (z. B. 404); View bleibt leer */ });
 
-/* Datenquellen-Modi (API-Vertrag v2, 2026-10-02):
- *   'history' (Standard): Server-Fenster GET /api/block-window?range=… +
- *   Cluster GET /api/flow-state — Polling 60 s, sichtbarkeits-gated, KEIN
- *   automatischer Besucher-WSS.
- *   'live' (Opt-in): WSS honeycluster.io, Abo Header-only, pro Block GENAU
+/* Datenquellen-Modi (API-Vertrag v2, 2026-10-02; Live-Standard-Tilt 2026-10-05):
+ *   'history' (Startwert + Fail-closed-Fallback, Knopf 'Archiv'):
+ *   Server-Fenster GET /api/block-window?range=… + Cluster GET /api/flow-state
+ *   — Polling 60 s, sichtbarkeits-gated, kein Besucher-WSS.
+ *   'live' (Standard nach Gate-Eintreffen): WSS honeycluster.io, Abo Header-only, pro Block GENAU
  *   EIN ledger-Kommando (expand:true) über den lib-Rate-Limiter — ohne
  *   Sampling, ohne Hash-Auflösung. Die a.D. Kalibrierung
  *   (ANALYZE_EVERY_N_BLOCKS/MAX_RESOLVE/QUOTA_CALLS_PER_MIN, xrplcluster-
@@ -696,6 +718,54 @@ function isClusterNode(id) {
   return network.clustering.isCluster(id);
 }
 
+/* vis-network lazy (Muster globe.js:254-268 loadGlobeGl): der 652-kB-Bundle
+ * war bisher das einzige eager <script> im Head (index.html alt:222) und
+ * blockierte den Erstanstrich. Jetzt: lokales Bundle vendor/vis-network.min.js
+ * (sha384 identisch zum bisherigen CDN-Pin — Download in dieser Session
+ * verifiziert), injiziert erst beim ersten vis-Bedarf. Singleton-Promise;
+ * nach Fehler kein Blink-Loop (initGraph-Guard schreibt die Fehlermeldung). */
+const VIS_NETWORK_URL = 'vendor/vis-network.min.js';
+const VIS_NETWORK_INTEGRITY = 'sha384-RDdG1CLOxjNlTHh4JYx/rnAueaMHbkBHmeHwrEyljMQw3LF0it4SkuNotIY/FPxD';
+let visPromise = null;
+function loadVisNetwork() {
+  if (typeof vis !== 'undefined') return Promise.resolve(true);
+  if (visPromise) return visPromise;
+  visPromise = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = VIS_NETWORK_URL;
+    s.integrity = VIS_NETWORK_INTEGRITY; // SRI wie beim bisherigen CDN-Pin
+    s.crossOrigin = 'anonymous';
+    s.async = true;
+    s.onload = () => resolve(typeof vis !== 'undefined');
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+  });
+  return visPromise;
+}
+
+/* Erster sichtbarer vis-Bedarf (Graph-Tab live/cluster) ODER eintreffende
+ * Daten (rebuildClusterGraph / applyFlowStateView → renderLiveGraph):
+ * Bundle laden, Netz konstruieren, dann lastClusterGraph SOFORT nachrendern
+ * — ohne diesen Re-Render bliebe die Bühne bis zum nächsten Poll-Takt leer.
+ * bindGraph bleibt beim Start (seine Handler brauchen vis nicht). */
+let visGraphInit = false;
+function ensureVisGraph() {
+  if (network || visGraphInit) return;
+  visGraphInit = true;
+  void loadVisNetwork().then(() => {
+    if (network) return;
+    initGraph(); // vis-undefined-Fehlerpfad: initGraph-Guard (graph.visError)
+    if (network) {
+      network.resize();
+      if (lastClusterGraph) renderLiveGraph(lastClusterGraph);
+    }
+  }).catch(() => {
+    /* Nachrendern kann werfen (z. B. vis-interne Kanten auf fehlende Knoten
+     * nach dem Knoten-Deckel). visGraphInit bleibt true — kein Retry-Loop;
+     * der nächste Poll-Takt (renderLiveGraph/setGraphTab) rendert erneut. */
+  });
+}
+
 function initGraph() {
   if (typeof vis === 'undefined') {
     document.getElementById('graph').innerHTML =
@@ -748,11 +818,38 @@ function initGraph() {
 /* Rohkanten/-knoten inkrementell aktualisieren (Muster aus dem bisherigen
  * renderGraph): updaten, hinzufügen, verschwundene entfernen – kein Flackern
  * bei den ~4-Sekunden-Ledger-Ereignissen. Läuft immer im Rohzustand
- * (vor dem Clustering bzw. im Live-Tab). */
-function updateRawGraph(cg) {
+ * (vor dem Clustering bzw. im Live-Tab).
+ * maxNodes (optional, Default null = uncapped): Live-Bühnen-Deckel gegen
+ * Physik-Einbruch (Diagnose: 2,8 fps ohne Cap). Der Cap darf NICHT in den
+ * Cluster-Pfad: applyClustering ruft updateRawGraph und clustering.cluster
+ * aggregiert genau diese nodesDS — ein Cap dort würde Cluster-Bubbles auf
+ * die Top-N-Teilmenge verzerren. Deshalb uncapped aus applyClustering,
+ * capped nur an den Live-Aufrufstellen (renderLiveGraph/setGraphTab).
+ * Auswahl nach Schwere (malicious > suspect > info), dann Drops-Summe. */
+const LIVE_GRAPH_MAX_NODES = 600;
+const SEV_CAP_RANK = { malicious: 2, suspect: 1, info: 0 };
+function updateRawGraph(cg, maxNodes = null) {
   if (!network) return;
-  const rawNodes = Array.isArray(cg.nodes) ? cg.nodes : [];
-  const rawEdges = Array.isArray(cg.edges) ? cg.edges : [];
+  let rawNodes = Array.isArray(cg.nodes) ? cg.nodes : [];
+  const rawEdgesAll = Array.isArray(cg.edges) ? cg.edges : [];
+  let cappedNodeIds = null;
+  if (Number.isInteger(maxNodes) && maxNodes > 0 && rawNodes.length > maxNodes) {
+    rawNodes = [...rawNodes].sort((a, b) => {
+      const sa = SEV_CAP_RANK[String(a?.severity ?? 'info')] ?? 0;
+      const sb = SEV_CAP_RANK[String(b?.severity ?? 'info')] ?? 0;
+      if (sa !== sb) return sb - sa;
+      const da = Math.max(0, Number(a?.inDrops ?? 0)) + Math.max(0, Number(a?.outDrops ?? 0));
+      const db = Math.max(0, Number(b?.inDrops ?? 0)) + Math.max(0, Number(b?.outDrops ?? 0));
+      if (da !== db) return db - da;
+      return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+    }).slice(0, maxNodes);
+    // Kanten hängen an Knoten: ohne Filter würden Kanten auf gekappte
+    // Knoten im DataSet schweben (vis-Warnung, Phantom-Kanten).
+    cappedNodeIds = new Set(rawNodes.map((n) => String(n.id)));
+  }
+  const rawEdges = cappedNodeIds
+    ? rawEdgesAll.filter((e) => cappedNodeIds.has(String(e.from)) && cappedNodeIds.has(String(e.to)))
+    : rawEdgesAll;
 
   const nextNodes = rawNodes.map((n) => {
     const role = ROLE_COLORS[n.role] ? n.role : 'unknown';
@@ -890,12 +987,13 @@ function openAllClusters() {
 }
 
 function renderLiveGraph(cg) {
-  if (!network || !cg) return;
+  if (!cg) return;
+  if (!network) { ensureVisGraph(); return; } // eintreffende Daten: lazy-Laden anstoßen; ensureVisGraph rendert lastClusterGraph nach dem Init selbst
   if (activeGraphTab === 'cluster') {
-    applyClustering(cg);
+    applyClustering(cg); // Cluster-Pfad bleibt uncapped: clustering.cluster aggregiert genau diese nodesDS
     return;
   }
-  updateRawGraph(cg);
+  updateRawGraph(cg, LIVE_GRAPH_MAX_NODES); // Live-Bühne: Knoten-Deckel (Physik-Einbruch-Schutz)
 }
 
 function setGraphTab(tab) {
@@ -938,18 +1036,18 @@ function setGraphTab(tab) {
   if (globeMod && typeof globeMod.deactivate === 'function') globeMod.deactivate();
   graphEl.hidden = false;
   document.getElementById('graph-png').hidden = false; // vis-Bühne: Export wieder sichtbar
-  if (!network) return; // vis offline: Bühnenwechsel genügt, Fehlermeldung bleibt sichtbar
+  if (!network) { ensureVisGraph(); return; } // vis noch nicht init: Bühnenwechsel genügt, lazy-Laden angestoßen; Nachrendern erfolgt in ensureVisGraph
   requestAnimationFrame(() => { try { network.resize(); } catch { /* egal */ } });
   if (tab === 'cluster') {
     listEl.hidden = !hasClusters;
     emptyEl.hidden = hasClusters;
-    if (lastClusterGraph) applyClustering(lastClusterGraph);
+    if (lastClusterGraph) applyClustering(lastClusterGraph); // uncapped (Cluster-Bubbles brauchen die volle Knotenmenge)
   } else {
     listEl.hidden = true;
     emptyEl.hidden = true;
     openAllClusters();
     network.setOptions({ physics: PHYSICS_LIVE });
-    if (lastClusterGraph) updateRawGraph(lastClusterGraph);
+    if (lastClusterGraph) updateRawGraph(lastClusterGraph, LIVE_GRAPH_MAX_NODES); // Live-Bühne: capped
   }
 }
 
@@ -1334,7 +1432,7 @@ function bindViews() {
 }
 
 /* ------------------------------------------------------------------ */
-/* BLOCK-FEED: Server-Fenster (Standard) + Opt-in-LIVE-WSS            */
+/* BLOCK-FEED: LIVE-WSS (Standard-Tilt) + Server-Fenster 'Archiv' (Fallback) */
 /* ------------------------------------------------------------------ */
 
 const RULE_CATALOG = ruleCatalog();
@@ -1394,7 +1492,8 @@ async function rebuildClusterGraph() {
 }
 
 let lastLedgerAt = 0;
-let feedMode = 'history';           // 'history' (Standard: Serverdaten) | 'live' (Opt-in WSS)
+let feedMode = 'history';           // Startwert bleibt 'history' (Serverdaten als Fail-closed-Fallback);
+                                    // der Live-Tilt erfolgt in der Rate-Gate-Importkette (Zeile ~66)
 let feedRange = '24h';              // Fenster des Server-Modus (24h|3d|7d)
 let liveMode = 'init';              // Live-Modus intern: 'init' | 'wss'
 // honeycluster drosselt JSON-Kommandos (Nutzer-Angabe: 10 req/s steady,
@@ -1974,6 +2073,11 @@ async function pollFlowState() {
 }
 
 async function serverPollTick() {
+  // Live-Standard: das Server-Fenster wird nur im Archiv-Modus gebraucht —
+  // der 60-s-Poll spart sonst ~3,2 MB dekodierte Antworten pro Minute
+  // (block-window + flow-state). setFeedMode('history') holt das Fenster
+  // sofort nach (void serverPollTick() im history-Zweig).
+  if (feedMode !== 'history') return;
   if (typeof document !== 'undefined' && document && document.visibilityState !== 'visible') return;
   if (Date.now() < serverPollBackoffUntil) return;
   let failed = false;
@@ -2009,7 +2113,7 @@ function startServerPolling() {
   serverPollTimer = setInterval(() => { void serverPollTick(); }, SERVER_POLL_MS);
 }
 
-/* ---------- Modus-Umschaltung (Historie-Standard / Live-Opt-in) ---------- */
+/* ---------- Modus-Umschaltung (Live-Standard / Archiv-Fallback) ---------- */
 async function setFeedMode(mode) {
   const target = mode === 'live' ? 'live' : 'history';
   if (target === feedMode) return;
@@ -2028,8 +2132,8 @@ async function setFeedMode(mode) {
     setConn(true, connLabel());
     void serverPollTick(); // sofort frisches Fenster statt erst nach dem Timer-Takt
   } else {
-    // Live ist Opt-in: ohne Rate-Gate (lib/rate-gate.mjs nicht erreichbar)
-    // startet der Modus nicht — fail-closed, Server-Modus bleibt.
+    // Gate-Check (unverändert): ohne Rate-Gate (lib/rate-gate.mjs nicht
+    // erreichbar) startet Live nicht — fail-closed zurück auf Server-Modus.
     if (!rateGateFactory) {
       console.warn(t('log.consoleLiveUnavailable'));
       setFeedMode('history');
@@ -2461,8 +2565,16 @@ function watchdogLive() {
 }
 
 function bindFeed() {
-  document.getElementById('feed-mode-history').addEventListener('click', () => setFeedMode('history'));
-  document.getElementById('feed-mode-live').addEventListener('click', () => setFeedMode('live'));
+  // Nutzer-Klick setzt feedModeUserChoice: ein später eintreffendes
+  // Rate-Gate übersteuert die Wahl nicht mehr (kein Tilt gegen den Klick).
+  document.getElementById('feed-mode-history').addEventListener('click', () => {
+    feedModeUserChoice = true;
+    setFeedMode('history');
+  });
+  document.getElementById('feed-mode-live').addEventListener('click', () => {
+    feedModeUserChoice = true;
+    setFeedMode('live');
+  });
   document.getElementById('feed-range').addEventListener('change', (e) => {
     const v = String(e.target.value ?? '24h');
     feedRange = ['24h', '3d', '7d'].includes(v) ? v : '24h';
@@ -2486,7 +2598,10 @@ function bindLive() {
 /* Start (Modulskript: DOM ist beim Ausführen bereits geparst)         */
 /* ------------------------------------------------------------------ */
 
-initGraph();
+// initGraph() läuft NICHT mehr beim Start: vis-network wird lazy geladen
+// (ensureVisGraph — erster Graph-Tab-Bedarf live/cluster oder eintreffende
+// Daten). bindGraph bleibt hier: seine Handler (Tab-Klicks, Karten, Export)
+// brauchen vis nicht.
 bindGraph();
 bindViews();
 setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
@@ -2494,9 +2609,13 @@ bindLive();
 bindFeed();
 bindAddrActions();
 document.getElementById('stat-network').textContent = t('net.mainnet');
-// Standard-Dashboard: Serverdaten (60-s-Poll flow-state + block-window),
-// KEIN automatischer Besucher-WSS. Der Live-Watchdog läuft nur, wenn der
-// Opt-in-LIVE-Modus aktiv ist.
+// Standard-Feed ist LIVE (Tilt erfolgt in der Rate-Gate-Importkette,
+// sobald lib/rate-gate.mjs eintrifft und der Nutzer noch nicht gewählt hat).
+// Dieser Startblock holt trotzdem sofort Serverdaten (60-s-Poll flow-state +
+// block-window): Fail-closed-Fallback — ist der Gate-Import nicht erreichbar,
+// bleibt history Standard und die Daten stehen bereits; im Live-Modus dient
+// das Fenster als Fallback über den Archiv-Knopf. Der Live-Watchdog läuft
+// nur, wenn der Live-Modus aktiv ist.
 setConn(true, connLabel());
 void serverPollTick();
 startServerPolling();
@@ -2536,3 +2655,30 @@ document.addEventListener('hx:langchange', () => {
   if (historyMod && typeof historyMod.refresh === 'function') historyMod.refresh();
   if (checkMod && typeof checkMod.reRender === 'function') checkMod.reRender();
 });
+
+/* ---------- Idle-Preload schwerer Vendoren erst nach Erstanstrich ----------
+ * globe.gl (1,9 MB), 3d-force-graph (1,3 MB), topojson-client (7 kB) —
+ * zusammen 3,2 MB / ~868 kB gzip. Kein Preload im HTML-Head (würde mit dem
+ * FCP konkurrieren); nach window 'load' + requestIdleCallback (Fallback
+ * setTimeout ~1 s) ist das Leerlauffenster frei und die Bundles liegen im
+ * HTTP-Cache, wenn Globe-/3D-Tab sie lazy anfordern. crossOrigin='anonymous'
+ * muss auf dem Preload stehen, sonst matcht der Eintrag nicht zum späteren
+ * CORS-Modus-Fetch der Loader (globe.js loadGlobeGl/loadTopojson,
+ * drilldown.js loadForceGraph3D — alle mit integrity + crossOrigin). */
+function preloadHeavyVendors() {
+  const schedule = typeof requestIdleCallback === 'function'
+    ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
+    : (fn) => setTimeout(fn, 1000);
+  schedule(() => {
+    for (const href of ['vendor/globe.gl.min.js', 'vendor/3d-force-graph.min.js', 'vendor/topojson-client.min.js']) {
+      const l = document.createElement('link');
+      l.rel = 'preload';
+      l.as = 'script';
+      l.href = href;
+      l.crossOrigin = 'anonymous';
+      document.head.appendChild(l);
+    }
+  });
+}
+if (document.readyState === 'complete') preloadHeavyVendors();
+else window.addEventListener('load', preloadHeavyVendors, { once: true });

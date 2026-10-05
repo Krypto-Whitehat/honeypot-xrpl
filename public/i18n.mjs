@@ -191,8 +191,8 @@ export const DICT = {
 
     /* app.js — Server-Fenster-Modus (Standard) und Opt-in-LIVE */
     'mode.label': 'Data source',
-    'mode.history': 'History',
-    'mode.historyAria': 'Show the persisted block window (24 h / 3 d / 7 d) from the server',
+    'mode.archive': 'Archive',
+    'mode.archiveAria': 'Show the persisted block window (24 h / 3 d / 7 d) from the server',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling',
     'range.label': 'Window',
@@ -568,8 +568,8 @@ export const DICT = {
 
     /* app.js — Server-Fenster-Modus (Standard) und Opt-in-LIVE */
     'mode.label': 'Datenquelle',
-    'mode.history': 'Historie',
-    'mode.historyAria': 'Persistiertes Block-Fenster (24 h / 3 d / 7 d) vom Server anzeigen',
+    'mode.archive': 'Archiv',
+    'mode.archiveAria': 'Persistiertes Block-Fenster (24 h / 3 d / 7 d) vom Server anzeigen',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direkter WSS zu honeycluster.io – ein Ledger-Kommando pro Block, ohne Stichprobe',
     'range.label': 'Fenster',

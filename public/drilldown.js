@@ -36,7 +36,13 @@
 
 import { t, fmtNum, sevText } from './i18n.mjs';
 
-const FORCE_GRAPH_URL = 'https://unpkg.com/3d-force-graph@1.80.0/dist/3d-force-graph.min.js';
+// Lokales Vendoren (Performance-Umbau 2026-10-05): 3d-force-graph@1.80.0
+// liegt in public/vendor/ (same-origin, vercel.json Rewrite /vendor/*). Der
+// sha384-Hash wurde vor dem Vendoren gegen die exakten Bytes der gepinnten
+// unpkg-URL verifiziert (1.313.897 B) — damit trägt auch dieses Bundle SRI
+// (vorher: nur src+async, die einzige SRI-Lücke).
+const FORCE_GRAPH_URL = 'vendor/3d-force-graph.min.js';
+const FORCE_GRAPH_INTEGRITY = 'sha384-Y7bC2PBKu8ujxtvo5+Z61OeGdSVRzFsYWBK4i5dnL/U6aFDTodk61qOUkTfInaxS';
 
 export function initClusterDrilldown(ctx) {
   const esc = ctx.esc;
@@ -90,6 +96,19 @@ export function initClusterDrilldown(ctx) {
   let currentClusterId = null;  // cluster.id — nie der Listen-Index
   let isOpen = false;
   let renderToken = 0;          // Guard gegen überlappende async-Render
+
+  // Konten-Tabelle mit Zeilen-Deckel (Diagnose: 25.458 <tr>, 329.289
+  // DOM-Knoten, 6.118 ms Klick→Canvas). Standard 200 Zeilen, 'Mehr laden'
+  // blendet je 200 weitere ein; openCluster setzt das Limit zurück.
+  const TABLE_MAX_ROWS = 200;
+  const TABLE_STEP = 200;
+  let tableRowLimit = TABLE_MAX_ROWS;
+  let lastTableNodes = null;    // letzter renderTable-Input für 'Mehr laden'
+  let lastTableEl = null;       // zugehöriges Container-Element
+
+  // 3D-Graph-Deckel (build3D): Top-N Knoten nach Drops-Summe + ein
+  // Aggregatknoten für die nicht dargestellten Knoten.
+  const GRAPH3D_MAX_NODES = 300;
 
   // 3d-force-graph: Singleton-Ladezustand (loadPromise + Injektions-Flag)
   let fg3dPromise = null;
@@ -154,6 +173,8 @@ export function initClusterDrilldown(ctx) {
     fg3dPromise = new Promise((resolve) => {
       const s = document.createElement('script');
       s.src = FORCE_GRAPH_URL;
+      s.integrity = FORCE_GRAPH_INTEGRITY; // SRI wie globe.js: Hash-Mismatch → Browser verwirft
+      s.crossOrigin = 'anonymous';
       s.async = true;
       s.onload = () => resolve(typeof window.ForceGraph3D === 'function');
       s.onerror = () => resolve(false);
@@ -230,6 +251,15 @@ export function initClusterDrilldown(ctx) {
       highlightSet.delete(String(row.dataset.addr));
       if (fg3d) fg3d.nodeColor(nodeColorAccessor());
     });
+    // 'Mehr laden' in der Konten-Tabelle (delegiert wie die addr-Actions im
+    // Host): erhöht das Zeilenlimit und baut die Tabelle aus dem zuletzt
+    // gerenderten Input neu auf.
+    surface.addEventListener('click', (e) => {
+      const btn = e.target.closest('.cluster-table-more');
+      if (!btn) return;
+      tableRowLimit += TABLE_STEP;
+      if (lastTableNodes && lastTableEl) renderTable(lastTableNodes, lastTableEl);
+    });
   }
 
   function getFocusables() {
@@ -268,6 +298,7 @@ export function initClusterDrilldown(ctx) {
     originMembers = null; // Fallback-ANKER neu einfrieren (Befund 2026-09-30)
     exportPayload = null; // A4: Export-Grundlage gilt nur für den nächsten Vollrender
     exportToken += 1;     // laufende async-Nachprüfung verwerfen
+    tableRowLimit = TABLE_MAX_ROWS; // Tabellen-Deckel pro Cluster neu beginnen
     clearTakeoverNotice();
     const staleNote = overlay.querySelector('.cluster-modal-stale');
     if (staleNote) staleNote.hidden = true;
@@ -819,10 +850,15 @@ export function initClusterDrilldown(ctx) {
   /* ---------------- Konten-Tabelle ---------------- */
 
   function renderTable(clusterNodes, el) {
-    const rows = [...clusterNodes]
+    lastTableNodes = clusterNodes;
+    lastTableEl = el;
+    const sorted = [...clusterNodes]
       .sort((a, b) =>
         ((b.inDrops ?? 0) + (b.outDrops ?? 0)) - ((a.inDrops ?? 0) + (a.outDrops ?? 0))
-        || String(a.id).localeCompare(String(b.id)))
+        || String(a.id).localeCompare(String(b.id)));
+    const visibleRows = sorted.slice(0, tableRowLimit);
+    const remaining = sorted.length - visibleRows.length;
+    const rows = visibleRows
       .map((n) => {
         const id = String(n.id);
         const full = isFullShownAddr(id);
@@ -848,6 +884,12 @@ export function initClusterDrilldown(ctx) {
           <td>${actions}</td>
         </tr>`;
       }).join('');
+    // Deckel-Button: ehrlicher Hinweis auf die noch nicht gerenderten Zeilen
+    // (Caption nennt weiterhin die Gesamtzahl). Label nutzt den bestehenden
+    // i18n-Key 'feed.loadMore' (EN 'Load more' / DE 'Mehr laden').
+    const moreBtn = remaining > 0
+      ? `<div class="feed-more-row"><button type="button" class="download-btn cluster-table-more" data-i18n="feed.loadMore" aria-label="${esc(t('feed.loadMoreAria'))}">${esc(t('feed.loadMore'))} (${num(remaining)})</button></div>`
+      : '';
     el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.tableTitle'))}</h3>
       <div class="cluster-table-wrap" tabindex="0" role="region" aria-label="${esc(t('modal.tableWrapAria'))}">
         <table class="cluster-table">
@@ -865,7 +907,7 @@ export function initClusterDrilldown(ctx) {
           </thead>
           <tbody>${rows}</tbody>
         </table>
-      </div>`;
+      </div>${moreBtn}`;
   }
 
   /* ---------------- Graph: 3D mit 2D-Ausweichansicht ---------------- */
@@ -914,14 +956,37 @@ export function initClusterDrilldown(ctx) {
 
   function build3D(clusterNodes, clusterEdges, graphEl, clusterId) {
     teardown2D();
+    // Deckel (Diagnose-Performance): Top-N Knoten nach Drops-Summe; die
+    // übrigen Knoten bündelt EIN Aggregatknoten (Label '+N', Drops-Summe
+    // der gebündelten Knoten). Der Aggregatknoten bekommt KEINE erfundenen
+    // Kanten — Kanten laufen ausschließlich zwischen gehaltenen Knoten.
+    let nodesIn = clusterNodes;
+    let linksIn = clusterEdges;
+    if (clusterNodes.length > GRAPH3D_MAX_NODES) {
+      const sorted = [...clusterNodes].sort((a, b) =>
+        ((b.inDrops ?? 0) + (b.outDrops ?? 0)) - ((a.inDrops ?? 0) + (a.outDrops ?? 0))
+        || String(a.id).localeCompare(String(b.id)));
+      const kept = sorted.slice(0, GRAPH3D_MAX_NODES);
+      const hidden = sorted.slice(GRAPH3D_MAX_NODES);
+      const keptIds = new Set(kept.map((n) => String(n.id)));
+      let hidIn = 0;
+      let hidOut = 0;
+      for (const n of hidden) {
+        hidIn += Math.max(0, Number(n.inDrops ?? 0));
+        hidOut += Math.max(0, Number(n.outDrops ?? 0));
+      }
+      nodesIn = [...kept, { id: '__aggregate__', role: 'unknown', inDrops: hidIn, outDrops: hidOut, aggregateCount: hidden.length }];
+      linksIn = clusterEdges.filter((e) => keptIds.has(String(e.from)) && keptIds.has(String(e.to)));
+    }
     const data = {
-      nodes: clusterNodes.map((n) => ({
+      nodes: nodesIn.map((n) => ({
         id: String(n.id),
         role: roleColors[n.role] ? n.role : 'unknown',
         inDrops: n.inDrops ?? 0,
         outDrops: n.outDrops ?? 0,
+        aggregateCount: n.aggregateCount ?? 0,
       })),
-      links: clusterEdges.map((e) => ({
+      links: linksIn.map((e) => ({
         source: String(e.from),
         target: String(e.to),
         type: String(e.type ?? ''),
@@ -954,7 +1019,9 @@ export function initClusterDrilldown(ctx) {
       }
       fg3d
         .backgroundColor('#ffffff')
-        .nodeLabel((n) => esc(displayAddr(n.id)))
+        // Aggregatknoten: zahlenmäßiges Label '+N' (sprachneutral, keine
+        // Adresse — der Knoten steht für N nicht einzeln gezeigte Knoten).
+        .nodeLabel((n) => esc(n.aggregateCount ? `+${n.aggregateCount}` : displayAddr(n.id)))
         .linkLabel((l) => {
           const from = l.source && typeof l.source === 'object' ? l.source.id : l.source;
           const to = l.target && typeof l.target === 'object' ? l.target.id : l.target;
