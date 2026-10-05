@@ -513,6 +513,20 @@ async function primeAddrHashes(cg, findings) {
     const a = String(f.address ?? '').trim();
     if (a && !addrHashCache.has(a)) targets.add(a);
   }
+  // Peeling-Ketten der Server-View: Ketten-Adressen und Brücken sitzen nicht
+  // immer in nodes/edges (Brücken erhalten bewusst keine Graph-Rolle) — ohne
+  // sie zu hashen blieben ihre Ketten-Chips in der Kurzform (Befund
+  // 05.10.2026: Flow-State-Karten zeigten 7 gekürzte chain-nodes).
+  for (const c of cg?.clusters ?? []) {
+    for (const ch of Array.isArray(c?.peelingChains) ? c.peelingChains : []) {
+      const seeds = [String(ch?.seed ?? '').trim()];
+      const addrs = (Array.isArray(ch?.addresses) ? ch.addresses : []).map((a) => String(a ?? '').trim());
+      const bridges = (Array.isArray(ch?.bridges) ? ch.bridges : []).map((a) => String(a ?? '').trim());
+      for (const a of [...seeds, ...addrs, ...bridges]) {
+        if (a && !addrHashCache.has(a)) targets.add(a);
+      }
+    }
+  }
   const list = [...targets].slice(0, 4000);
   if (list.length) await Promise.all(list.map((a) => hashOf(a)));
 }
@@ -1878,9 +1892,8 @@ function renderWindowFeed() {
  * rolesByAddress statt memberAddresses; memberAddresses wird für die
  * bestehenden Konsumenten (renderClusterList, drilldown, globe) deterministisch
  * aus rolesByAddress abgeleitet. */
-function applyFlowStateView(view) {
-  const clusters = (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {
-    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
+async function applyFlowStateView(view) {
+  const clusters = (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
     // lib/flow-state.mjs:228) und rolesByAddress als Adresse->Rolle.
     // clusterCardHtml (lib/cluster-Markup des Hosts) erwartet die
     // Adresse->Rolle-Form — sie wird aus rolesByAddress abgeleitet, die
@@ -1926,6 +1939,10 @@ function applyFlowStateView(view) {
     }
   }
   lastClusterGraph = { nodes, edges, clusters };
+  // Vor dem Rendern hashen (displayFindingAddr/chain-Chips entscheiden
+  // synchron und fail-closed): ohne Priming blieben Flow-State-Karten in der
+  // Kurzform (Befund 05.10.2026).
+  await primeAddrHashes(lastClusterGraph, []);
   renderLiveGraph(lastClusterGraph);
   renderClusterList(clusters);
   if (drilldown && typeof drilldown.refresh === 'function') drilldown.refresh();
@@ -1953,7 +1970,7 @@ async function pollFlowState() {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const body = await res.json();
   flowData = body;
-  if (feedMode === 'history') applyFlowStateView(body);
+  if (feedMode === 'history') await applyFlowStateView(body);
 }
 
 async function serverPollTick() {
@@ -1993,7 +2010,7 @@ function startServerPolling() {
 }
 
 /* ---------- Modus-Umschaltung (Historie-Standard / Live-Opt-in) ---------- */
-function setFeedMode(mode) {
+async function setFeedMode(mode) {
   const target = mode === 'live' ? 'live' : 'history';
   if (target === feedMode) return;
   feedMode = target;
@@ -2007,7 +2024,7 @@ function setFeedMode(mode) {
     document.getElementById('block-feed').innerHTML = '';
     windowRenderSig = null;
     renderWindowFeed();
-    if (flowData) applyFlowStateView(flowData);
+    if (flowData) await applyFlowStateView(flowData);
     setConn(true, connLabel());
     void serverPollTick(); // sofort frisches Fenster statt erst nach dem Timer-Takt
   } else {
