@@ -14,13 +14,31 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23f5a623' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23f5a623'/%3E%3C/svg%3E">
 </head>
 <body data-a6>
+  <!-- App-Kopfzeile (Console-Shell): links Marke, rechts Status-Cluster —
+       Verbindungs-LED (#conn/#conn-dot, app.js setConn), Netzwerk-Chip und
+       Uhr (#stat-network/#stat-last) — angereiht die Kopf-KPIs
+       (#stat-malicious/#stat-suspect/#stat-events, Mono tabular-nums),
+       ganz rechts der Sprachumschalter. Alle IDs unverändert. -->
   <header class="topbar">
     <div class="brand">
       <h1>Honeypot&nbsp;XRPL</h1>
       <p class="sub" data-i18n="brand.sub">Live ledger analysis and threat dashboard for the XRPL community</p>
     </div>
 
+    <div class="conn" id="conn" role="status">
+      <span class="conn-dot" id="conn-dot"></span>
+      <span id="conn-text" data-i18n="conn.init">Establishing live connection …</span>
+    </div>
+
     <div class="stats" id="stats" data-i18n-aria="stats.aria">
+      <div class="stat stat-network">
+        <span class="stat-value" id="stat-network">–</span>
+        <span class="stat-label" data-i18n="stat.network">Network</span>
+      </div>
+      <div class="stat stat-last">
+        <span class="stat-value stat-value-small" id="stat-last">–</span>
+        <span class="stat-label" data-i18n="stat.last">As of</span>
+      </div>
       <div class="stat stat-malicious">
         <span class="stat-value" id="stat-malicious">–</span>
         <span class="stat-label" data-i18n="stat.malicious">Findings malicious (live)</span>
@@ -33,32 +51,22 @@
         <span class="stat-value" id="stat-events">–</span>
         <span class="stat-label" data-i18n="stat.events">Transactions (live)</span>
       </div>
-      <div class="stat stat-network">
-        <span class="stat-value" id="stat-network">–</span>
-        <span class="stat-label" data-i18n="stat.network">Network</span>
-      </div>
-      <div class="stat stat-last">
-        <span class="stat-value stat-value-small" id="stat-last">–</span>
-        <span class="stat-label" data-i18n="stat.last">As of</span>
-      </div>
-    </div>
-
-    <div class="conn" id="conn" role="status">
-      <span class="conn-dot" id="conn-dot"></span>
-      <span id="conn-text" data-i18n="conn.init">Establishing live connection …</span>
     </div>
 
     <div class="lang-switch" id="lang-switch"></div>
   </header>
 
-  <!-- Hero-Bühne (Astra-6 .a6-stage-Muster, Profil lab_graphite): eine
-       ruhige, hochkontrastreiche Bühne über den Views; die KPI-Werte sind
+  <!-- Live-Statusleiste statt Landing-Hero (Astra-6 .a6-stage-Muster, Profil
+       lab_graphite): schmale Console-Kopfzone über den Views — kurzer Titel,
+       kurzer Lead, KPI-Zähler als Tachometer-Zeile. Die KPI-Werte sind
        dieselben Live-Zähler wie in der Kopfstatistik — keine erfundenen
-       Zahlen, keine duplizierten IDs. -->
+       Zahlen, keine duplizierten IDs. e3-Erhebung und der einzige Glow der
+       Seite wohnen auf genau dieser einen Bühne (lab_graphite.avoid: kein
+       Glow auf jeder Karte). -->
   <section class="hx-stage" aria-labelledby="hx-title">
     <div class="hx-stage-copy">
       <h2 class="hx-title" id="hx-title" data-i18n="hero.title">Live threat radar for the XRP Ledger</h2>
-      <p class="hx-lead" data-i18n="hero.lead">Every validated ledger block is analyzed in real time — malware memos, drainer sweeps, dusting and fake-NFT patterns are detected and the actors behind them are grouped into clusters.</p>
+      <p class="hx-lead" data-i18n="hero.lead">Every validated ledger block is analyzed in real time — findings and clusters, live from the public ledger.</p>
     </div>
     <div class="hx-kpis" data-i18n-aria="hero.kpisAria">
       <span class="hx-kpi hx-kpi-malicious"><span class="hx-kpi-value" id="hx-kpi-malicious">0</span><span class="hx-kpi-label" data-i18n="hero.kpiMalicious">malicious</span></span>
@@ -77,6 +85,14 @@
 
   <main>
     <div id="view-dashboard" role="tabpanel" aria-labelledby="view-tab-dashboard">
+      <!-- Console-Raster (ab 1024 px zwei Spalten): links Feed- und Log-Panel
+           untereinander, rechts die Graph-Bühne. Unterhalb des Breakpoints
+           einspaltig wie zuvor. Alle Panel-IDs/Klassen unverändert; das
+           Analyse-Log ist vom Feed-Panel in ein eigenes Panel umgezogen
+           (Markup-IDs #log-title/#log-severity/#log-rule/#log-download/
+           #analysis-log/#log-empty bleiben). -->
+      <div class="console-grid">
+        <div class="console-col">
     <section class="panel" aria-labelledby="live-title">
       <div class="panel-head">
         <h2 id="live-title" data-i18n="live.title">Live Block Feed</h2>
@@ -116,9 +132,11 @@
       </div>
       <p class="graph-note" id="feed-note" role="status" aria-live="polite" hidden></p>
       <div id="feed-chart" hidden></div>
+    </section>
 
+    <section class="panel" aria-labelledby="log-title">
       <div class="log-head">
-        <h3 id="log-title" data-i18n="log.title">Analysis Log</h3>
+        <h2 id="log-title" data-i18n="log.title">Analysis Log</h2>
         <div class="live-controls">
           <label class="filter-label" for="log-severity" data-i18n="log.severity">Severity</label>
           <select id="log-severity" class="filter-select">
@@ -136,7 +154,9 @@
       <p class="empty" id="log-empty" data-i18n="log.empty">No rule hits in the observation window yet.</p>
       <p class="graph-note" data-i18n="feed.note">Fund addresses are exclusively actor addresses visible in the public ledger and are shown in full as soon as the bait-hash allowlist is loaded. Bait accounts never appear in the log – the server sanitizes them to labels and the client blocks them via the hash deny-list.</p>
     </section>
+        </div>
 
+        <div class="console-col">
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
         <h2 id="graph-title" data-i18n="graph.title">Activity Graph</h2>
@@ -181,6 +201,8 @@
 
       <p class="graph-note" data-i18n="graph.note">Nodes are actors visible in the public ledger from the live analysis – addresses are shown in full as soon as the bait-hash allowlist is loaded (bait addresses always remain hidden via the hash deny-list). Clicking a cluster card or a cluster bubble opens the cluster detail view.</p>
     </section>
+        </div>
+      </div>
     </div>
 
     <section id="view-history" class="panel" role="tabpanel" aria-labelledby="view-tab-history" hidden>

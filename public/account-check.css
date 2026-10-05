@@ -9,6 +9,17 @@
    Touch-Ziele >= 44 px (Eingabefeld und Prüfen-Button explizit angehoben —
    .download-btn liegt global bei 40 px). */
 
+/* ---------------- Panel-Kopf im Console-Look ----------------
+   Der Kopf des Konto-Check-Panels (von account-check.js als .panel-head
+   erzeugt) erhält eine 1px-Ink-Trennlinie — Console-Muster wie die
+   Dashboard-Panels. Scoped auf #check-root, damit die Dashboard-Panel-Köpfe
+   unverändert bleiben; Markup-IDs unverändert. */
+
+#check-root .panel-head {
+  border-bottom: 1px solid var(--a6-line-strong);
+  padding-bottom: 12px;
+}
+
 /* ---------------- Formular ---------------- */
 
 .check-form {

@@ -52,9 +52,9 @@ export const DICT = {
     'stat.last': 'As of',
     'conn.init': 'Establishing live connection …',
 
-    /* index.html — Hero-Bühne (.hx-stage) */
+    /* index.html — Live-Statusleiste (.hx-stage) */
     'hero.title': 'Live threat radar for the XRP Ledger',
-    'hero.lead': 'Every validated ledger block is analyzed in real time — malware memos, drainer sweeps, dusting and fake-NFT patterns are detected and the actors behind them are grouped into clusters.',
+    'hero.lead': 'Every validated ledger block is analyzed in real time — findings and clusters, live from the public ledger.',
     'hero.kpisAria': 'Live key figures',
     'hero.kpiMalicious': 'malicious',
     'hero.kpiSuspect': 'suspect',
@@ -423,15 +423,15 @@ export const DICT = {
     'brand.sub': 'Live-Ledger-Analyse und Bedrohungs-Dashboard für die XRPL-Community',
     'stats.aria': 'Live-Statistiken',
     'stat.malicious': 'Funde maliziös (live)',
-    'stat.suspect': 'Findings suspect (live)',
+    'stat.suspect': 'Funde verdächtig (live)',
     'stat.events': 'Transaktionen (live)',
     'stat.network': 'Netzwerk',
     'stat.last': 'Stand',
     'conn.init': 'Live-Verbindung wird aufgebaut …',
 
-    /* index.html — Hero-Bühne (.hx-stage) */
+    /* index.html — Live-Statusleiste (.hx-stage) */
     'hero.title': 'Live-Bedrohungsradar für das XRP-Ledger',
-    'hero.lead': 'Jeder validierte Ledger-Block wird in Echtzeit analysiert — Malware-Memos, Drainer-Abflüsse, Dusting und Fake-NFT-Muster werden erkannt und die Akteure dahinter zu Clustern gruppiert.',
+    'hero.lead': 'Jeder validierte Ledger-Block wird in Echtzeit analysiert — Funde und Cluster, live aus dem öffentlichen Ledger.',
     'hero.kpisAria': 'Live-Kennzahlen',
     'hero.kpiMalicious': 'maliziös',
     'hero.kpiSuspect': 'verdächtig',

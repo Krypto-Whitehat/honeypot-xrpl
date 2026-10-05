@@ -253,6 +253,15 @@ const BACKOFF_CAP_MS = 30000; // exponentielle Kappe
 const MAX_DURATION_MS = maxDuration * 1000;
 const GUARD_MARGIN_MS = 5000; // Restlaufzeit für Persistenz-Write + Antwort
 
+// Persistenz-Marge für den Walk-Stopp: GUARD_MARGIN_MS allein deckt nur
+// Antwort+Start-Persistenz ab. Die letzte Parallel-Runde des Walks läuft
+// bis Deadline + Latenz (live gemessen bis 1,79 s) aus, danach folgen die
+// Persistenz-Calls (Flow-State GET+PUT, Block-Fenster GET+PUT/Tag,
+// Retention 3 GET+DELETE, Archiv-Retention 7 GET, Entity GET+PUT, Replay
+// GET — live ~5-8 s). Mit Marge 6000 endet der Walk bei ~19 s:
+// 19 s + ~2 s Rest-Runde + ~8 s Persistenz <= 30 s (maxDuration).
+const PERSIST_MARGIN_MS = 6000;
+
 // Pure: genanntes Retry-Fenster (ms) aus einem RPC-Fehler-Result parsen.
 // Präzedenz wie lib/live-gate.mjs: retry_after-Feld (Sekunden) vor
 // "retry in ~Nms" in error_message. Kein Fenster -> null.
@@ -632,12 +641,33 @@ export default async function handler(req, res) {
     // Signale (x-Feld: SetRegularKey/AccountSet überleben so das Pruning).
     const windowByDay = new Map(); // day -> records[]
     const entitySignals = [];
+    // Ursache des Walk-Endes (Netzwerk-/RPC-Fehler statt Live-Edge) — für
+    // die Summary sichtbar (neutraler Text, nie Token; Muster
+    // lib/history.mjs:12).
+    let walkError = null;
     const advanceResult = await advance({
       cursor,
       budget,
       now,
       fetcher: async (idx) => {
-        const block = await fetchBlock(idx, ctx);
+        // Deadline-aware Walk-Ende: der Walk endet bei tickDeadline minus
+        // PERSIST_MARGIN_MS, damit die letzte Parallel-Runde (Latenz bis
+        // ~1,79 s, live gemessen) plus die Persistenz-Phase (15-20
+        // GitHub-Contents-Calls, live ~5-8 s) innerhalb maxDuration 30 s
+        // durchkommen — sonst killt Vercel die Function ohne Persistenz
+        // (advance() persistiert Partial, ledger-walk.mjs:66-91).
+        if (clockImpl() >= tickDeadline - PERSIST_MARGIN_MS) return null;
+        let block;
+        try {
+          block = await fetchBlock(idx, ctx);
+        } catch (err) {
+          // Netzwerk-/RPC-Fehler im Walk: bisher von advance() als Ende
+          // verschluckt (ledger-walk.mjs:74-75) — live 3/12 Ticks +0 ohne
+          // Fehlerfeld. Hier: Ursache erfassen, null wie bisher (Walk-Ende,
+          // Partial-Persist), aber sichtbar in der Summary.
+          walkError = String(err?.message ?? err).slice(0, 200);
+          return null;
+        }
         if (block) {
           const tMs = Date.parse(String(block.closeIso ?? ""));
           const day = dayOf(Number.isFinite(tMs) ? tMs : now) ?? dayOf(now);
@@ -839,13 +869,13 @@ export default async function handler(req, res) {
         }
       }
       const targets = [...flagged].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)).slice(0, ENTITY_TICK_CAP);
-      if (targets.length && clockImpl() < tickDeadline) {
+      if (targets.length && clockImpl() < tickDeadline - PERSIST_MARGIN_MS) {
         const queue = [...targets];
         const results = await Promise.all(
           Array.from({ length: Math.min(4, queue.length) }, async () => {
             const out = [];
             while (queue.length) {
-              if (clockImpl() >= tickDeadline) break; // Deadline: Partial persistieren
+              if (clockImpl() >= tickDeadline - PERSIST_MARGIN_MS) break; // Deadline: Partial persistieren
               const batch = queue.splice(0, 4);
               const { snapshots, requests } = await fetchEntitySnapshots(rpc, batch, {
                 cap: ENTITY_TICK_CAP,
@@ -926,7 +956,7 @@ export default async function handler(req, res) {
       if (jobs.length) {
         let requests = 0;
         for (const job of jobs) {
-          if (requests >= REPLAY_TICK_CAP || clockImpl() >= tickDeadline) break;
+          if (requests >= REPLAY_TICK_CAP || clockImpl() >= tickDeadline - PERSIST_MARGIN_MS) break;
           const toLedger = Number.isFinite(job.toLedger) ? job.toLedger : null;
           if (toLedger == null) continue;
           const fromLedger = Number.isFinite(job.fromLedger) ? job.fromLedger : 0;
@@ -969,7 +999,7 @@ export default async function handler(req, res) {
       .reduce((s, r) => s + (Array.isArray(r.f) ? r.f.length : 0), 0);
     return res.status(200).json({
       cursor: finalDoc.cursor,
-      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}, Archiv-Zeilen: ${archiveDocs.length}, Entity-Snapshots: ${entityRequests}, Replay-Jobs: ${replayProcessed}`,
+      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}, Archiv-Zeilen: ${archiveDocs.length}, Entity-Snapshots: ${entityRequests}, Replay-Jobs: ${replayProcessed}${walkError ? `, Fehler: ${walkError}` : ""}`,
     });
   } catch (err) {
     // Read-/Write-Fehler (409-Retry scheitert, 403/429, Netzwerk) -> kein

@@ -8,6 +8,17 @@
  * Designbasis: Astra 6 (weiße Flächen, 1px-Ink-Ränder, Radien, ≥12 px Schrift,
  * 44 px Touch-Ziele, WCAG AA, reduced-motion/forced-colors-Respekt). */
 
+/* ---------- Panel-Kopf im Console-Look ----------
+   Der Kopf des Historie-Panels (von history.js als .panel-head erzeugt)
+   erhält eine 1px-Ink-Trennlinie — Console-Muster wie die Dashboard-Panels
+   (style.css .panel 1px --a6-line-strong). Scoped auf #history-root, damit
+   die Dashboard-Panel-Köpfe unverändert bleiben; Markup-IDs unverändert. */
+
+#history-root .panel-head {
+  border-bottom: 1px solid var(--a6-line-strong);
+  padding-bottom: 12px;
+}
+
 /* ---------- Suchfeld ---------- */
 
 .history-search {

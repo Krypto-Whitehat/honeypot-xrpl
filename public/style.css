@@ -123,14 +123,20 @@ html, body {
   outline-offset: 3px;
 }
 
-/* ---------------- Kopfzeile ---------------- */
+/* ---------------- App-Kopfzeile (Console-Shell) ----------------
+   Links Marke, rechts Status-Cluster in einer Zeile: Verbindungs-LED
+   (#conn, app.js setConn), Netzwerk-Chip (#stat-network), Uhr (#stat-last) —
+   angereiht die Kopf-KPIs (#stat-malicious/#stat-suspect/#stat-events, Mono
+   tabular-nums, 3px-Severity-Band links), ganz rechts .lang-switch.
+   Nicht sticky: die Kopfzeile verdeckt sonst die View-Anker
+   (Skill-Nav-Regel; scroll-margin bleibt unten erhalten). */
 
 .topbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
-  padding: 18px var(--a6-gutter);
+  gap: 12px 18px;
+  padding: 14px var(--a6-gutter);
   background: var(--a6-surface);
   border-bottom: 1px solid var(--a6-line-strong);
 }
@@ -163,8 +169,22 @@ html, body {
   padding: 9px 14px;
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
+  /* 3px-Band links = Severity-LED der Kopf-KPIs (Status nie nur durch Farbe —
+     der Badge-/Labeltext trägt denselben Schweregrad). */
+  border-left: 3px solid var(--a6-line-strong);
   border-radius: var(--a6-r-sm);
   box-shadow: var(--a6-e1);
+}
+
+/* Netzwerk und Uhr sind Status-Chips im Cluster, keine KPI-Karten: kompakt,
+   flach, Haarlinie statt 3px-Band. */
+.stat-network,
+.stat-last {
+  min-width: 0;
+  padding: 6px 12px;
+  border-left: 1px solid var(--a6-line);
+  background: var(--a6-surface-alt);
+  box-shadow: none;
 }
 
 .stat-value {
@@ -189,6 +209,10 @@ html, body {
 .stat-events .stat-value { color: var(--a6-ink); }
 .stat-network .stat-value { color: var(--a6-info); font-size: 15px; }
 .stat-last .stat-value { color: var(--a6-muted); }
+
+.stat-malicious { border-left-color: var(--a6-error); }
+.stat-suspect { border-left-color: var(--a6-warn); }
+.stat-events { border-left-color: var(--a6-brand-blue); }
 
 .conn {
   display: flex;
@@ -235,15 +259,33 @@ html, body {
   scroll-margin-block-start: 84px;
 }
 
-/* Dashboard-View: die beiden Panels (Live-Feed, Aktivitäts-Graph) sind Kinder
-   eines neutralen Containers — ohne eigene Rhythmus-Regel klebten ihre
-   1px-Ink-Borders aneinander (Astra-6 lab_graphite: Borders dürfen nicht
-   verschmelzen). Der View übernimmt denselben Achsabstand wie main (22 px),
-   also denselben Token-Abstand, den main ohnehin nutzt. */
-#view-dashboard {
+/* Dashboard-View: Console-Raster. Ab 1024 px zwei Spalten — links Feed- und
+   Log-Panel untereinander, rechts die Graph-Bühne; darunter einspaltig wie
+   zuvor. Die Panels bleiben Kinder neutraler Spaltencontainer — ohne eigene
+   Rhythmus-Regel klebten ihre 1px-Ink-Borders aneinander (Astra-6
+   lab_graphite: Borders dürfen nicht verschmelzen). Der View übernimmt
+   denselben Achsabstand wie main (22 px), also denselben Token-Abstand, den
+   main ohnehin nutzt. */
+#view-dashboard { display: block; }
+
+.console-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+}
+
+.console-col {
   display: flex;
   flex-direction: column;
   gap: 22px;
+  min-inline-size: 0; /* Grid-Kind darf schrumpfen, damit Inhalte umbrechen */
+}
+
+@media (min-width: 1024px) {
+  .console-grid {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    align-items: start;
+  }
 }
 
 /* ---------------- Panels ---------------- */
@@ -466,19 +508,19 @@ main {
 
 /* ---------------- Analyse-Log ---------------- */
 
+/* Log-Panel-Kopf: eigene Panel-Konsole (das Log ist kein Feed-Unterabschnitt
+   mehr) — Kopf wie .panel-head, H2 statt H3, IDs unverändert. */
 .log-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin: 18px 0 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--a6-line-strong);
+  margin: 0 0 14px;
 }
 
-.log-head h3 {
+.log-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.01em;
 }
@@ -977,20 +1019,27 @@ main {
   border: 1px solid rgba(154, 91, 0, 0.4);
 }
 
-/* ---------------- Hero-Bühne (Astra-6 .a6-stage, SKILL hero_system) ------
+/* ---------------- Live-Statusleiste (Astra-6 .a6-stage, SKILL hero_system) --
+   Zur Console-Kopfzone verdichtete Bühne: kurzer Titel/Lead links, KPI-Zähler
+   als Tachometer-Zeile rechts (ab ~900px eine Zeile, darunter umbrechend).
    Eigene Breitenbegrenzung: die Bühne liegt außerhalb von main und erbt
    die main-Breite NICHT — identische Formel hält sie fluchtgleich zu den
-   Panels. Panel-Hierarchie: Hero mit e3 (höchste Erhebung), Panels mit e1 —
-   der Glow (::before) wohnt auf GENAU dieser einen Bühne, nicht auf jeder
-   Karte (lab_graphite.avoid: „Glow auf jeder Karte"). */
+   Panels. Panel-Hierarchie: Statusleiste mit e3 (höchste Erhebung), Panels
+   mit e1 — der Glow (::before) wohnt auf GENAU dieser einen Bühne, nicht auf
+   jeder Karte (lab_graphite.avoid: „Glow auf jeder Karte"). */
 .hx-stage {
   position: relative;
   isolation: isolate;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
   width: min(var(--a6-container), 100% - 2 * var(--a6-gutter));
-  margin: 22px auto 0;
-  padding: clamp(1.25rem, 4vw, 4rem);
+  margin: 18px auto 0;
+  padding: clamp(0.875rem, 1.4vw, 1.25rem) clamp(1rem, 2vw, 1.75rem);
   border: 1px solid var(--a6-line-strong);
-  border-radius: clamp(1.25rem, 3vw, 2rem);
+  border-radius: var(--a6-r-lg);
   background: linear-gradient(155deg, #fff 0%, #fbfbfc 58%, #eeeef1 100%);
   box-shadow: var(--a6-e3);
 }
@@ -1009,14 +1058,15 @@ main {
 
 .hx-stage-copy {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.25rem;
+  min-inline-size: 0;
 }
 
 .hx-title {
-  max-inline-size: 18ch;
-  font-size: clamp(2.25rem, 1.35rem + 3.2vw, 4.5rem);
-  line-height: 1.06;
-  letter-spacing: -0.04em;
+  max-inline-size: 42ch;
+  font-size: clamp(1.125rem, 0.95rem + 0.9vw, 1.5rem);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
   font-weight: 800;
   overflow-wrap: anywhere;
   hyphens: auto;
@@ -1024,27 +1074,28 @@ main {
 }
 
 .hx-lead {
-  max-inline-size: 56ch;
+  max-inline-size: 72ch;
   color: var(--a6-body);
-  font-size: clamp(1rem, 0.94rem + 0.3vw, 1.1875rem);
-  line-height: 1.7;
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
-/* KPI-Zeile: zeigt ausschließlich bereits live gemessene Werte (dieselben
-   Zähler wie die Kopfstatistik) — keine erfundenen Zahlen, keine duplizierten
-   IDs (SKILL honesty: „Keine erfundenen Bewertungen, Projektzahlen"). */
+/* Tachometer-Zeile: zeigt ausschließlich bereits live gemessene Werte
+   (dieselben Zähler wie die Kopfstatistik) — keine erfundenen Zahlen, keine
+   duplizierten IDs (SKILL honesty: „Keine erfundenen Bewertungen,
+   Projektzahlen"). */
 .hx-kpis {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: clamp(1rem, 2vw, 1.5rem);
+  gap: 8px;
+  margin-top: 0;
 }
 
 .hx-kpi {
   display: inline-flex;
   align-items: baseline;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 6px 12px;
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
@@ -1061,7 +1112,7 @@ main {
 
 .hx-kpi-value {
   font-family: var(--a6-mono);
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--a6-ink);
@@ -1135,6 +1186,9 @@ main {
 @media (max-width: 900px) {
   .stats { margin-left: 0; width: 100%; }
   .stat { flex: 1 1 100px; min-width: 96px; }
+  /* Status-Chips bleiben kompakt und wachsen nicht auf KPI-Kartenbreite. */
+  .stat-network,
+  .stat-last { flex: 0 1 auto; }
   #graph { height: 800px; } /* C3: 400 -> 800 (verdoppelt) */
   .legend { margin-left: 0; }
   .live-stats { margin-left: 0; width: 100%; }
