@@ -2766,12 +2766,22 @@ function preloadHeavyVendors() {
     ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
     : (fn) => setTimeout(fn, 1000);
   schedule(() => {
-    for (const href of ['vendor/globe.gl.min.js', 'vendor/3d-force-graph.min.js', 'vendor/topojson-client.min.js']) {
+    /* Integritätswerte müssen exakt zu den Consumer-Konstanten passen
+     * (globe.js GLOBE_GL_INTEGRITY/TOPOJSON_INTEGRITY, drilldown.js
+     * FORCE_GRAPH_INTEGRITY): ohne l.integrity verwirft Chrome den
+     * Preload-Eintrag beim ersten Consumer mit SRI-Pin
+     * ("integrity mismatch") und das Bundle lädt doppelt. */
+    for (const [href, integrity] of [
+      ['vendor/globe.gl.min.js', 'sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT'],
+      ['vendor/3d-force-graph.min.js', 'sha384-Y7bC2PBKu8ujxtvo5+Z61OeGdSVRzFsYWBK4i5dnL/U6aFDTodk61qOUkTfInaxS'],
+      ['vendor/topojson-client.min.js', 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67'],
+    ]) {
       const l = document.createElement('link');
       l.rel = 'preload';
       l.as = 'script';
       l.href = href;
       l.crossOrigin = 'anonymous';
+      l.integrity = integrity;
       document.head.appendChild(l);
     }
   });
