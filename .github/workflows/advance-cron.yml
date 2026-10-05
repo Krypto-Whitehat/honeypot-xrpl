@@ -71,11 +71,30 @@ jobs:
           fi
           cursor=$(grep -o '"cursor":[0-9]*' response.json | head -1 | cut -d: -f2)
           if [ -z "$cursor" ]; then echo "kein cursor in Antwort -> keine Kette"; exit 0; fi
-          validated=$(curl -s --max-time 10 -X POST https://honeycluster.io \
-            -H 'content-type: application/json' \
-            -d '{"method":"ledger","params":[{"ledger_index":"validated"}]}' \
-            | grep -o '"ledger_index":[0-9]*' | head -1 | cut -d: -f2)
-          if [ -z "$validated" ]; then echo "validated nicht lesbar -> keine Kette"; exit 0; fi
+          validated=""
+          for attempt in 1 2 3; do
+            validated=$(curl -s --max-time 10 -X POST https://honeycluster.io \
+              -H 'content-type: application/json' \
+              -d '{"method":"ledger","params":[{"ledger_index":"validated"}]}' \
+              | grep -o '"ledger_index":[0-9]*' | head -1 | cut -d: -f2)
+            [ -n "$validated" ] && break
+            sleep 3
+          done
+          if [ -z "$validated" ]; then
+            # Honeycluster temporär nicht lesbar: Kette trotzdem fortsetzen
+            # (05.10.2026: ein Lese-Aussetzer stoppte die Kette ~8 min, während
+            # die Schedule-Crons erneut schwiegen). Der Spin-Schutz oben fängt
+            # dauerhafte Upstream-Fehler vorher ab; die Lag-Drossel greift beim
+            # nächsten Tick mit lesbarer Validated-Abfrage.
+            echo "validated nicht lesbar -> Kette fortsetzen (Drossel naechster Tick)"
+            curl -s --max-time 10 -o /dev/null -w "dispatch HTTP %{http_code}\n" \
+              -X POST \
+              -H "Authorization: Bearer $CHAIN_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/advance-cron-b.yml/dispatches" \
+              -d '{"ref":"main"}'
+            exit 0
+          fi
           lag=$((validated - cursor))
           echo "Lag: $lag Blöcke (cursor $cursor, validated $validated)"
           # Lag-Gate: Kette nur bei Rückstand > 300 Blöcke (~19 min bei ~16 Blöcken/min).
