@@ -24,7 +24,7 @@
 //     simulierten Obergrenze 270 — lib/rate-gate.test.mjs Simulation),
 //   - 1 Request pro Block (expand:true liefert alle Tx-Objekte; kein
 //     separates tx-Kommando mehr) -> worstCaseTickRequests(budget) = budget,
-//   - DEFAULT_BUDGET = 100 Blöcke/Tick (ENV ADVANCE_BUDGET überschreibt).
+//   - DEFAULT_BUDGET = 140 Blöcke/Tick (ENV ADVANCE_BUDGET überschreibt).
 //   Latenzgebundenes Optimum: expand:true-Latenz gemessen Ø ~0,7 s;
 //   FETCH_PARALLEL = 4 -> ~5,7 req/s < 10/s steady; ohne Gate wären über
 //   30-s-Ticks alle ~100 s ~16 req/s — deshalb Rate-Gate PRO REQUEST
@@ -147,13 +147,15 @@ const baitLabels = new Map();
 export const REQUESTS_PER_SEC = 10; // honeycluster steady-Limit
 export const TICK_REQUEST_BUDGET = 250; // 25 s nutzbar × 10/s (konservativ)
 export const FETCH_PARALLEL = 4; // 4/0,708 s ≈ 5,7 req/s < 10/s steady
-// Budget-Default: 100 Blöcke/Tick — erreichbar unter min(TICK_REQUEST_BUDGET,
-// Latenzgrenze ~140 Blöcke/Tick) und mit Headroom über dem 5-min-Bedarf
-// (63–77 Blöcke bei 12,6–15,3 Blöcke/min). ENV ADVANCE_BUDGET überschreibt.
-export const DEFAULT_BUDGET = 100;
+// Budget-Default: 140 Blöcke/Tick (Aufhol-Beschaltung 05.10.2026) — Bilanz
+// 140 + REPLAY 40 + ENTITY 20 + Seed 1 = 201 <= TICK_REQUEST_BUDGET 250;
+// die 19-s-Walk-Fenster (Deadline minus PERSIST_MARGIN_MS) kappen bei live
+// gemessener Latenz 1,1-1,8 s ohnehin auf ~55-108 Blöcke/Tick. ENV
+// ADVANCE_BUDGET überschreibt.
+export const DEFAULT_BUDGET = 140;
 // Entity-Layer-Cap (Grenze 3): account_info-Calls pro Tick nach dem Block-
 // Walk. Budget-Bilanz (doku, lib/advance-batch.test.mjs):
-//   worstCaseTickRequests(100) + REQUESTS_PER_TICK_CAP(40) + ENTITY_TICK_CAP(20)
+//   worstCaseTickRequests(140) + REQUESTS_PER_TICK_CAP(40) + ENTITY_TICK_CAP(20)
 //   + seedCursorIfFresh (1 Request, NUR bei frischem Cursor) <= 250.
 // Die GitHub-Retention-Calls (Block-Fenster/Archiv-Löschung, unten) gehören
 // NICHT ins honeycluster-Budget — sie laufen gegen die GitHub-Contents-API.
