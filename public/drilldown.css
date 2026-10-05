@@ -325,7 +325,7 @@ body.cluster-modal-open {
 
 .cluster-export-note { margin: 0; }
 
-/* ---------------- Adress-Aktionen (Kopieren + xrplcharts-Link) ---------- */
+/* ---------------- Adress-Aktionen (Kopieren + XRPScan-Link) ---------- */
 
 .addr-actions {
   display: inline-flex;
@@ -375,6 +375,11 @@ body.cluster-modal-open {
 /* In Chain-Chips und Log-Zeilen kompakt unterbringen */
 .chain-node .addr-actions { margin-left: 6px; flex-shrink: 0; }
 .log-addr .addr-actions { margin-left: 6px; }
+
+/* XRPScan-Namens-Chip (nur ergänzt): in Kette und Tabellenzelle kompakt —
+   Name zusätzlich, nie anstelle der Adresse (Basis-Look: style.css). */
+.chain-node .name-chip { margin-left: 6px; flex-shrink: 0; }
+.cluster-td-addr .name-chip { margin-left: 8px; }
 
 /* ---------------- Responsiv ---------------- */
 

@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // rate-gate.mjs (2026-10-02): DOM-freie Token-Bucket-Bibliothek für den
 // Opt-in-LIVE-Modus des Browsers (public/app.js importiert '/lib/rate-gate.mjs').
-const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs"]);
+// name-resolve.mjs (2026-10-05): DOM-freie Namens-Pure-Bibliothek für
+// public/name-index.mjs (XRPScan-Well-known-Aliase; reiner Parser, kein fetch).
+const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs"]);
 
 export default async function handler(req, res) {
   try {

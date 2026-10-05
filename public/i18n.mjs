@@ -133,7 +133,12 @@ export const DICT = {
     'addr.copied': 'Copied',
     'addr.error': 'Error',
     'addr.copyAria': 'Copy address',
-    'addr.linkAria': 'Open on xrplcharts.com',
+    'addr.linkAria': 'Open on xrpscan.com',
+
+    /* app.js / Module — XRPScan-Namens-Badges (public/name-index.mjs) */
+    'name.chipAria': 'Verified name from xrpscan.com',
+    'name.unverifiedAria': 'Unverified name from xrpscan.com',
+    'name.sourceNote': 'Account names: xrpscan.com (CC BY-NC-SA 4.0)',
 
     /* app.js — Graph */
     'graph.visError': 'vis-network could not be loaded (CDN unreachable).',
@@ -230,6 +235,7 @@ export const DICT = {
     'modal.tableAria': 'Cluster accounts',
     'modal.takeover': 'Cluster continues under a new identifier – automatically adopted (seamless takeover via member overlap).',
     'modal.stale': 'As of {time} – cluster no longer in the current observation window.',
+    'modal.frozen': 'Snapshot from {time} – contents stay frozen until you close; the list behind keeps updating.',
     'modal.gone': 'Cluster no longer current – it no longer belongs to the current observation window.',
     'modal.rolesTitle': 'Role distribution',
     'modal.roleBarAria': '{role}: {count} of {total} accounts ({pct} %)',
@@ -510,7 +516,12 @@ export const DICT = {
     'addr.copied': 'Kopiert',
     'addr.error': 'Fehler',
     'addr.copyAria': 'Adresse kopieren',
-    'addr.linkAria': 'Auf xrplcharts.com öffnen',
+    'addr.linkAria': 'Auf xrpscan.com öffnen',
+
+    /* app.js / Module — XRPScan-Namens-Badges (public/name-index.mjs) */
+    'name.chipAria': 'Verifizierter Name von xrpscan.com',
+    'name.unverifiedAria': 'Unverifizierter Name von xrpscan.com',
+    'name.sourceNote': 'Kontonamen: xrpscan.com (CC BY-NC-SA 4.0)',
 
     /* app.js — Graph */
     'graph.visError': 'vis-network konnte nicht geladen werden (CDN nicht erreichbar).',
@@ -607,6 +618,7 @@ export const DICT = {
     'modal.tableAria': 'Konten des Clusters',
     'modal.takeover': 'Cluster läuft unter neuer Kennung weiter – automatisch übernommen (nahtlose Übernahme über die Mitglieder-Schnittmenge).',
     'modal.stale': 'Stand {time} – Cluster nicht mehr im aktuellen Beobachtungsfenster.',
+    'modal.frozen': 'Momentaufnahme vom {time} – Inhalte bleiben bis zum Schließen erhalten; die Liste dahinter läuft weiter.',
     'modal.gone': 'Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.',
     'modal.rolesTitle': 'Rollen-Verteilung',
     'modal.roleBarAria': '{role}: {count} von {total} Konten ({pct} %)',

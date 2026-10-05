@@ -58,6 +58,13 @@
   overflow-wrap: anywhere;
 }
 
+/* XRPScan-Name am Punkt-Label (nur ergänzt): eigene Zeile unter der
+   Adresse, Brand-Teal — die Adresse bleibt der primäre Inhalt. */
+#globe .globe-addr-name {
+  display: block;
+  color: var(--a6-brand-teal);
+}
+
 /* Pflicht-Hinweis unter der Kugel: globe.js legt ein p.graph-note.globe-note
    in die Bühne. Die Typografie (12 px, muted) liefert .graph-note aus
    style.css:508-512 — hier steht nur die Overlay-Positionierung; über den

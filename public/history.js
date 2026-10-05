@@ -98,6 +98,24 @@ export function initHistory(ctx) {
   const isFullShownAddr = typeof host.isFullShownAddr === 'function' ? host.isFullShownAddr : () => false;
   const displayAddr = typeof host.displayAddr === 'function' ? host.displayAddr : (a) => shortAddr(a);
   const addrActionsHtml = typeof host.addrActionsHtml === 'function' ? host.addrActionsHtml : () => '';
+  // Namens-Badge (XRPScan-Aliase): HOST-GATE — ctx.accountNameOf (app.js)
+  // liefert null für maskierte/Deny-Adressen; lokaler Guard spiegelt die
+  // isFullShownAddr-Politik von memberLine (:283). Fallback ohne Host-
+  // Funktion: () => null — ohne Lookup fehlt nur das Badge, nie die Maske.
+  const accountNameOf = (a) => (typeof host.accountNameOf === 'function' && isFullShownAddr(a) ? host.accountNameOf(a) : null);
+  const nameChipHtml = (addr) => {
+    const entry = accountNameOf(addr);
+    if (!entry) return '';
+    const label = String(entry.name ?? '').trim();
+    if (!label) return '';
+    const verified = entry.verified === true;
+    const aria = verified ? t('name.chipAria') : t('name.unverifiedAria');
+    const mark = verified ? '<span class="name-chip-verified" aria-hidden="true">✓</span>' : '';
+    const domain = typeof entry.domain === 'string' && entry.domain.trim()
+      ? `<span class="name-chip-domain">${esc(entry.domain.trim())}</span>`
+      : '';
+    return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
+  };
 
   const numDe = (v) => fmtNum(v);
 
@@ -283,7 +301,9 @@ export function initHistory(ctx) {
     const full = isFullShownAddr(addr);
     const shown = full ? displayAddr(addr) : shortAddr(addr); // title = Anzeigewert, NIE Roheadresse
     const actions = full ? addrActionsHtml(displayAddr(addr)) : '';
-    return `<li class="history-member"><span class="addr-full" title="${esc(shown)}">${esc(shown)}</span>${actions}</li>`;
+    // Name nur bei erlaubter Vollanzeige und nur hinter dem Host-Gate.
+    const nameChip = full ? nameChipHtml(addr) : '';
+    return `<li class="history-member"><span class="addr-full" title="${esc(shown)}">${esc(shown)}</span>${actions}${nameChip}</li>`;
   }
 
   function clusterMatches(c, needle) {

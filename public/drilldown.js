@@ -30,11 +30,11 @@
  * durch die vom Host (app.js) gelieferten Funktionen displayAddr /
  * isFullShownAddr: volle Anzeige nur bei geladener Bait-Hash-Allowlist und
  * Nicht-Treffer auf der Deny-Liste; sonst Kurzform ohne Kopier-Button und
- * ohne xrplcharts-Link. Köder-Adressen und Seeds tauchen in keinem
+ * ohne XRPScan-Link. Köder-Adressen und Seeds tauchen in keinem
  * Modal-Artefakt auf.
  */
 
-import { t, fmtNum, sevText } from './i18n.mjs';
+import { t, fmtNum, fmtClock, sevText, getLang } from './i18n.mjs';
 
 // Lokales Vendoren (Performance-Umbau 2026-10-05): 3d-force-graph@1.80.0
 // liegt in public/vendor/ (same-origin, vercel.json Rewrite /vendor/*). Der
@@ -64,6 +64,25 @@ export function initClusterDrilldown(ctx) {
   const edgeDefault = ctx.edgeDefault;
   const roleLabels = ctx.roleLabels;
   const addrActionsHtml = ctx.addrActionsHtml;
+  // Namens-Badge-Lookup (XRPScan-Aliase): HOST-SEITIG GEGATET —
+  // ctx.accountNameOf (app.js) liefert null für jede maskierte oder
+  // Deny-Treffer-Adresse, das Modul kann das Gate nicht umgehen. Fallback
+  // ohne Host-Funktion: () => null (fail-closed — ohne Lookup fehlt nur das
+  // Badge, die Anzeige bleibt unverändert; Muster isDeniedAddrAsync oben).
+  const accountNameOf = typeof ctx.accountNameOf === 'function' ? ctx.accountNameOf : () => null;
+  const nameChipHtml = (addr) => {
+    const entry = accountNameOf(addr);
+    if (!entry) return '';
+    const label = String(entry.name ?? '').trim();
+    if (!label) return '';
+    const verified = entry.verified === true;
+    const aria = verified ? t('name.chipAria') : t('name.unverifiedAria');
+    const mark = verified ? '<span class="name-chip-verified" aria-hidden="true">✓</span>' : '';
+    const domain = typeof entry.domain === 'string' && entry.domain.trim()
+      ? `<span class="name-chip-domain">${esc(entry.domain.trim())}</span>`
+      : '';
+    return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
+  };
   // 2D-Canvas-Label in Kurzform (Design-Fix): shortAddr kommt bereits im ctx
   // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
   const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
@@ -73,10 +92,15 @@ export function initClusterDrilldown(ctx) {
   // Kurzform. Bei voller Adresse wird ein Zeilenumbruch nach Zeichen 24
   // eingefügt — vis-network rendert '\n' im Knotenlabel (Label-Clipping bei
   // 25–35 Zeichen langen Base58-Adressen war der Ausgangspunkt).
+  // Name-Zusatz (XRPScan-Alias) NUR hinter dem Host-Gate: accountNameOf
+  // liefert null für maskierte Adressen, also hängt der Name nie an einer
+  // Kurzform. Adresse bleibt der primäre Label-Inhalt, der Name Zeile 2.
   const graphLabel = (id) => {
     const s = String(id ?? '');
-    if (s && isFullShownAddr(s)) return s.length > 24 ? `${s.slice(0, 24)}\n${s.slice(24)}` : s;
-    return shortAddrFn(id);
+    const name = accountNameOf(s);
+    const nameSuffix = name ? `\n${name.name}` : '';
+    if (s && isFullShownAddr(s)) return (s.length > 24 ? `${s.slice(0, 24)}\n${s.slice(24)}` : s) + nameSuffix;
+    return shortAddrFn(id) + nameSuffix;
   };
 
   const num = (v) => fmtNum(v);
@@ -150,6 +174,24 @@ export function initClusterDrilldown(ctx) {
                                 // openCluster — bleibt stabil, damit der
                                 // Fallback-Lookup nicht transitiv wandern kann
   let takeoverNoticeTimer = 0;  // Auto-Ausblendung des Übernahme-Hinweises
+
+  /* Freeze (Inhalts-Einfrierung des OFFENEN Modals, Plan 2026-10-05):
+   * Nach dem ersten erfolgreichen Vollrender kopiert das Modal Cluster,
+   * Knoten und Kanten in `frozen`. Jeder Poll-Tick (live ~4-5 s, Archiv
+   * 60 s, bait 60 s, hx:langchange) erreicht dann den Live-Lookup
+   * (getClusterGraph), die Übernahme, das Digest-Gate, den
+   * graphData-Austausch und den Camera-Reset NICHT mehr — kein Titel-
+   * wechsel, kein Umsortieren, kein Layout-/Kamera-Neustart. Einzige
+   * Ausnahmen je Tick: unveränderter Köder-Recheck (Deny-Liste rotiert
+   * serverseitig alle 5 s — 'KÖDER-SCHUTZ SCHLÄGT ALTERUNGSANZEIGE'),
+   * Sprachwechsel (Labels neu, Daten identisch) und der ehrliche
+   * Zeitstempel-Hinweis. close() setzt frozen zurück; die Liste hinter
+   * dem Modal bleibt live.
+   * Bewusste Verhaltensänderung (Akzeptanzpunkt): die 300-s-Kappe
+   * STALE_SNAPSHOT_MAX_MS greift das offene Modal nicht mehr — sie wirkt
+   * nur im Missing-Cluster-Pfad. Gewollt: Freeze bis zum Schließen. */
+  let frozen = null;            // {clusterId, at, lang, cluster, nodes, edges, members}
+  let frozenLang = null;        // Sprache des zuletzt gemalten Freeze-Standes
 
   function reducedMotion() {
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
@@ -260,6 +302,15 @@ export function initClusterDrilldown(ctx) {
       tableRowLimit += TABLE_STEP;
       if (lastTableNodes && lastTableEl) renderTable(lastTableNodes, lastTableEl);
     });
+    // Sprachwechsel (hx:langchange, app.js): das Modal hatte bisher KEINEN
+    // eigenen Listener — der Retranslate lief über den Live-Pfad von
+    // refresh() und wurde vom sprachblinden Digest-Gate möglicherweise
+    // übersprungen (dokumentierter Mangel, Kommentar im Shell-Export-Block).
+    // Jetzt: Freeze-Pfad malt Labels in der neuen Sprache (recheckFrozen),
+    // Live-Pfad ist über den Sprache-Digest-Anteil nicht mehr sprachblind.
+    try {
+      document.addEventListener('hx:langchange', () => { if (isOpen) render(); });
+    } catch { /* Noop ohne addEventListener */ }
   }
 
   function getFocusables() {
@@ -296,6 +347,8 @@ export function initClusterDrilldown(ctx) {
     snapshot = null;
     staleShown = false;
     originMembers = null; // Fallback-ANKER neu einfrieren (Befund 2026-09-30)
+    frozen = null;        // Freeze neu beginnen: openCluster startet immer bei null Stand
+    frozenLang = null;
     exportPayload = null; // A4: Export-Grundlage gilt nur für den nächsten Vollrender
     exportToken += 1;     // laufende async-Nachprüfung verwerfen
     tableRowLimit = TABLE_MAX_ROWS; // Tabellen-Deckel pro Cluster neu beginnen
@@ -324,6 +377,8 @@ export function initClusterDrilldown(ctx) {
     isOpen = false;
     currentClusterId = null;
     originMembers = null; // Anker verfällt mit dem Modal (neues Öffnen friert neu)
+    frozen = null;        // ab dem Schließen greift wieder Live-Rendering
+    frozenLang = null;
     exportPayload = null; // A4: kein Export über die Lebensdauer des Modals hinaus
     exportToken += 1;
     clearTakeoverNotice();
@@ -436,6 +491,8 @@ export function initClusterDrilldown(ctx) {
   function clearToEmptyState(els) {
     snapshot = null;
     staleShown = false;
+    frozen = null;   // Total-Leerung (Köder-Treffer/leerer Freeze-Satz) wirft
+    frozenLang = null; // auch den Freeze-Satz ersatzlos raus
     clearTakeoverNotice(); // Übernahme-Hinweis hat seinen Cluster verloren
     // A4: Total-Leerung löscht auch die Export-Grundlage; Button und Hinweis
     // bleiben verborgen, bis ein erfolgreicher Vollrender sie wieder setzt.
@@ -493,13 +550,82 @@ export function initClusterDrilldown(ctx) {
     }
   }
 
+  /* Freeze-Hilfe: verweigerte Adressen aus dem Freeze-Satz schneiden —
+   * Knoten, Kanten (beide Enden müssen bleiben) und members-Fallback.
+   * Muster der asynchronen Deny-Nachprüfung im Vollrender unten. */
+  function removeFrozenMembers(denied) {
+    if (!frozen || !denied || !denied.size) return;
+    frozen.nodes = frozen.nodes.filter((n) => !denied.has(String(n.id)));
+    frozen.edges = frozen.edges.filter((e) =>
+      !denied.has(String(e.from)) && !denied.has(String(e.to)));
+    frozen.members = frozen.members.filter((a) => !denied.has(String(a)));
+  }
+
+  // Freeze-Hinweis (ehrlicher Zeitstempel): wiederverwendet die
+  // .cluster-modal-stale-Zeile. staleShown=true hält den Auto-Ausblend-
+  // Timer des Übernahme-Hinweises fern (showTakeoverNotice: 'if (staleShown)
+  // return') und wird je Tick neu gesetzt, weil paintCluster/endStaleState
+  // die Zeile im Sprachwechsel-Pfad kurz ausräumen.
+  function showFrozenNote() {
+    if (!frozen) return;
+    staleShown = true;
+    const note = overlay.querySelector('.cluster-modal-stale');
+    if (note) {
+      note.textContent = t('modal.frozen', { time: fmtClock(frozen.at) });
+      note.hidden = false;
+    }
+  }
+
+  /* Freeze-Tick (render() leitet jeden Tick hierher um): der offene Stand
+   * wird NIE gegen den Live-Graphen neu gemalet — kein Lookup, keine
+   * Übernahme, kein Digest-Gate, kein graphData-Austausch, kein
+   * Camera-Reset. Einzige Ausnahmen: (1) unveränderter Köder-Recheck —
+   * Deny-Liste rotiert serverseitig alle 5 s, 'KÖDER-SCHUTZ SCHLÄGT
+   * ALTERUNGSANZEIGE' (Muster renderMissingCluster + Export-Gate): Treffer
+   * fallen einzeln aus Knoten/Kanten/Export; ist danach nichts mehr übrig,
+   * ehrliche Total-Leerung. (2) Sprachwechsel: Labels werden neu gemalt,
+   * Daten bleiben der Freeze-Satz. (3) der Zeitstempel-Hinweis. */
+  async function recheckFrozen(els, token) {
+    let removed = false;
+    if (typeof isDeniedAddr === 'function') {
+      const hits = new Set();
+      for (const n of frozen.nodes) {
+        if (isDeniedAddr(String(n.id))) hits.add(String(n.id));
+      }
+      if (hits.size) { removeFrozenMembers(hits); removed = true; }
+    }
+    if (isDeniedAddrAsync) {
+      try {
+        const denied = new Set();
+        for (const a of frozen.members) {
+          if (await isDeniedAddrAsync(a)) denied.add(a);
+        }
+        if (denied.size) { removeFrozenMembers(denied); removed = true; }
+      } catch { /* Nachprüfung fehlgeschlagen: Freeze bleibt auf bisheriger Basis */ }
+      if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
+    }
+    if (!frozen) return; // clearToEmptyState hat den Freeze bereits verworfen
+    if (!frozen.nodes.length) { clearToEmptyState(els); return; }
+    if (removed || getLang() !== frozenLang) {
+      // Deny-Treffer ODER Sprachwechsel: Title/Badge/Metriken/Rollen/
+      // Zeitachse/Kette/Tabelle/Graph aus dem (gekappten) Freeze-Satz neu
+      // malen — ein nachträglich verweigertes Mitglied darf nicht als
+      // DOM-Zeile im offenen Modal stehen bleiben (KÖDER-SCHUTZ SCHLÄGT
+      // FREEZE, Grundsatz 'Total-Leerung ... bei Köder-Treffer').
+      await paintCluster(els, frozen.cluster, frozen.nodes, frozen.edges, token, false);
+      if (token !== renderToken || !isOpen) return;
+      frozenLang = getLang();
+    }
+    if (exportPayload) {
+      // Export-Grundlage je Tick gegen die gekappte Freeze-Knotenmenge
+      // neu schneiden — kein Deny-Ende darf als Phantom im Download stehen.
+      exportPayload = buildExportPayload(frozen.cluster, frozen.nodes, frozen.edges);
+    }
+    showFrozenNote();
+  }
+
   async function render() {
     const token = ++renderToken;
-    const cg = ctx.getClusterGraph();
-    const clusters = cg && Array.isArray(cg.clusters) ? cg.clusters : [];
-    const allNodes = cg && Array.isArray(cg.nodes) ? cg.nodes : [];
-    const allEdges = cg && Array.isArray(cg.edges) ? cg.edges : [];
-
     const titleEl = overlay.querySelector('#cluster-modal-title');
     const badgeEl = overlay.querySelector('.cluster-modal-badge');
     const metricsEl = overlay.querySelector('.cluster-modal-metrics');
@@ -510,6 +636,19 @@ export function initClusterDrilldown(ctx) {
     const graphEl = overlay.querySelector('.cluster-3d');
     const noteEl = overlay.querySelector('.cluster-graph-note');
     const els = { titleEl, badgeEl, metricsEl, rolesEl, timelineEl, chainEl, tableEl, graphEl, noteEl };
+
+    // FREEZE-BRANCHE (Plan 2026-10-05): nach dem ersten erfolgreichen
+    // Vollrender läuft jeder Tick ausschließlich über recheckFrozen — der
+    // Live-Lookup (getClusterGraph) wird nicht mehr gelesen. Bewusste
+    // Akzeptanzpunkt-Änderung: die STALE_SNAPSHOT_MAX_MS-Kappe und der
+    // Missing-Cluster-Pfad leeren das OFFENE Modal nicht mehr; der Freeze
+    // hält bis close()/openCluster()/Total-Leerung.
+    if (frozen) { await recheckFrozen(els, token); return; }
+
+    const cg = ctx.getClusterGraph();
+    const clusters = cg && Array.isArray(cg.clusters) ? cg.clusters : [];
+    const allNodes = cg && Array.isArray(cg.nodes) ? cg.nodes : [];
+    const allEdges = cg && Array.isArray(cg.edges) ? cg.edges : [];
 
     // Exakter Lookup über die cluster.id; bei Verfehlen (ID-Träger aus dem
     // rollenden Fenster gerollt) Fallback über die Mitglieder-Schnittmenge
@@ -586,14 +725,27 @@ export function initClusterDrilldown(ctx) {
 
     // Änderungs-Gate: identischer Inhalt wie beim letzten Vollrender → nur
     // einen eventuellen Alterungszustand lösen und zurück (kein Re-Render,
-    // kein graphData-Austausch, kein zoomToFit).
+    // kein graphData-Austausch, kein zoomToFit). Sprach-Anteil (Fix
+    // 2026-10-05): clusterDigest ist sprachblind — ohne den
+    // frozenLang-Vergleich würde ein Sprachwechsel bei identischen Daten
+    // übersprungen und das Modal bliebe in der alten Sprache stehen.
     const digest = clusterDigest(cluster, clusterNodes, clusterEdges);
-    if (digest === lastRenderDigest) {
+    if (digest === lastRenderDigest && getLang() === frozenLang) {
       endStaleState();
       return;
     }
     lastRenderDigest = digest;
 
+    await paintCluster(els, cluster, clusterNodes, clusterEdges, token, takeoverPending);
+  }
+
+  /* Vollrender des Inhalts (aus render() extrahiert, Plan 2026-10-05):
+   * Title/Badge/Metriken/Rollen/Zeitachse/Kette/Tabelle/Graph aus dem
+   * (freeze-geprüften) Knoten- und Kantensatz. Läuft im Live-Pfad beim
+   * ersten Vollrender und im Freeze-Pfad beim Sprachwechsel — die Daten
+   * stammen dann aus dem Freeze-Satz, nicht aus dem Live-Graphen. */
+  async function paintCluster(els, cluster, clusterNodes, clusterEdges, token, takeoverPending) {
+    const { titleEl, badgeEl, metricsEl, rolesEl, timelineEl, chainEl, tableEl, graphEl, noteEl } = els;
     titleEl.textContent = cluster.label ?? t('cluster.labelDefault');
     const sev = clusterSeverity(cluster, clusterNodes);
     badgeEl.innerHTML = sev === 'malicious' || sev === 'suspect'
@@ -612,13 +764,35 @@ export function initClusterDrilldown(ctx) {
     renderTimeline(cluster, clusterEdges, timelineEl);
     renderChain(cluster, clusterNodes, clusterEdges, chainEl);
     renderTable(clusterNodes, tableEl);
+    const memberIds = new Set(clusterNodes.map((n) => String(n.id)));
     // Letztstand einfrieren — Grundlage für Alterungsanzeige (members+at);
     // das Fallback-Matching läuft seit Befund 2026-09-30 gegen den stabilen
     // ORIGIN-ANKER (originMembers), nicht gegen diesen Snapshot.
-    snapshot = { clusterId: cluster.id, at: Date.now(), members: [...nodeIds] };
+    snapshot = { clusterId: cluster.id, at: Date.now(), members: [...memberIds] };
     endStaleState();
     if (takeoverPending) showTakeoverNotice();
     await renderGraph(clusterNodes, clusterEdges, graphEl, noteEl, token, cluster.id);
+    if (token !== renderToken || !isOpen) return; // renderGraph war async
+
+    // FREEZE-SETZUNG (nur der ERSTE erfolgreiche Vollrender eines geöffneten
+    // Clusters): tiefe Kopie — die Live-Objekte wandern/rotieren weiter,
+    // der Freeze-Satz bleibt davon unberührt. cooldownTicks(0) friest die
+    // Physik ein (graphData-Austausch als einziger Wiederaufheiz-Punkt
+    // liegt im Live-Pfad, den der Freeze nie wieder erreicht).
+    if (!frozen) {
+      frozen = {
+        clusterId: cluster.id,
+        at: Date.now(),
+        lang: getLang(),
+        cluster: { ...cluster },
+        nodes: clusterNodes.map((n) => ({ ...n })),
+        edges: clusterEdges.map((e) => ({ ...e })),
+        members: [...memberIds],
+      };
+    }
+    frozenLang = getLang();
+    if (fg3d) { try { fg3d.cooldownTicks(0); } catch { /* egal */ } }
+    showFrozenNote();
   }
 
   /* ---------------- JSON-Export des Clusters (A3/A5) ----------------
@@ -804,7 +978,10 @@ export function initClusterDrilldown(ctx) {
       const address = String(x?.id ?? '');
       const shown = displayAddr(address);
       const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
-      return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}</span>`;
+      // Name nur hinter dem Host-Gate (accountNameOf) und nur ergänzend —
+      // der Anzeigewert bleibt die Adresse.
+      const nameChip = nameChipHtml(address);
+      return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}${nameChip}</span>`;
     };
     // Pfade NUR aus echten Kanten des Clusters (flowPaths, lib/cluster.mjs):
     // '→' verbindet ausschließlich Adressen entlang belegter Transaktionen —
@@ -874,8 +1051,12 @@ export function initClusterDrilldown(ctx) {
         // darf nie als DOM-Attribut landen (Befund 2026-09-29). Hover-
         // Highlight und Klick-Scroll vergleichen deshalb gegen
         // displayAddr(n.id), nicht gegen die rohe Id.
+        // Name-Chip nur hinter dem Host-Gate (accountNameOf) und nur bei
+        // Vollanzeige — die Zelle behält den Anzeigewert, der Name ist
+        // zusätzliches Element.
+        const nameChip = full ? nameChipHtml(id) : '';
         return `<tr data-addr="${esc(full ? id : shown)}">
-          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}</td>
+          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}${nameChip}</td>
           <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabelText(role))}</span></td>
           <td>${badge}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
@@ -1021,11 +1202,19 @@ export function initClusterDrilldown(ctx) {
         .backgroundColor('#ffffff')
         // Aggregatknoten: zahlenmäßiges Label '+N' (sprachneutral, keine
         // Adresse — der Knoten steht für N nicht einzeln gezeigte Knoten).
-        .nodeLabel((n) => esc(n.aggregateCount ? `+${n.aggregateCount}` : displayAddr(n.id)))
+        // Labels: Adresse bleibt primär, XRPScan-Name als ergänzte zweite
+        // Zeile — nur hinter dem Host-Gate (accountNameOf, null bei Maske).
+        .nodeLabel((n) => {
+          if (n.aggregateCount) return esc(`+${n.aggregateCount}`);
+          const name = accountNameOf(String(n.id ?? ''));
+          return esc(displayAddr(n.id) + (name ? `\n${name.name}` : ''));
+        })
         .linkLabel((l) => {
           const from = l.source && typeof l.source === 'object' ? l.source.id : l.source;
           const to = l.target && typeof l.target === 'object' ? l.target.id : l.target;
-          return `${esc(displayAddr(from))} → ${esc(displayAddr(to))} (${esc(String(l.type ?? ''))})`;
+          const nameFrom = accountNameOf(String(from ?? ''));
+          const nameTo = accountNameOf(String(to ?? ''));
+          return `${esc(displayAddr(from) + (nameFrom ? ` (${nameFrom.name})` : ''))} → ${esc(displayAddr(to) + (nameTo ? ` (${nameTo.name})` : ''))} (${esc(String(l.type ?? ''))})`;
         })
         .linkWidth(1)
         .linkDirectionalArrowLength(3)

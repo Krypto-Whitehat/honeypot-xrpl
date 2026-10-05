@@ -164,6 +164,12 @@ export function initGlobe(ctx) {
   const edgeColors = ctx.edgeColors || {};
   const edgeDefault = typeof ctx.edgeDefault === 'string' ? ctx.edgeDefault : null;
   const openCluster = typeof ctx.openCluster === 'function' ? ctx.openCluster : null;
+  // Namens-Badge-Lookup (XRPScan-Aliase): HOST-GATE accountNameOf (liefert
+  // null für maskierte/Deny-Adressen) PLUS Defense-in-Depth isFullShownAddr
+  // im ctx (Blocker-Fix 2026-10-05 — der globe-ctx hatte das Gate bisher
+  // nicht), fail-closed-Fallback () => false (Muster history.js:98).
+  const isFullShownAddr = typeof ctx.isFullShownAddr === 'function' ? ctx.isFullShownAddr : () => false;
+  const accountNameOf = (a) => (typeof ctx.accountNameOf === 'function' && isFullShownAddr(a) ? ctx.accountNameOf(a) : null);
 
   let container = null;      // #globe (Mount des Verdrahtungs-Agenten)
   let globe = null;          // globe.gl-Instanz
@@ -226,6 +232,18 @@ export function initGlobe(ctx) {
     return s.replace(/[&<>"']/g, (c) => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     })[c]);
+  };
+
+  // Name-Span für Punkt-Labels: Adresse bleibt primärer Inhalt, der
+  // XRPScan-Name ist ergänzend — nur hinter dem Host-Gate (accountNameOf,
+  // null bei Maske/Deny). Wrap-Regel #globe .globe-addr-label (globe.css)
+  // gilt für beide Spans. Bogen-Labels bleiben unverändert (Clutter).
+  const nameSpanHtml = (addr) => {
+    const entry = accountNameOf(addr);
+    if (!entry) return '';
+    const label = String(entry.name ?? '').trim();
+    if (!label) return '';
+    return `<span class="globe-addr-name">${esc(label)}</span>`;
   };
 
   function reducedMotion() {
@@ -701,7 +719,7 @@ export function initGlobe(ctx) {
         // pointLabel/arcLabel als HTML in eine klassenlose CSS2D-Div; ohne
         // eigenes Element greift keine Wrap-Regel (Kritik 2026-10-04). Die
         // Wrap-Regel steht in globe.css (#globe .globe-addr-label).
-        label: `<span class="globe-addr-label">${esc(displayAddr(id))}</span>`,
+        label: `<span class="globe-addr-label">${esc(displayAddr(id))}${nameSpanHtml(id)}</span>`,
         clusterId: n.clusterId != null ? String(n.clusterId) : null,
         _drops: drops, // nur für den GLOBE_MAX_POINTS-Deckel unten, wird entfernt
       });

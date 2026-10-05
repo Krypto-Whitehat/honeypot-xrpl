@@ -775,7 +775,9 @@ app.get("/api/ledger", async (req, res) => {
 // künftige Server-Dateien wie lib/account-report.mjs bleiben lokal privat.
 // stride.mjs (2026-10-02): statischer Import von public/app.js:52 — fehlt er
 // hier, bricht die gesamte Modul-Evaluation des Live-Dashboards (404).
-const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs"]);
+// name-resolve.mjs (2026-10-05): reiner Parser für public/name-index.mjs
+// (XRPScan-Well-known-Aliase) — identische Liste zu api/lib-detector.js.
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs"]);
 app.get("/lib/:name", (req, res) => {
   if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
   res.sendFile(path.join(ROOT, "lib", req.params.name));

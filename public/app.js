@@ -139,6 +139,7 @@ import('./drilldown.js')
         roleLabels: ROLE_LABEL,
         physicsCluster: PHYSICS_CLUSTER,
         addrActionsHtml,
+        accountNameOf,
         flowPaths: () => flowPathsFn,
       });
     }
@@ -164,6 +165,12 @@ import('./globe.js')
         getClusterGraph: () => lastClusterGraph,
         displayAddr: displayFindingAddr,
         isDeniedAddr,
+        // Host-Gate für Namens-Badges (accountNameOf gibt null für jede
+        // maskierte/Deny-Adresse) PLUS Defense-in-Depth: isFullShownAddr
+        // jetzt auch im globe-ctx (globe-ctx hatte es bisher nicht —
+        // Blocker-Fix 2026-10-05), damit globe lokal selbst prüfen kann.
+        accountNameOf,
+        isFullShownAddr,
         hashOf,
         shortAddr,
         esc,
@@ -191,6 +198,7 @@ import('./history.js')
         fmtXrp,
         fmtClock,
         addrActionsHtml,
+        accountNameOf,
         ruleNames: RULE_NAME,
       });
       // Sichtbarkeit nachziehen, falls der View schon aktiv ist, bevor das
@@ -211,6 +219,7 @@ import('./account-check.js')
         fmtXrp,
         fmtClock,
         addrActionsHtml,
+        accountNameOf,
         roleLabels: ROLE_LABEL,
         roleColors: ROLE_COLORS,
         ruleNames: RULE_NAME,
@@ -219,6 +228,20 @@ import('./account-check.js')
     }
   })
   .catch(() => { /* Konto-Check offline (z. B. 404); View bleibt leer */ });
+
+/* Namensindex (XRPScan-Well-known-Aliase, public/name-index.mjs): derselbe
+ * nicht-blockierende Import-Muster mit Null-Guard. Der Modul-Import selbst
+ * ist DOM-/fetch-frei und löst NOCH keinen Netzwerk-Request aus — der
+ * einzige Bulk-Fetch pro Session startet lazy im ersten Cluster-Daten-Takt
+ * (rebuildClusterGraph / applyFlowStateView), nie im Head und nie im
+ * WSS-Takt pro Adresse. Fehlt das Modul, zeigen alle Sichten ohne Namen
+ * (fail-closed, Live-Betrieb unberührt). */
+let nameIndexMod = null;
+import('./name-index.mjs')
+  .then((m) => {
+    if (m && typeof m.ensureNameIndex === 'function') nameIndexMod = m;
+  })
+  .catch(() => { /* Namensindex offline (z. B. 404); Karten laufen ohne Namen */ });
 
 /* Datenquellen-Modi (API-Vertrag v2, 2026-10-02; Live-Standard-Tilt 2026-10-05):
  *   'history' (Startwert + Fail-closed-Fallback, Knopf 'Archiv'):
@@ -554,17 +577,53 @@ async function primeAddrHashes(cg, findings) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Adresse: Kopieren + xrplcharts-Link (nur bei voller Anzeige)        */
+/* Adresse: Kopieren + XRPScan-Link (nur bei voller Anzeige)           */
 /* ------------------------------------------------------------------ */
 function addrActionsHtml(address) {
   const a = String(address ?? '');
-  const href = `https://xrplcharts.com/accounts/${encodeURIComponent(a)}`;
+  const href = `https://xrpscan.com/account/${encodeURIComponent(a)}`;
   return (
     `<span class="addr-actions">` +
     `<button type="button" class="addr-copy" data-addr="${esc(a)}" aria-label="${esc(t('addr.copyAria'))}">${esc(t('addr.copy'))}</button>` +
     `<a class="addr-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(t('addr.linkAria'))}" title="${esc(t('addr.linkAria'))}">↗</a>` +
     `</span>`
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* XRPScan-Namens-Badges (nur ergänzt; Adresse bleibt der Anzeigewert) */
+/* ------------------------------------------------------------------ */
+/* HOST-GATE (primär, nicht umgehbar): accountNameOf liefert null für jede
+ * maskierte oder Deny-Treffer-Adresse — auch für Module ohne eigenes
+ * isFullShownAddr (globe). shortAddr/displayFindingAddr/isFullShownAddr
+ * bleiben unverändert; ein Name hängt nie an einer Kurzform-Adresse.
+ * Ohne Namensindex-Modul oder ohne Lookup-Treffer: null → nur kein Badge,
+ * Anzeige unverändert (fail-closed wie die addr-Aktionen). */
+function accountNameOf(addr) {
+  const a = String(addr ?? '');
+  if (!nameIndexMod || !isFullShownAddr(a)) return null;
+  try {
+    return nameIndexMod.lookupNameCached(a) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/* Name-Chip-Markup (Muster .role-chip/.risk-badge): Pill mit Name,
+ * verified-Häkchen und Domain; aria über die Legenden-Keys. Rein
+ * ergänzend — verdrängt nie die Adresse und erscheint nie ohne Gate. */
+function nameChipHtml(addr) {
+  const entry = accountNameOf(addr);
+  if (!entry) return '';
+  const label = String(entry.name ?? '').trim();
+  if (!label) return '';
+  const verified = entry.verified === true;
+  const aria = verified ? t('name.chipAria') : t('name.unverifiedAria');
+  const mark = verified ? '<span class="name-chip-verified" aria-hidden="true">✓</span>' : '';
+  const domain = typeof entry.domain === 'string' && entry.domain.trim()
+    ? `<span class="name-chip-domain">${esc(entry.domain.trim())}</span>`
+    : '';
+  return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
 }
 
 async function copyAddress(addr) {
@@ -1063,7 +1122,7 @@ const roleLabelText = (role) => t('legend.' + role);
 
 // Flusskette als Markup: Pfade aus flowPaths (lib/cluster.mjs) werden entlang
 // EBENER KANTEN mit '→' verbunden; mehrere Pfade trennt ein '·'. Volle
-// Adresse + Kopier-Button + xrplcharts-Link nur bei erlaubter Vollanzeige
+// Adresse + Kopier-Button + XRPScan-Link nur bei erlaubter Vollanzeige
 // (Allowlist geladen, kein Deny-Treffer); sonst Kurzform ohne beides.
 function flowChainHtml(paths, opts = {}) {
   const maxChips = Number.isFinite(opts.maxChips) ? Math.max(2, Math.floor(opts.maxChips)) : 10;
@@ -1071,9 +1130,12 @@ function flowChainHtml(paths, opts = {}) {
     const address = String(x?.id ?? '');
     const shown = displayFindingAddr(address);
     const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
+    // Name nur hinter demselben Gate (accountNameOf ist host-seitig gegatet)
+    // und nur als ergänzender Chip — der Anzeigewert bleibt die Adresse.
+    const nameChip = nameChipHtml(address);
     // title trägt NUR den Anzeigewert (gerenderter displayFindingAddr-Wert),
     // nie die Roheadresse (Design-Fix, Muster drilldown.js-Konten-Tabelle).
-    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}" title="${esc(shown)}">${esc(shown)}${actions}</span>`;
+    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}" title="${esc(shown)}">${esc(shown)}${actions}${nameChip}</span>`;
   };
   const parts = [];
   let used = 0;
@@ -1088,9 +1150,14 @@ function flowChainHtml(paths, opts = {}) {
 
 function clusterCardHtml(c, index) {
   // Cluster-Schweregrad = max der Mitglieder-Schweregrade aus dem Knoten-Cache.
+  // dropsByAddr (dieselbe Schleife) sortiert die Namens-Chips nach Drops.
   const sevByAddr = new Map();
+  const dropsByAddr = new Map();
   if (lastClusterGraph && Array.isArray(lastClusterGraph.nodes)) {
-    for (const n of lastClusterGraph.nodes) sevByAddr.set(String(n.id), String(n.severity ?? 'info'));
+    for (const n of lastClusterGraph.nodes) {
+      sevByAddr.set(String(n.id), String(n.severity ?? 'info'));
+      dropsByAddr.set(String(n.id), (Number(n.inDrops) || 0) + (Number(n.outDrops) || 0));
+    }
   }
   let sev = 'info';
   for (const a of c.memberAddresses ?? []) {
@@ -1152,6 +1219,21 @@ function clusterCardHtml(c, index) {
     ? `<div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${chainInner}</div>`
     : '';
 
+  // Benannte Mitglieder (XRPScan-Aliase, public/name-index.mjs): bis zu 3
+  // Namens-Chips nach Drops-Summe sortiert (Tiebreak: Adresse) — reine
+  // Ergänzungslinie nach dem Kopf. accountNameOf ist host-seitig gegatet:
+  // maskierte oder Deny-Treffer-Adressen liefern null, zeigen also nie
+  // einen Namen. Ohne Namensindex-Treffer bleibt die Karte unverändert.
+  const named = [];
+  for (const a of c.memberAddresses ?? []) {
+    const chipHtml = nameChipHtml(a);
+    if (chipHtml) named.push({ a: String(a), chipHtml, drops: dropsByAddr.get(String(a)) ?? 0 });
+  }
+  named.sort((x, y) => (y.drops - x.drops) || x.a.localeCompare(y.a));
+  const namesHtml = named.length
+    ? `<div class="cluster-names">${named.slice(0, 3).map((x) => x.chipHtml).join('')}</div>`
+    : '';
+
   // Schaltflächen-Semantik für Screenreader: die Karte öffnet das Drilldown-
   // Modal (Klick + Enter/Leertaste) — deshalb role="button" plus sprechendes
   // aria-label (Befund 2026-09-29).
@@ -1170,6 +1252,7 @@ function clusterCardHtml(c, index) {
         <span class="cluster-label">${esc(c.label ?? 'Cluster')}</span>
         ${badge}
       </div>
+      ${namesHtml}
       <div class="cluster-roles">${chips}</div>
       <div class="cluster-metrics">
         <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
@@ -1477,6 +1560,13 @@ async function rebuildClusterGraph() {
   }
   const cg = buildClusterGraph(graphTx, graphFindings, { maxEdges: CLUSTER_MAX_EDGES });
   lastClusterGraph = cg;
+  // Lazy-Namensindex (ANDOCKSTELLE des Bulk-Fetches im Live-Takt): der erste
+  // Cluster-Daten-Takt stößt GENAU EINEN Bulk-Fetch pro Session an (Guard/TTL
+  // im Modul). Kein Await — der Fetch blockiert weder Render noch WSS-Takt;
+  // Namen erscheinen ab dem nächsten Takt (fail-closed ohne Index).
+  if (nameIndexMod && typeof nameIndexMod.ensureNameIndex === 'function') {
+    nameIndexMod.ensureNameIndex().catch(() => { /* ohne Namen rendern */ });
+  }
   await primeAddrHashes(cg, graphFindings);
   renderLiveGraph(cg);
   renderClusterList(cg.clusters);
@@ -2038,6 +2128,12 @@ async function applyFlowStateView(view) {
     }
   }
   lastClusterGraph = { nodes, edges, clusters };
+  // Lazy-Namensindex im Archiv-Takt (60 s): dieselbe Guard-gedeckte
+  // Andockstelle wie im Live-Takt — der In-Flight-Guard/TTL im Modul macht
+  // daraus GENAU EINEN Bulk-Fetch pro Session, nie einen pro Poll.
+  if (nameIndexMod && typeof nameIndexMod.ensureNameIndex === 'function') {
+    nameIndexMod.ensureNameIndex().catch(() => { /* ohne Namen rendern */ });
+  }
   // Vor dem Rendern hashen (displayFindingAddr/chain-Chips entscheiden
   // synchron und fail-closed): ohne Priming blieben Flow-State-Karten in der
   // Kurzform (Befund 05.10.2026).

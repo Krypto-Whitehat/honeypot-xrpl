@@ -12,7 +12,7 @@
  * Hosts gerendert — Adressen erscheinen NIE roh im DOM:
  *   displayAddr/isFullShownAddr  (Köder-Schutz, fail-closed: ohne Gates oder
  *                                ohne geladene Allowlist nur Kurzform),
- *   addrActionsHtml              (Kopieren + xrplcharts-Link, nur bei
+ *   addrActionsHtml              (Kopieren + XRPScan-Link, nur bei
  *                                erlaubter Vollanzeige).
  * Fehlt der Mount #check-root (View noch nicht verdrahtet), liefert
  * initAccountCheck ein Noop-Objekt — der Live-Betrieb läuft unberührt weiter.
@@ -92,6 +92,24 @@ export function initAccountCheck(ctx = {}) {
     return isFullShownAddr(a) ? String(a ?? '') : shortAddr(a);
   };
   const addrActionsHtml = (a) => (typeof ctx.addrActionsHtml === 'function' && isFullShownAddr(a) ? ctx.addrActionsHtml(a) : '');
+  // Namens-Badge (XRPScan-Aliase): HOST-GATE (ctx.accountNameOf aus app.js
+  // liefert null für maskierte/Deny-Adressen) PLUS lokaler fail-closed-Guard
+  // wie bei addrActionsHtml (:94) — Badge erscheint nur bei erlaubter
+  // Vollanzeige. Fallback ohne Host-Funktion: () => null (nur kein Badge).
+  const accountNameOf = (a) => (typeof ctx.accountNameOf === 'function' && isFullShownAddr(a) ? ctx.accountNameOf(a) : null);
+  const nameChipHtml = (addr) => {
+    const entry = accountNameOf(addr);
+    if (!entry) return '';
+    const label = String(entry.name ?? '').trim();
+    if (!label) return '';
+    const verified = entry.verified === true;
+    const aria = verified ? t('name.chipAria') : t('name.unverifiedAria');
+    const mark = verified ? '<span class="name-chip-verified" aria-hidden="true">✓</span>' : '';
+    const domain = typeof entry.domain === 'string' && entry.domain.trim()
+      ? `<span class="name-chip-domain">${esc(entry.domain.trim())}</span>`
+      : '';
+    return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
+  };
   const ruleName = (id) => {
     const viaI18n = i18nRuleName(id);
     if (viaI18n !== String(id)) return viaI18n;
@@ -173,6 +191,7 @@ export function initAccountCheck(ctx = {}) {
   function contactRow(c) {
     const shown = displayAddr(c.counterparty);
     const actions = addrActionsHtml(c.counterparty);
+    const nameChip = nameChipHtml(c.counterparty);
     const risk =
       c.risk === 'malicious'
         ? `<span class="risk-badge risk-malicious">${esc(sevText('malicious'))}</span>`
@@ -181,7 +200,7 @@ export function initAccountCheck(ctx = {}) {
           : '<span class="cluster-table-dash">–</span>';
     return (
       `<tr>` +
-      `<td class="cluster-td-addr"><span class="addr-full" title="${esc(shown)}">${esc(shown)}</span>${actions}</td>` +
+      `<td class="cluster-td-addr"><span class="addr-full" title="${esc(shown)}">${esc(shown)}</span>${actions}${nameChip}</td>` +
       `<td>${esc(c.direction ?? '–')}</td>` +
       `<td>${esc(c.txType ?? '–')}</td>` +
       `<td>${esc(fmtClockHost(c.time))}</td>` +
@@ -273,7 +292,7 @@ export function initAccountCheck(ctx = {}) {
   // Hash-Priming über den Host (Befund 2026-09-30): isFullShownAddr entscheidet
   // synchron aus dem addrHashCache des Hosts — ohne Priming blieben die geprüfte
   // Adresse und die Kontakt-Gegenparteien auch bei geladener Bait-Allowlist in
-  // der Kurzform, ohne Kopieren-/xrplcharts-Aktionen (diese Adressen erscheinen
+  // der Kurzform, ohne Kopieren-/XRPScan-Aktionen (diese Adressen erscheinen
   // nur hier, nicht im Cluster-Graph, und werden dort nie geprimt). Fail-closed:
   // Ohne ctx.hashOf oder bei Priming-Fehlern bleibt die Kurzform.
   async function renderReport(report) {
@@ -290,6 +309,7 @@ export function initAccountCheck(ctx = {}) {
     const badge = VERDICT_BADGE[report.verdict] ?? VERDICT_BADGE.unknown;
     const shownAddr = displayAddr(report.address);
     const actions = addrActionsHtml(report.address);
+    const nameChip = nameChipHtml(report.address);
     const scoreValue = typeof report.score === 'number' ? String(report.score) : '–';
     // Disclaimers sind serverseitige deutsche Protokollwerte — Anzeige über
     // serverPhrase() (Exact-Match auf die vier bekannten Werte).
@@ -306,7 +326,7 @@ export function initAccountCheck(ctx = {}) {
       `<article class="check-report" aria-label="${esc(t('check.reportAria'))}">` +
       `<header class="check-report-head">` +
       `<span class="${esc(badge.cls)}">${esc(t(badge.key))}</span>` +
-      `<span class="addr-full check-report-addr" title="${esc(shownAddr)}">${esc(shownAddr)}</span>${actions}` +
+      `<span class="addr-full check-report-addr" title="${esc(shownAddr)}">${esc(shownAddr)}</span>${actions}${nameChip}` +
       `<div class="check-score" aria-label="${esc(t('check.scoreAria'))}">` +
       `<span class="check-score-value">${esc(scoreValue)}</span><span class="check-score-max">/ 100</span>` +
       `</div>` +

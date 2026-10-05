@@ -13,6 +13,7 @@
     { "source": "/account-check.css", "destination": "/public/account-check.css" },
     { "source": "/drilldown.js", "destination": "/public/drilldown.js" },
     { "source": "/drilldown.css", "destination": "/public/drilldown.css" },
+    { "source": "/name-index.mjs", "destination": "/public/name-index.mjs" },
     { "source": "/vendor/vis-network.min.js", "destination": "/public/vendor/vis-network.min.js" },
     { "source": "/vendor/globe.gl.min.js", "destination": "/public/vendor/globe.gl.min.js" },
     { "source": "/vendor/topojson-client.min.js", "destination": "/public/vendor/topojson-client.min.js" },
