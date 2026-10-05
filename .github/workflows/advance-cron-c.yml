@@ -40,7 +40,7 @@ jobs:
         continue-on-error: true
         env:
           ADVANCE_CHAIN: ${{ vars.ADVANCE_CHAIN }}
-          CHAIN_TOKEN: *** secrets.ADVANCE_CHAIN_TOKEN }}
+          CHAIN_TOKEN: ${{ secrets.ADVANCE_CHAIN_TOKEN }}
         run: |
           # Kill-Switch: Repo-Variable ADVANCE_CHAIN=off stoppt die Kette.
           if [ "${ADVANCE_CHAIN:-on}" = "off" ]; then echo "Kette aus (Kill-Switch)"; exit 0; fi
