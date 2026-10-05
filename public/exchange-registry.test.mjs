@@ -19,8 +19,11 @@ import {
   ensureExchangeRegistry,
   registrySnapshot,
   exchangeEntryOf,
+  multiUserEntryOf,
+  multiUserSnapshot,
   REGISTRY_TTL_MS,
 } from "./exchange-registry.mjs";
+import { ensureNameIndex } from "./name-index.mjs";
 
 const REGISTRY_URL = "/data/exchange-registry.json";
 
@@ -172,6 +175,98 @@ test("TTL abgelaufen + Fehler: letzter guter Stand bleibt (fail-closed)", async 
       assert.equal(registryCount(), 3);
       assert.equal(m3, m1);
     });
+  } finally {
+    restore();
+  }
+});
+
+/* ---------- Multi-User-Union (Coverage-Fix 2026-10-05) ----------
+ * multiUserEntryOf: Registry-Treffer zuerst, sonst verifizierter well-known-
+ * Eintrag aus dem synchronen Namens-Index (lookupNameCached — KEIN Fetch aus
+ * dem Lookup); unverifizierte Namen liefern null (fail-closed).
+ * multiUserSnapshot: Registry ∪ verifizierte well-known-Einträge für den
+ * Graphen-Neubau (app.js multiUserAccounts). */
+
+// Base58-gültige well-known-Testadressen (kein 0/O/I/l; die Bulk-URL wird im
+// Stub bedient — kein echter Endpunkt).
+const WK1 = "rTESTwkVerifiedAcc11111111111";    // verified: true
+const WK2 = "rTESTwkUnverifiedAcc22222222222";  // verified fehlt -> nie ein Chip
+const BULK_URL = "https://api.xrpscan.com/api/v1/names/well-known";
+
+async function seedNameIndex(fixture) {
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url) === BULK_URL) {
+      return { ok: true, json: async () => fixture };
+    }
+    if (typeof prev === "function") return prev(url);
+    throw new Error("unexpected fetch url: " + url);
+  };
+  try {
+    await ensureNameIndex();
+  } finally {
+    if (prev === undefined) delete globalThis.fetch;
+    else globalThis.fetch = prev;
+  }
+}
+
+test("multiUserEntryOf: Registry-Treffer gewinnt (Registry-Shape bleibt)", async () => {
+  resetStubs();
+  const restore = installFetch();
+  try {
+    await ensureExchangeRegistry();
+    const entry = multiUserEntryOf(EX1);
+    assert.ok(entry, "Registry-Treffer liefert Eintrag");
+    assert.equal(entry.exchange, "Test Exchange One");
+    assert.notEqual(entry.confidence, "well-known", "Registry-Eintrag wird nicht zur Union-Form umgeformt");
+  } finally {
+    restore();
+  }
+});
+
+test("multiUserEntryOf: verifizierter well-known-Fallback, unverifiziert fail-closed", async () => {
+  resetStubs();
+  const restore = installFetch();
+  try {
+    await ensureExchangeRegistry();
+    await seedNameIndex([
+      { account: WK1, name: "WK Verified Test", domain: "wk.example", verified: true },
+      { account: WK2, name: "WK Unverified Test", domain: "wk2.example" },
+    ]);
+    const wk = multiUserEntryOf(WK1);
+    assert.ok(wk, "verifizierte well-known-Adresse liefert Fallback-Eintrag");
+    assert.equal(wk.exchange, "WK Verified Test");
+    assert.equal(wk.confidence, "well-known");
+    assert.equal(wk.domain, "wk.example");
+    assert.equal(multiUserEntryOf(WK2), null, "unverifizierte well-known-Adresse: null (kein Chip)");
+    assert.equal(multiUserEntryOf("rUnbekannteAdresseX111111111"), null, "ohne jeden Treffer: null");
+    assert.equal(multiUserEntryOf(null), null);
+    assert.equal(multiUserEntryOf(""), null);
+  } finally {
+    restore();
+  }
+});
+
+test("multiUserSnapshot: Registry ∪ verifizierte well-known-Einträge (unverifiziert ausgeschlossen)", async () => {
+  resetStubs();
+  const restore = installFetch();
+  try {
+    await ensureExchangeRegistry();
+    await seedNameIndex([
+      { account: WK1, name: "WK Verified Test", domain: "wk.example", verified: true },
+      { account: WK2, name: "WK Unverified Test", domain: "wk2.example" },
+    ]);
+    const snap = multiUserSnapshot();
+    assert.ok(snap instanceof Map);
+    assert.ok(snap.has(EX1) && snap.has(EX2), "Registry-Einträge vollständig enthalten");
+    assert.ok(snap.has(WK1), "verifizierte well-known-Adresse enthalten");
+    assert.equal(snap.get(WK1).exchange, "WK Verified Test");
+    assert.equal(snap.get(WK1).confidence, "well-known");
+    assert.ok(!snap.has(WK2), "unverifizierte well-known-Adresse ausgeschlossen");
+    // Zweiter Aufruf: frische Kopie, identischer Inhalt (kein Stand-Verbrauch).
+    const snap2 = multiUserSnapshot();
+    assert.equal(snap2.size, snap.size, "Snapshot-Aufruf ist idempotent");
+    assert.notEqual(snap2, snap, "jeder Aufruf liefert eine neue Kopie (Registry-Map bleibt unangetastet)");
   } finally {
     restore();
   }

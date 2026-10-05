@@ -376,14 +376,25 @@ body.cluster-modal-open {
 .chain-node .addr-actions { margin-left: 6px; flex-shrink: 0; }
 .log-addr .addr-actions { margin-left: 6px; }
 
-/* XRPScan-Namens-Chip (nur ergänzt): in Kette und Tabellenzelle kompakt —
+/* XRPScan-Namens-Chip (nur ergänzt): in Kette und Exchange-Spalte kompakt —
    Name zusätzlich, nie anstelle der Adresse (Basis-Look: style.css). */
 .chain-node .name-chip { margin-left: 6px; flex-shrink: 0; }
-.cluster-td-addr .name-chip { margin-left: 8px; }
 
 /* Destination-Tag-Chip (nur ergänzt): gleiche Platzierung wie Namens-Chip. */
 .chain-node .tag-chip { margin-left: 6px; flex-shrink: 0; }
-.cluster-td-addr .tag-chip { margin-left: 8px; }
+
+/* Exchange-/Tag-Spalten der Konten-Tabelle (Layout-Fix 2026-10-05: Name- und
+   Tag-Chips klebten vorher an der Adresse — eigene Spalten entlasten die
+   Adress-Zelle). Chips beginnen an der Zellkante, lange Namens-Chips dürfen
+   kontrolliert umbrechen. */
+.cluster-td-exchange,
+.cluster-td-tag {
+  max-width: 260px;
+  white-space: normal;
+}
+.cluster-td-exchange .name-chip { margin-left: 0; }
+.cluster-td-tag .tag-chip { margin-left: 0; }
+.cluster-td-tag .tag-chip + .tag-chip { margin-left: 6px; }
 
 /* ---------------- Responsiv ---------------- */
 

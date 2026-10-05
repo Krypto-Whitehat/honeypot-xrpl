@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAccountReport } from "../lib/account-report.mjs";
-import { getThreatKnowledge, buildCheckCtx, getExchangeRegistryMap } from "../lib/threats-service.mjs";
+import { getThreatKnowledge, buildCheckCtx, getMultiUserAccountsMap } from "../lib/threats-service.mjs";
 
 export const maxDuration = 30; // Präzedenz api/ledger.js:25
 
@@ -177,9 +177,14 @@ export default async function handler(req, res, opts = {}) {
     const knowledgeResult = await knowledge(opts);
     const threatsByAddress = knowledgeResult.knowledge;
     const engineCtx = buildCheckCtx(knowledgeResult);
-    // Exchange-Registry (fail-open, lib/threats-service.mjs): hostedAccount-
-    // Verfeinerung + Kontakt-Tags im Report (lib/tag-identity.mjs).
-    const registryMap = getExchangeRegistryMap();
+    // Multi-User-Map (fail-open, lib/threats-service.mjs): Registry ∪
+    // verifizierte well-known-Namen für hostedAccount-Verfeinerung +
+    // Kontakt-/Kanten-Tags im Report (lib/tag-identity.mjs). Coverage-Fix
+    // 2026-10-05: verifizierte well-known-Börsen (z. B. rNxp4…, Binance)
+    // erhalten jetzt hostedAccount/Tags. Severity-Pfade nutzt diese Stelle
+    // nicht — der Exchange-Registry-Ausschluss läuft in getThreatKnowledge/
+    // buildCheckCtx über die reine Registry.
+    const registryMap = await getMultiUserAccountsMap();
     let report;
     try {
       const { entries, truncated } = await fetchAccountTxs(address, CHECK_MAX_TX);

@@ -36,7 +36,7 @@ import {
   checkDrainerSweepFromEntries,
   getThreatKnowledge,
   buildCheckCtx,
-  getExchangeRegistryMap,
+  getMultiUserAccountsMap,
 } from "../lib/threats-service.mjs";
 import { normalizeTag } from "../lib/tag-identity.mjs";
 import {
@@ -501,7 +501,11 @@ app.get("/api/check/:address", async (req, res) => {
     // werden aus der Wissens-Map ausgeschlossen und erscheinen daher nie als
     // contact (Konsistenz zu lib/threats-service.mjs).
     const contacts = [];
-    const registryMap = getExchangeRegistryMap();
+    // Hosted-Selbst-Zuordnung über die Multi-User-Union (Registry ∪
+    // verifizierte well-known-Namen, lib/threats-service.mjs) — Coverage-Fix
+    // 2026-10-05: verifizierte well-known-Börsen erhalten jetzt hostedAccount
+    // und Kontakt-Tags. Fail-open: Fetch-Fehler -> Union = reine Registry.
+    const registryMap = await getMultiUserAccountsMap();
     const hostedSelf = registryMap.get(addr) ?? null;
     const hostedIdentities = new Set(); // Identitäten des geprüften Hosted-Kontos
     for (const entry of entries) {

@@ -25,6 +25,7 @@
 // Adresse->Börsen-Eintrag-Auflösung.
 
 import { parseExchangeRegistry } from './attribution.mjs';
+import { nameIndexSnapshot, lookupNameCached } from './name-index.mjs';
 
 export const REGISTRY_TTL_MS = 6 * 60 * 60 * 1000; // 6 h — Registry ändert sich selten
 const REGISTRY_URL = '/data/exchange-registry.json'; // same-origin (Muster globe.js:85)
@@ -85,4 +86,62 @@ export function exchangeEntryOf(addr) {
   const a = String(addr ?? '').trim();
   if (!a) return null;
   return byAddressMap.get(a) ?? null;
+}
+
+// ---------- Multi-User-Union (Registry ∪ verifizierte well-known-Namen) ----------
+// Coverage-Fix 2026-10-05: die 81-Einträge-Registry erkennt weit weniger
+// Börsen-Konten als der XRPScan-well-known-Bulk (2.772 Einträge, ~1.182
+// verifiziert) — Tag-Chips blieben für z. B. rNxp4… (Binance) aus. Die
+// Union formt verifizierte Bulk-Einträge in den Registry-Entry-Schema um
+// ({exchange, domain, confidence:'well-known'}); bei Adress-Kollision
+// gewinnt der Registry-Eintrag. KEIN Netzwerkzugriff hier: der Bulk steht
+// synchron über nameIndexSnapshot() (public/name-index.mjs holt ihn lazy im
+// Live-Takt), Einzel-Konto-Fetches bleiben dem Konto-Check-Pfad vorbehalten
+// (dokumentierte Grenze name-index.mjs:21-23). Unverifizierte Namen tragen
+// nie Chips (fail-closed).
+
+// Gemergter Snapshot für den Graphen-Neubau (app.js multiUserAccounts):
+// Registry-Map-Kopie ∪ verifizierte well-known-Einträge. Ohne guten Stand
+// einer Quelle fällt die jeweilige Quelle leer aus (fail-closed).
+export function multiUserSnapshot() {
+  const merged = new Map(byAddressMap ?? []);
+  const bulk = nameIndexSnapshot();
+  if (bulk) {
+    for (const [addr, entry] of bulk) {
+      if (entry?.verified !== true || merged.has(addr)) continue;
+      const name = String(entry.name ?? '').trim();
+      if (!name) continue;
+      merged.set(addr, {
+        exchange: name,
+        domain: typeof entry.domain === 'string' && entry.domain ? entry.domain : null,
+        confidence: 'well-known',
+      });
+    }
+  }
+  return merged;
+}
+
+// Einzel-Lookup über die Union: Registry-Treffer zuerst, sonst der
+// verifizierte well-known-Eintrag aus dem synchronen Namens-Index
+// (Bulk zuerst, dann Einzel-Konto-Cache — lookupNameCached). Null ohne
+// Treffer oder bei unverifiziertem Namen.
+export function multiUserEntryOf(addr) {
+  const reg = exchangeEntryOf(addr);
+  if (reg) return reg;
+  const a = String(addr ?? '').trim();
+  if (!a) return null;
+  let entry = null;
+  try {
+    entry = lookupNameCached(a);
+  } catch {
+    entry = null; // fail-closed: Index-Fehler bleibt ohne Chip
+  }
+  if (!entry || entry.verified !== true) return null;
+  const name = String(entry.name ?? '').trim();
+  if (!name) return null;
+  return {
+    exchange: name,
+    domain: typeof entry.domain === 'string' && entry.domain ? entry.domain : null,
+    confidence: 'well-known',
+  };
 }

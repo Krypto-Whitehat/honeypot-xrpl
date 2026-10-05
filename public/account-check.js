@@ -110,18 +110,26 @@ export function initAccountCheck(ctx = {}) {
       : '';
     return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
   };
-  // Exchange-Registry-Lookup (Destination-Tag-Identität): HOST-GATE
-  // (ctx.exchangeEntryOf aus app.js) PLUS lokaler fail-closed-Guard wie bei
-  // accountNameOf (:99). Fallback ohne Host-Funktion: () => null — ohne
-  // Lookup fehlt nur der Tag-Chip, die Anzeige bleibt unverändert.
-  const exchangeEntryOf = (a) => (typeof ctx.exchangeEntryOf === 'function' && isFullShownAddr(a) ? ctx.exchangeEntryOf(a) : null);
+  // Multi-User-Lookup (Destination-Tag-Identität, Registry ∪ verifizierte
+  // well-known-Namen — Coverage-Fix 2026-10-05): HOST-GATE
+  // (ctx.multiUserEntryOf aus app.js liefert null für maskierte/Deny-Adressen
+  // und ohne Registry-/verifizierten Namens-Treffer) PLUS lokaler fail-closed-
+  // Guard wie bei accountNameOf (:99). Fallback ohne Host-Funktion: der
+  // frühere reine Registry-Lookup ctx.exchangeEntryOf, sonst () => null —
+  // ohne Lookup fehlt nur der Tag-Chip, die Anzeige bleibt unverändert.
+  const multiUserEntryOf = (a) => (
+    typeof ctx.multiUserEntryOf === 'function' && isFullShownAddr(a)
+      ? ctx.multiUserEntryOf(a)
+      : (typeof ctx.exchangeEntryOf === 'function' && isFullShownAddr(a) ? ctx.exchangeEntryOf(a) : null)
+  );
   // Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur bei
-  // Registry-Treffer der GEPÜFTE Adresse (Hosted-Account) und gültigem Tag.
+  // Multi-User-Treffer der GEPÜFTEN Adresse (Hosted-Account: Registry ODER
+  // verifizierter well-known-Name) und gültigem Tag.
   // destinationTag (eingehend) und sourceTag (ausgehend, informativ) gehören
   // zum geprüften Konto, nicht zur Gegenpartei — Gate ist die Prüfadresse.
   const tagChipHtml = (addr, tag, ariaKey) => {
     if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
-    if (!exchangeEntryOf(addr)) return '';
+    if (!multiUserEntryOf(addr)) return '';
     const aria = t(ariaKey);
     return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
   };
@@ -215,7 +223,8 @@ export function initAccountCheck(ctx = {}) {
           : '<span class="cluster-table-dash">–</span>';
     // Hosted-Sub-Konto des GEPRÜFTEN Kontos (additive Server-Felder
     // destinationTag/sourceTag, lib/threats-service.mjs): Chip in der
-    // Notiz-Zelle, gegatet über die Prüfadresse (exchangeEntryOf).
+    // Notiz-Zelle, gegatet über die Prüfadresse (multiUserEntryOf —
+    // Registry ODER verifizierter well-known-Name).
     const hostedTagChip =
       (c.destinationTag != null ? tagChipHtml(checkedAddr, c.destinationTag, 'tag.chipAria') : '') +
       (c.sourceTag != null ? tagChipHtml(checkedAddr, c.sourceTag, 'tag.sourceAria') : '');

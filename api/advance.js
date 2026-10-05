@@ -115,7 +115,7 @@ import {
   mergeHistory,
   writeHistoryGitHub,
 } from "../lib/history.mjs";
-import { getThreatKnowledge, buildCheckCtx, getExchangeRegistryMap } from "../lib/threats-service.mjs";
+import { getThreatKnowledge, buildCheckCtx, getExchangeRegistryMap, getMultiUserAccountsMap } from "../lib/threats-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -647,11 +647,17 @@ export default async function handler(req, res) {
     // die Summary sichtbar (neutraler Text, nie Token; Muster
     // lib/history.mjs:12).
     let walkError = null;
-    // Exchange-Registry für die Tag-Kantenattribute (toTag in den
-    // Block-Fenster-Edges, toTag/transit im akkumulierten Flow-State;
-    // lib/tag-identity.mjs). Fail-open: Read-Fehler -> leere Map -> keine
-    // Tag-Felder (Verhalten wie vor der Funktion).
+    // Exchange-Registry für die Severity-Pfade (flaggedEdgesFrom, :685) — die
+    // REINE 81-Einträge-Registry, unverändert. Für die Tag-Kantenattribute
+    // (toTag in den Block-Fenster-Edges, toTag/transit im akkumulierten
+    // Flow-State, :714) läuft zusätzlich die Multi-User-Union (Registry ∪
+    // verifizierte well-known-Namen, lib/threats-service.mjs getMultiUser-
+    // AccountsMap) — Coverage-Fix 2026-10-05: Kanten zu z. B. rNxp4…
+    // (Binance, well-known-verifiziert, nicht in der 81er-Registry) bekommen
+    // jetzt ein toTag. Fail-open: Fetch-/Parse-Fehler -> Union = Registry
+    // (Verhalten wie vor der Erweiterung).
     const registryMap = getExchangeRegistryMap();
+    const multiUserMap = await getMultiUserAccountsMap();
     const advanceResult = await advance({
       cursor,
       budget,
@@ -711,7 +717,7 @@ export default async function handler(req, res) {
       opts: {
         parallel: FETCH_PARALLEL,
         entityLinks: entityDoc ? buildEntityLinks(entityDoc) : null,
-        multiUserAccounts: registryMap,
+        multiUserAccounts: multiUserMap,
       },
     });
     // (iii.4) Effektiver Cluster-Cap EINMAL pro Tick (Byte-Cap

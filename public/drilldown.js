@@ -83,18 +83,24 @@ export function initClusterDrilldown(ctx) {
       : '';
     return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
   };
-  // Exchange-Registry-Lookup (Destination-Tag-Identität): HOST-SEITIG GEGATET —
-  // ctx.exchangeEntryOf (app.js) liefert null für jede maskierte oder
-  // Deny-Treffer-Adresse und ohne Registry-Treffer. Fallback ohne Host-
-  // Funktion: () => null (fail-closed — ohne Lookup fehlt nur der Tag-Chip,
-  // die Anzeige bleibt unverändert; Muster accountNameOf oben).
-  const exchangeEntryOf = typeof ctx.exchangeEntryOf === 'function' ? ctx.exchangeEntryOf : () => null;
+  // Multi-User-Lookup (Destination-Tag-Identität, Registry ∪ verifizierte
+  // well-known-Namen — Coverage-Fix 2026-10-05): HOST-SEITIG GEGATET —
+  // ctx.multiUserEntryOf (app.js) liefert null für jede maskierte oder
+  // Deny-Treffer-Adresse und ohne Registry-/verifizierten Namens-Treffer.
+  // Fallback ohne Host-Funktion: der frühere reine Registry-Lookup
+  // ctx.exchangeEntryOf, sonst () => null (fail-closed — ohne Lookup fehlt
+  // nur der Tag-Chip, die Anzeige bleibt unverändert; Muster accountNameOf
+  // oben).
+  const multiUserEntryOf = typeof ctx.multiUserEntryOf === 'function'
+    ? ctx.multiUserEntryOf
+    : (typeof ctx.exchangeEntryOf === 'function' ? ctx.exchangeEntryOf : () => null);
   // Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur bei
-  // Registry-Treffer der Adresse (host-seitig gegatet) UND gültigem Tag.
-  // Tag 0 ist ein echter Tag (lib/tag-identity.mjs) und zeigt '#0'.
+  // Multi-User-Treffer der Adresse (Registry ODER verifizierter well-known-
+  // Name, host-seitig gegatet) UND gültigem Tag. Tag 0 ist ein echter Tag
+  // (lib/tag-identity.mjs) und zeigt '#0'.
   const tagChipHtml = (addr, tag) => {
     if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
-    if (!exchangeEntryOf(addr)) return '';
+    if (!multiUserEntryOf(addr)) return '';
     const aria = t('tag.chipAria');
     return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
   };
@@ -1011,8 +1017,9 @@ export function initClusterDrilldown(ctx) {
       // Name nur hinter dem Host-Gate (accountNameOf) und nur ergänzend —
       // der Anzeigewert bleibt die Adresse.
       const nameChip = nameChipHtml(address);
-      // Tag-Chip nur bei Registry-Treffer des Ziels (exchangeEntryOf,
-      // Host-Gate) und belegter Kante mit toTag — nie an der Kurzform.
+      // Tag-Chip nur bei Multi-User-Treffer des Ziels (Registry ODER
+      // verifizierter well-known-Name, multiUserEntryOf-Host-Gate) und
+      // belegter Kante mit toTag — nie an der Kurzform.
       const tag = prevId != null ? tagByPair.get(`${String(prevId)}\u0001${address}`) : null;
       const tagChip = tagChipHtml(address, tag);
       return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}${nameChip}${tagChip}</span>`;
@@ -1100,10 +1107,12 @@ export function initClusterDrilldown(ctx) {
         // darf nie als DOM-Attribut landen (Befund 2026-09-29). Hover-
         // Highlight und Klick-Scroll vergleichen deshalb gegen
         // displayAddr(n.id), nicht gegen die rohe Id.
-        // Name-Chip nur hinter dem Host-Gate (accountNameOf) und nur bei
-        // Vollanzeige — die Zelle behält den Anzeigewert, der Name ist
-        // zusätzliches Element. Tag-Chips ebenso (exchangeEntryOf-Gate):
-        // distinct toTags der eingehenden Cluster-Kanten, aufsteigend, Cap 3.
+        // Name-Chip (Exchange-Spalte) nur hinter dem Host-Gate
+        // (accountNameOf) und nur bei Vollanzeige. Tag-Chips (Tag-Spalte)
+        // ebenso (multiUserEntryOf-Gate): distinct toTags der eingehenden
+        // Cluster-Kanten, aufsteigend, Cap 3. Die Adress-Zelle trägt nur
+        // noch Adresse + Aktionen (Layout-Fix 2026-10-05: Chips klebten
+        // vorher übereinander an der Adresse).
         const nameChip = full ? nameChipHtml(id) : '';
         const tagSet = full ? tagsByAddr.get(id) : null;
         let tagChips = '';
@@ -1113,7 +1122,9 @@ export function initClusterDrilldown(ctx) {
           if (tags.length > 3) tagChips += '<span class="cluster-table-dash">+</span>';
         }
         return `<tr data-addr="${esc(full ? id : shown)}">
-          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}${nameChip}${tagChips}</td>
+          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}</td>
+          <td class="cluster-td-exchange">${nameChip}</td>
+          <td class="cluster-td-tag">${tagChips}</td>
           <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabelText(role))}</span></td>
           <td>${badge}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
@@ -1135,6 +1146,8 @@ export function initClusterDrilldown(ctx) {
           <thead>
             <tr>
               <th scope="col">${esc(t('modal.thAddr'))}</th>
+              <th scope="col">${esc(t('modal.thExchange'))}</th>
+              <th scope="col">${esc(t('modal.thTag'))}</th>
               <th scope="col">${esc(t('modal.thRole'))}</th>
               <th scope="col">${esc(t('modal.thSeverity'))}</th>
               <th scope="col">${esc(t('modal.thIn'))}</th>
@@ -1273,9 +1286,10 @@ export function initClusterDrilldown(ctx) {
           const to = l.target && typeof l.target === 'object' ? l.target.id : l.target;
           const nameFrom = accountNameOf(String(from ?? ''));
           const nameTo = accountNameOf(String(to ?? ''));
-          // Tag-Suffix nur bei Registry-Treffer des Ziels (exchangeEntryOf-
-          // Host-Gate) und belegtem toTag — an der Kurzform nie (fail-closed).
-          const tagSuffix = l.toTag != null && exchangeEntryOf(String(to ?? '')) ? ` · #${l.toTag}` : '';
+          // Tag-Suffix nur bei Multi-User-Treffer des Ziels (Registry ODER
+          // verifizierter well-known-Name, multiUserEntryOf-Host-Gate) und
+          // belegtem toTag — an der Kurzform nie (fail-closed).
+          const tagSuffix = l.toTag != null && multiUserEntryOf(String(to ?? '')) ? ` · #${l.toTag}` : '';
           return `${esc(displayAddr(from) + (nameFrom ? ` (${nameFrom.name})` : ''))} → ${esc(displayAddr(to) + (nameTo ? ` (${nameTo.name})` : ''))} (${esc(String(l.type ?? ''))})${tagSuffix ? esc(tagSuffix) : ''}`;
         })
         .linkWidth(1)
@@ -1344,10 +1358,11 @@ export function initClusterDrilldown(ctx) {
       from: String(e.from),
       to: String(e.to),
       label: String(e.type ?? ''),
-      // Tag-Suffix im Kanten-Tooltip nur bei Registry-Treffer des Ziels
-      // (exchangeEntryOf-Host-Gate) und belegtem toTag (fail-closed).
+      // Tag-Suffix im Kanten-Tooltip nur bei Multi-User-Treffer des Ziels
+      // (Registry ODER verifizierter well-known-Name, multiUserEntryOf-Host-
+      // Gate) und belegtem toTag (fail-closed).
       title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`
-        + (e.toTag != null && exchangeEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
+        + (e.toTag != null && multiUserEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
       color: { color: edgeColors[String(e.type)] || edgeDefault, highlight: '#141416', hover: '#141416' },
       arrows: { to: { enabled: true, scaleFactor: 0.5 } },
       width: 1,

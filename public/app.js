@@ -143,6 +143,10 @@ import('./drilldown.js')
         // Host-Gate der Exchange-Registry (analog accountNameOf: null für
         // maskierte/Deny-Adressen und ohne Registry-Treffer — fail-closed).
         exchangeEntryOf,
+        // Host-Gate der Multi-User-Union (Registry ∪ verifizierte well-known-
+        // Namen) — Tag-Chips/Tooltips im Drilldown nutzen es statt des reinen
+        // Registry-Lookups (Coverage-Fix 2026-10-05).
+        multiUserEntryOf,
         flowPaths: () => flowPathsFn,
       });
     }
@@ -226,6 +230,9 @@ import('./account-check.js')
         addrActionsHtml,
         accountNameOf,
         exchangeEntryOf,
+        // Host-Gate der Multi-User-Union — Tag-Chips im Konto-Check nutzen es
+        // statt des reinen Registry-Lookups (Coverage-Fix 2026-10-05).
+        multiUserEntryOf,
         roleLabels: ROLE_LABEL,
         roleColors: ROLE_COLORS,
         ruleNames: RULE_NAME,
@@ -659,13 +666,29 @@ function exchangeEntryOf(addr) {
   }
 }
 
+/* HOST-GATE der Multi-User-Union (Registry ∪ verifizierte well-known-Namen,
+ * Coverage-Fix 2026-10-05): dasselbe Gate-Muster — null für jede maskierte
+ * oder Deny-Treffer-Adresse; verifizierte XRPScan-Namen (z. B. Binance-
+ * Hot-Wallets, nicht in der 81er-Registry) erhalten jetzt einen Eintrag.
+ * Lookup-Synchron über den geladenen Namens-Index (kein Zusatz-Fetch). */
+function multiUserEntryOf(addr) {
+  const a = String(addr ?? '');
+  if (!registryMod || typeof registryMod.multiUserEntryOf !== 'function' || !isFullShownAddr(a)) return null;
+  try {
+    return registryMod.multiUserEntryOf(a) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /* Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur, wenn die
- * Adresse ein Registry-Multi-User-Konto ist (host-seitig gegatet) UND ein
- * gültiger Tag vorliegt. Rein ergänzend — verdrängt nie die Adresse.
- * Tag 0 ist ein echter Tag (lib/tag-identity.mjs) und zeigt '#0'. */
+ * Adresse ein Multi-User-Konto ist (Registry ODER verifizierter well-known-
+ * Name, host-seitig gegatet) UND ein gültiger Tag vorliegt. Rein ergänzend —
+ * verdrängt nie die Adresse. Tag 0 ist ein echter Tag (lib/tag-identity.mjs)
+ * und zeigt '#0'. */
 function tagChipHtml(addr, tag) {
   if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
-  if (!exchangeEntryOf(addr)) return '';
+  if (!multiUserEntryOf(addr)) return '';
   const aria = t('tag.chipAria');
   return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
 }
@@ -989,10 +1012,11 @@ function updateRawGraph(cg, maxNodes = null) {
       label: typeLabel,
       // Kanten-Tooltip: volle Adressen bei geladener Allowlist und Nicht-Treffer
       // auf der Deny-Liste, sonst Kurzform (displayFindingAddr, fail-closed).
-      // Tag-Suffix nur bei Registry-Treffer des Ziels (exchangeEntryOf-Gate)
-      // und belegtem toTag — an der Kurzform nie (fail-closed).
+      // Tag-Suffix nur bei Multi-User-Treffer des Ziels (Registry ODER
+      // verifizierter well-known-Name, multiUserEntryOf-Gate) und belegtem
+      // toTag — an der Kurzform nie (fail-closed).
       title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`
-        + (e.toTag != null && exchangeEntryOf(e.to) ? ` · #${e.toTag}` : ''),
+        + (e.toTag != null && multiUserEntryOf(e.to) ? ` · #${e.toTag}` : ''),
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
       font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
@@ -1195,8 +1219,9 @@ function flowChainHtml(paths, opts = {}) {
     // Name nur hinter demselben Gate (accountNameOf ist host-seitig gegatet)
     // und nur als ergänzender Chip — der Anzeigewert bleibt die Adresse.
     const nameChip = nameChipHtml(address);
-    // Tag-Chip nur bei Registry-Treffer des Ziels (exchangeEntryOf, gleiches
-    // Gate) und belegter Kante mit toTag — nie an der Kurzform.
+    // Tag-Chip nur bei Multi-User-Treffer des Ziels (Registry ODER
+    // verifizierter well-known-Name, multiUserEntryOf, gleiches Gate) und
+    // belegter Kante mit toTag — nie an der Kurzform.
     const tag = prevId != null ? tagByPair.get(`${String(prevId)}\u0001${address}`) : null;
     const tagChip = tagChipHtml(address, tag);
     // title trägt NUR den Anzeigewert (gerenderter displayFindingAddr-Wert),
@@ -1639,15 +1664,18 @@ async function rebuildClusterGraph() {
   // Lazy-Registry (ANDOCKSTELLE des Registry-Fetches im Live-Takt, Muster
   // Namensindex): GENAU EIN Fetch pro Session (Guard/TTL im Modul), kein
   // Await — Tags erscheinen ab dem nächsten Takt (fail-closed ohne Stand).
-  // Der Snapshot des letzten guten Stands geht als multiUserAccounts in den
-  // Graphen (lib/cluster.mjs: Tags sind reine Edge-Attribute, Topologie
-  // unverändert; ohne Stand: bit-identisch zu vorher).
+  // Die Multi-User-Union (Registry ∪ verifizierte well-known-Namen,
+  // Coverage-Fix 2026-10-05) geht als multiUserAccounts in den Graphen
+  // (lib/cluster.mjs: Tags sind reine Edge-Attribute, Topologie unverändert;
+  // ohne Stand: bit-identisch zu vorher).
   if (registryMod && typeof registryMod.ensureExchangeRegistry === 'function') {
     registryMod.ensureExchangeRegistry().catch(() => { /* ohne Tags rendern */ });
   }
-  const multiUserAccounts = registryMod && typeof registryMod.registrySnapshot === 'function'
-    ? registryMod.registrySnapshot()
-    : null;
+  const multiUserAccounts = registryMod && typeof registryMod.multiUserSnapshot === 'function'
+    ? registryMod.multiUserSnapshot()
+    : (registryMod && typeof registryMod.registrySnapshot === 'function'
+      ? registryMod.registrySnapshot()
+      : null);
   const cg = buildClusterGraph(graphTx, graphFindings, {
     maxEdges: CLUSTER_MAX_EDGES,
     ...(multiUserAccounts ? { multiUserAccounts } : {}),

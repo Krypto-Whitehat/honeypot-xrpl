@@ -402,6 +402,29 @@ test("Tag-Chips: maskierte Tabellenzeile (isFullShownAddr false) ohne Chips, auc
   assert.ok(!table.includes("tag-chip"), "keine Tag-Chips an maskierter Kurzform");
 });
 
+/* ---------------- 9) Konten-Tabelle: getrennte Exchange-/Tag-Spalten (Layout-Fix 2026-10-05) ---------------- */
+
+test("Konten-Tabelle: Exchange- und Tag-Spalten getrennt, Adress-Zelle trägt nur die Adresse", async () => {
+  lang = "de";
+  liveGraph = makeTagGraph();
+  // Kein ctx.multiUserEntryOf: der Fallback auf ctx.exchangeEntryOf (gatedRegistry)
+  // trägt die Chips — derselbe Vertrag wie vor dem Coverage-Fix.
+  const dd = initClusterDrilldown(makeCtx({ exchangeEntryOf: gatedRegistry, flowPaths: chainPaths }));
+  dd.openCluster(CID);
+  await settle();
+  const table = q(".cluster-modal-table").innerHTML;
+  // Spaltenüberschriften: Adresse, Exchange, Tag (DE, korrekte Orthographie).
+  assert.ok(table.includes(">Adresse<"), "DE Adress-Spalte");
+  assert.ok(table.includes(">Börse<"), "DE Exchange-Spalte");
+  assert.ok(table.includes(">Tag<"), "DE Tag-Spalte");
+  // Chips in eigenen Zellen (Exchange-/Tag-Spalte), nicht mehr an der Adresse.
+  assert.ok(table.includes('td class="cluster-td-exchange"'), "Exchange-Zelle vorhanden");
+  assert.ok(table.includes('td class="cluster-td-tag"'), "Tag-Zelle vorhanden");
+  assert.ok(table.includes(`<td class="cluster-td-addr" title="${A2}">${A2}</td>`), "Adress-Zelle trägt nur die Adresse (keine Chips mehr)");
+  assert.ok(table.includes('class="name-chip"'), "Name-Chip weiterhin gerendert (jetzt in der Exchange-Spalte)");
+  assert.ok(table.includes("#42"), "Tag-Chip #42 weiterhin gerendert (jetzt in der Tag-Spalte)");
+});
+
 test("Freeze-Export: Kanten tragen toTag/transit additiv (ohne Tag-Felder bleiben Kanten schlank)", async () => {
   liveGraph = makeGraph("Export-Ohne-Tags", 6);
   const dd = initClusterDrilldown(makeCtx({ exchangeEntryOf: gatedRegistry }));

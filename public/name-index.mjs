@@ -89,6 +89,15 @@ export function nameIndexOf(addr) {
   return bulkMap ? nameFor(bulkMap, addr) : null;
 }
 
+// Synchroner Bulk-Snapshot (null ohne erfolgreichen Stand): nur-lesende
+// Herausgabe der GESAMTEN Bulk-Map für Merge-Konsumenten, die über alle
+// verifizierten Einträge iterieren müssen (public/exchange-registry.mjs
+// multiUserSnapshot). KEIN Kopierversprechen: Aufrufer dürfen die Map nicht
+// mutieren (gleiche Lesevertrag-Strenge wie registrySnapshot).
+export function nameIndexSnapshot() {
+  return bulkMap;
+}
+
 // Synchroner Gesamt-Lookup: Bulk zuerst, dann Einzel-Konto-Cache.
 export function lookupNameCached(addr) {
   const a = String(addr ?? '').trim();
