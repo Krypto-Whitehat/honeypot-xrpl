@@ -140,6 +140,12 @@ export const DICT = {
     'name.unverifiedAria': 'Unverified name from xrpscan.com',
     'name.sourceNote': 'Account names: xrpscan.com (CC BY-NC-SA 4.0)',
 
+    /* app.js / Module — Destination-Tag-Chips (Exchange-Registry) */
+    'tag.chipAria': 'Destination tag — hosted account at this exchange',
+    'tag.sourceAria': 'Source tag — informative, set by the sender',
+    'cluster.transitNote': 'Connection runs through a shared exchange account (different destination tags)',
+    'check.transitNote': 'Connection runs through a shared exchange account (different destination tags)',
+
     /* app.js — Graph */
     'graph.visError': 'vis-network could not be loaded (CDN unreachable).',
     'edge.other': 'Other',
@@ -522,6 +528,12 @@ export const DICT = {
     'name.chipAria': 'Verifizierter Name von xrpscan.com',
     'name.unverifiedAria': 'Unverifizierter Name von xrpscan.com',
     'name.sourceNote': 'Kontonamen: xrpscan.com (CC BY-NC-SA 4.0)',
+
+    /* app.js / Module — Destination-Tag-Chips (Exchange-Registry) */
+    'tag.chipAria': 'Destination-Tag — Hosted-Account bei dieser Börse',
+    'tag.sourceAria': 'Source-Tag — informativ, vom Absender gesetzt',
+    'cluster.transitNote': 'Verbindung läuft über ein gemeinsames Börsen-Konto (unterschiedliche Destination-Tags)',
+    'check.transitNote': 'Verbindung läuft über ein gemeinsames Börsen-Konto (unterschiedliche Destination-Tags)',
 
     /* app.js — Graph */
     'graph.visError': 'vis-network konnte nicht geladen werden (CDN nicht erreichbar).',

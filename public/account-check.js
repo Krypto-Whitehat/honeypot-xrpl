@@ -110,6 +110,21 @@ export function initAccountCheck(ctx = {}) {
       : '';
     return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
   };
+  // Exchange-Registry-Lookup (Destination-Tag-Identität): HOST-GATE
+  // (ctx.exchangeEntryOf aus app.js) PLUS lokaler fail-closed-Guard wie bei
+  // accountNameOf (:99). Fallback ohne Host-Funktion: () => null — ohne
+  // Lookup fehlt nur der Tag-Chip, die Anzeige bleibt unverändert.
+  const exchangeEntryOf = (a) => (typeof ctx.exchangeEntryOf === 'function' && isFullShownAddr(a) ? ctx.exchangeEntryOf(a) : null);
+  // Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur bei
+  // Registry-Treffer der GEPÜFTE Adresse (Hosted-Account) und gültigem Tag.
+  // destinationTag (eingehend) und sourceTag (ausgehend, informativ) gehören
+  // zum geprüften Konto, nicht zur Gegenpartei — Gate ist die Prüfadresse.
+  const tagChipHtml = (addr, tag, ariaKey) => {
+    if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
+    if (!exchangeEntryOf(addr)) return '';
+    const aria = t(ariaKey);
+    return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
+  };
   const ruleName = (id) => {
     const viaI18n = i18nRuleName(id);
     if (viaI18n !== String(id)) return viaI18n;
@@ -188,7 +203,7 @@ export function initAccountCheck(ctx = {}) {
 
   /* ---------- Report-Rendering ---------- */
 
-  function contactRow(c) {
+  function contactRow(c, checkedAddr) {
     const shown = displayAddr(c.counterparty);
     const actions = addrActionsHtml(c.counterparty);
     const nameChip = nameChipHtml(c.counterparty);
@@ -198,6 +213,12 @@ export function initAccountCheck(ctx = {}) {
         : c.risk === 'suspect'
           ? `<span class="risk-badge risk-suspect">${esc(sevText('suspect'))}</span>`
           : '<span class="cluster-table-dash">–</span>';
+    // Hosted-Sub-Konto des GEPRÜFTEN Kontos (additive Server-Felder
+    // destinationTag/sourceTag, lib/threats-service.mjs): Chip in der
+    // Notiz-Zelle, gegatet über die Prüfadresse (exchangeEntryOf).
+    const hostedTagChip =
+      (c.destinationTag != null ? tagChipHtml(checkedAddr, c.destinationTag, 'tag.chipAria') : '') +
+      (c.sourceTag != null ? tagChipHtml(checkedAddr, c.sourceTag, 'tag.sourceAria') : '');
     return (
       `<tr>` +
       `<td class="cluster-td-addr"><span class="addr-full" title="${esc(shown)}">${esc(shown)}</span>${actions}${nameChip}</td>` +
@@ -205,7 +226,7 @@ export function initAccountCheck(ctx = {}) {
       `<td>${esc(c.txType ?? '–')}</td>` +
       `<td>${esc(fmtClockHost(c.time))}</td>` +
       `<td>${risk}</td>` +
-      `<td>${esc(c.note ?? '')}</td>` +
+      `<td>${esc(c.note ?? '')}${hostedTagChip}</td>` +
       `</tr>`
     );
   }
@@ -273,7 +294,7 @@ export function initAccountCheck(ctx = {}) {
       `<div class="cluster-table-wrap" tabindex="0" role="region" aria-label="${esc(t('check.contactsAria'))}">` +
       `<table class="cluster-table check-contacts-table">` +
       `<thead><tr><th scope="col">${esc(t('check.thCounterparty'))}</th><th scope="col">${esc(t('check.thDirection'))}</th><th scope="col">${esc(t('check.thTxType'))}</th><th scope="col">${esc(t('check.thTime'))}</th><th scope="col">${esc(t('check.thRisk'))}</th><th scope="col">${esc(t('check.thNote'))}</th></tr></thead>` +
-      `<tbody>${list.map(contactRow).join('')}</tbody>` +
+      `<tbody>${list.map((c) => contactRow(c, report.address)).join('')}</tbody>` +
       `</table></div>`
     );
   }
@@ -322,16 +343,29 @@ export function initAccountCheck(ctx = {}) {
     // nie auf rohe Server-Sätze aus — report.zusammenfassung bleibt Rohwert.
     const summary = summaryText(report);
 
+    // Hosted-Account-Zeile (tagIdentityDesign, additiv): report.hostedAccount
+    // liefert der Server NUR bei Registry-Treffer der geprüften Adresse.
+    // Anzeige nur bei erlaubter Vollanzeige (isFullShownAddr — die Börsen-
+    // Zugehörigkeit einer maskierten Adresse wäre ein Identitäts-Leak).
+    const hosted = report.hostedAccount && typeof report.hostedAccount === 'object' ? report.hostedAccount : null;
+    const hostedChip = hosted && isFullShownAddr(report.address) && hosted.exchange
+      ? `<span class="tag-chip" role="img" aria-label="${esc(t('tag.chipAria'))}" title="${esc(t('tag.chipAria'))}">${esc(String(hosted.exchange))}</span>`
+      : '';
+    const transitNote = hosted && hosted.transit === true && isFullShownAddr(report.address)
+      ? `<p class="graph-note check-transit-note">${esc(t('check.transitNote'))}</p>`
+      : '';
+
     reportEl.innerHTML =
       `<article class="check-report" aria-label="${esc(t('check.reportAria'))}">` +
       `<header class="check-report-head">` +
       `<span class="${esc(badge.cls)}">${esc(t(badge.key))}</span>` +
-      `<span class="addr-full check-report-addr" title="${esc(shownAddr)}">${esc(shownAddr)}</span>${actions}${nameChip}` +
+      `<span class="addr-full check-report-addr" title="${esc(shownAddr)}">${esc(shownAddr)}</span>${actions}${nameChip}${hostedChip}` +
       `<div class="check-score" aria-label="${esc(t('check.scoreAria'))}">` +
       `<span class="check-score-value">${esc(scoreValue)}</span><span class="check-score-max">/ 100</span>` +
       `</div>` +
       `</header>` +
       `<p class="check-summary">${esc(summary)}</p>` +
+      transitNote +
       hintHtml +
       `<section class="check-section" aria-label="${esc(t('check.sectionScore'))}">` +
       `<h3 class="check-section-title">${esc(t('check.sectionScore'))}</h3>` +

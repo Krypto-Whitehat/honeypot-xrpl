@@ -115,7 +115,7 @@ import {
   mergeHistory,
   writeHistoryGitHub,
 } from "../lib/history.mjs";
-import { getThreatKnowledge, buildCheckCtx } from "../lib/threats-service.mjs";
+import { getThreatKnowledge, buildCheckCtx, getExchangeRegistryMap } from "../lib/threats-service.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -647,6 +647,11 @@ export default async function handler(req, res) {
     // die Summary sichtbar (neutraler Text, nie Token; Muster
     // lib/history.mjs:12).
     let walkError = null;
+    // Exchange-Registry für die Tag-Kantenattribute (toTag in den
+    // Block-Fenster-Edges, toTag/transit im akkumulierten Flow-State;
+    // lib/tag-identity.mjs). Fail-open: Read-Fehler -> leere Map -> keine
+    // Tag-Felder (Verhalten wie vor der Funktion).
+    const registryMap = getExchangeRegistryMap();
     const advanceResult = await advance({
       cursor,
       budget,
@@ -676,7 +681,8 @@ export default async function handler(req, res) {
           const flagged = flaggedEdgesFrom(
             block.transactions.map((e) => txRecordFromEntry(e, block.closeIso)).filter(Boolean),
             block.findings,
-            baitLabels
+            baitLabels,
+            registryMap
           );
           // x nur für Adressen, die bereits in der Entity-Tabelle oder
           // geflaggt sind (Köder-Filter/sanitizeText im Codec).
@@ -705,6 +711,7 @@ export default async function handler(req, res) {
       opts: {
         parallel: FETCH_PARALLEL,
         entityLinks: entityDoc ? buildEntityLinks(entityDoc) : null,
+        multiUserAccounts: registryMap,
       },
     });
     // (iii.4) Effektiver Cluster-Cap EINMAL pro Tick (Byte-Cap

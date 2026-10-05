@@ -83,6 +83,21 @@ export function initClusterDrilldown(ctx) {
       : '';
     return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
   };
+  // Exchange-Registry-Lookup (Destination-Tag-Identität): HOST-SEITIG GEGATET —
+  // ctx.exchangeEntryOf (app.js) liefert null für jede maskierte oder
+  // Deny-Treffer-Adresse und ohne Registry-Treffer. Fallback ohne Host-
+  // Funktion: () => null (fail-closed — ohne Lookup fehlt nur der Tag-Chip,
+  // die Anzeige bleibt unverändert; Muster accountNameOf oben).
+  const exchangeEntryOf = typeof ctx.exchangeEntryOf === 'function' ? ctx.exchangeEntryOf : () => null;
+  // Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur bei
+  // Registry-Treffer der Adresse (host-seitig gegatet) UND gültigem Tag.
+  // Tag 0 ist ein echter Tag (lib/tag-identity.mjs) und zeigt '#0'.
+  const tagChipHtml = (addr, tag) => {
+    if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
+    if (!exchangeEntryOf(addr)) return '';
+    const aria = t('tag.chipAria');
+    return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
+  };
   // 2D-Canvas-Label in Kurzform (Design-Fix): shortAddr kommt bereits im ctx
   // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
   const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
@@ -128,6 +143,7 @@ export function initClusterDrilldown(ctx) {
   const TABLE_STEP = 200;
   let tableRowLimit = TABLE_MAX_ROWS;
   let lastTableNodes = null;    // letzter renderTable-Input für 'Mehr laden'
+  let lastTableEdges = null;    // zugehörige Cluster-Kanten (Tag-Zuordnung je Zeile)
   let lastTableEl = null;       // zugehöriges Container-Element
 
   // 3D-Graph-Deckel (build3D): Top-N Knoten nach Drops-Summe + ein
@@ -468,8 +484,12 @@ export function initClusterDrilldown(ctx) {
       .map((n) => `${n.id}:${n.role ?? ''}:${n.inDrops ?? 0}:${n.outDrops ?? 0}:${n.degreeIn ?? 0}:${n.degreeOut ?? 0}:${n.severity ?? ''}`)
       .sort()
       .join('|');
+    // Tag-Anteil (tagIdentityDesign): toTag/transit gehören in den Digest —
+    // ohne sie würde ein nachträglich mit Tags angereicherter Kantenstand
+    // das offene Modal nicht aktualisieren (Freeze-Semantik unverändert:
+    // der Digest entscheidet nur über "neu rendern oder nicht").
     const edges = clusterEdges
-      .map((e) => `${e.from}>${e.to}:${e.type ?? ''}:${e.txHash ?? ''}:${e.closeTime ?? ''}`)
+      .map((e) => `${e.from}>${e.to}:${e.type ?? ''}:${e.txHash ?? ''}:${e.closeTime ?? ''}:${e.toTag ?? ''}:${e.transit ? 1 : 0}`)
       .sort()
       .join('|');
     return `${cluster.id}#${cluster.label ?? ''}#${cluster.totalDrops ?? 0}#${cluster.txCount ?? 0}`
@@ -763,7 +783,7 @@ export function initClusterDrilldown(ctx) {
     renderRoles(cluster, clusterNodes, rolesEl);
     renderTimeline(cluster, clusterEdges, timelineEl);
     renderChain(cluster, clusterNodes, clusterEdges, chainEl);
-    renderTable(clusterNodes, tableEl);
+    renderTable(clusterNodes, tableEl, clusterEdges);
     const memberIds = new Set(clusterNodes.map((n) => String(n.id)));
     // Letztstand einfrieren — Grundlage für Alterungsanzeige (members+at);
     // das Fallback-Matching läuft seit Befund 2026-09-30 gegen den stabilen
@@ -839,6 +859,10 @@ export function initClusterDrilldown(ctx) {
         txHash: e.txHash != null ? String(e.txHash) : null,
         closeTime: e.closeTime != null ? String(e.closeTime) : null,
         type: String(e.type ?? ''),
+        // Tag-Felder (tagIdentityDesign, additiv): nur wenn belegt — kein
+        // null-Feld für Kanten ohne Tag (Export bleibt schlank).
+        ...(e.toTag != null ? { toTag: e.toTag } : {}),
+        ...(e.transit === true ? { transit: true } : {}),
       })),
       peelingChains: chains,
       exportAt: new Date().toISOString(),
@@ -974,14 +998,24 @@ export function initClusterDrilldown(ctx) {
   /* ---------------- Flusskette: echte Kantenpfade Start → … → Kollektor ---------------- */
 
   function renderChain(cluster, clusterNodes, clusterEdges, el) {
-    const chip = (x) => {
+    // Edge-Tag-Lookup (from→to → toTag) aus den Cluster-Kanten: Tags sind
+    // Edge-Attribute, der Chip hängt am Ziel-Knoten der Kette.
+    const tagByPair = new Map();
+    for (const e of clusterEdges) {
+      if (e && e.toTag != null) tagByPair.set(`${String(e.from)}\u0001${String(e.to)}`, e.toTag);
+    }
+    const chip = (x, prevId) => {
       const address = String(x?.id ?? '');
       const shown = displayAddr(address);
       const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
       // Name nur hinter dem Host-Gate (accountNameOf) und nur ergänzend —
       // der Anzeigewert bleibt die Adresse.
       const nameChip = nameChipHtml(address);
-      return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}${nameChip}</span>`;
+      // Tag-Chip nur bei Registry-Treffer des Ziels (exchangeEntryOf,
+      // Host-Gate) und belegter Kante mit toTag — nie an der Kurzform.
+      const tag = prevId != null ? tagByPair.get(`${String(prevId)}\u0001${address}`) : null;
+      const tagChip = tagChipHtml(address, tag);
+      return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}">${esc(shown)}${actions}${nameChip}${tagChip}</span>`;
     };
     // Pfade NUR aus echten Kanten des Clusters (flowPaths, lib/cluster.mjs):
     // '→' verbindet ausschließlich Adressen entlang belegter Transaktionen —
@@ -997,11 +1031,15 @@ export function initClusterDrilldown(ctx) {
       : [];
     if (paths.length) {
       const rows = paths
-        .map((p) => p.map(chip).join('<span class="chain-arrow" aria-hidden="true">→</span>'))
+        .map((p) => p.map((x, i) => chip(x, i > 0 ? p[i - 1]?.id : null)).join('<span class="chain-arrow" aria-hidden="true">→</span>'))
         .join('<span class="chain-path-sep" aria-hidden="true">·</span>');
+      // Transit-Hinweis (tagIdentityDesign): nur bei belegter transit-Kante.
+      const transitNote = clusterEdges.some((e) => e && e.transit === true)
+        ? `<p class="graph-note cluster-transit-note">${esc(t('cluster.transitNote'))}</p>`
+        : '';
       el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.chainTitle'))}</h3>
         <div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${rows}</div>
-        <p class="graph-note">${esc(t('modal.chainNote'))}</p>`;
+        <p class="graph-note">${esc(t('modal.chainNote'))}</p>${transitNote}`;
       return;
     }
     // Fallback (keine Kante im Fenster bzw. flowPaths offline): Rollen-Chips
@@ -1026,9 +1064,20 @@ export function initClusterDrilldown(ctx) {
 
   /* ---------------- Konten-Tabelle ---------------- */
 
-  function renderTable(clusterNodes, el) {
+  function renderTable(clusterNodes, el, clusterEdges) {
     lastTableNodes = clusterNodes;
     lastTableEl = el;
+    if (Array.isArray(clusterEdges)) lastTableEdges = clusterEdges;
+    // Tag-Sammlung je Adresse (distinct toTags der eingehenden Cluster-Kanten):
+    // Tags sind Edge-Attribute — die Tabellenzeile zeigt die im Cluster
+    // belegten Tags des Kontos (aufsteigend, Deckel 3 + '+' bei mehr).
+    const tagsByAddr = new Map();
+    for (const e of lastTableEdges ?? []) {
+      if (!e || e.toTag == null) continue;
+      const key = String(e.to);
+      if (!tagsByAddr.has(key)) tagsByAddr.set(key, new Set());
+      tagsByAddr.get(key).add(e.toTag);
+    }
     const sorted = [...clusterNodes]
       .sort((a, b) =>
         ((b.inDrops ?? 0) + (b.outDrops ?? 0)) - ((a.inDrops ?? 0) + (a.outDrops ?? 0))
@@ -1053,10 +1102,18 @@ export function initClusterDrilldown(ctx) {
         // displayAddr(n.id), nicht gegen die rohe Id.
         // Name-Chip nur hinter dem Host-Gate (accountNameOf) und nur bei
         // Vollanzeige — die Zelle behält den Anzeigewert, der Name ist
-        // zusätzliches Element.
+        // zusätzliches Element. Tag-Chips ebenso (exchangeEntryOf-Gate):
+        // distinct toTags der eingehenden Cluster-Kanten, aufsteigend, Cap 3.
         const nameChip = full ? nameChipHtml(id) : '';
+        const tagSet = full ? tagsByAddr.get(id) : null;
+        let tagChips = '';
+        if (tagSet && tagSet.size) {
+          const tags = [...tagSet].sort((a, b) => a - b);
+          tagChips = tags.slice(0, 3).map((tg) => tagChipHtml(id, tg)).join('');
+          if (tags.length > 3) tagChips += '<span class="cluster-table-dash">+</span>';
+        }
         return `<tr data-addr="${esc(full ? id : shown)}">
-          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}${nameChip}</td>
+          <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}${nameChip}${tagChips}</td>
           <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabelText(role))}</span></td>
           <td>${badge}</td>
           <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
@@ -1171,6 +1228,8 @@ export function initClusterDrilldown(ctx) {
         source: String(e.from),
         target: String(e.to),
         type: String(e.type ?? ''),
+        // Tag-Felder durchreichen (linkLabel liest sie; Gate im Label-Callback).
+        ...(e.toTag != null ? { toTag: e.toTag } : {}),
       })),
     };
     // Gleicher Cluster wie im aktuellen Graphen? Dann NUR die Daten
@@ -1214,7 +1273,10 @@ export function initClusterDrilldown(ctx) {
           const to = l.target && typeof l.target === 'object' ? l.target.id : l.target;
           const nameFrom = accountNameOf(String(from ?? ''));
           const nameTo = accountNameOf(String(to ?? ''));
-          return `${esc(displayAddr(from) + (nameFrom ? ` (${nameFrom.name})` : ''))} → ${esc(displayAddr(to) + (nameTo ? ` (${nameTo.name})` : ''))} (${esc(String(l.type ?? ''))})`;
+          // Tag-Suffix nur bei Registry-Treffer des Ziels (exchangeEntryOf-
+          // Host-Gate) und belegtem toTag — an der Kurzform nie (fail-closed).
+          const tagSuffix = l.toTag != null && exchangeEntryOf(String(to ?? '')) ? ` · #${l.toTag}` : '';
+          return `${esc(displayAddr(from) + (nameFrom ? ` (${nameFrom.name})` : ''))} → ${esc(displayAddr(to) + (nameTo ? ` (${nameTo.name})` : ''))} (${esc(String(l.type ?? ''))})${tagSuffix ? esc(tagSuffix) : ''}`;
         })
         .linkWidth(1)
         .linkDirectionalArrowLength(3)
@@ -1282,7 +1344,10 @@ export function initClusterDrilldown(ctx) {
       from: String(e.from),
       to: String(e.to),
       label: String(e.type ?? ''),
-      title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`,
+      // Tag-Suffix im Kanten-Tooltip nur bei Registry-Treffer des Ziels
+      // (exchangeEntryOf-Host-Gate) und belegtem toTag (fail-closed).
+      title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`
+        + (e.toTag != null && exchangeEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
       color: { color: edgeColors[String(e.type)] || edgeDefault, highlight: '#141416', hover: '#141416' },
       arrows: { to: { enabled: true, scaleFactor: 0.5 } },
       width: 1,

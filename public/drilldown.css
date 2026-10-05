@@ -381,6 +381,10 @@ body.cluster-modal-open {
 .chain-node .name-chip { margin-left: 6px; flex-shrink: 0; }
 .cluster-td-addr .name-chip { margin-left: 8px; }
 
+/* Destination-Tag-Chip (nur ergänzt): gleiche Platzierung wie Namens-Chip. */
+.chain-node .tag-chip { margin-left: 6px; flex-shrink: 0; }
+.cluster-td-addr .tag-chip { margin-left: 8px; }
+
 /* ---------------- Responsiv ---------------- */
 
 @media (max-width: 900px) {

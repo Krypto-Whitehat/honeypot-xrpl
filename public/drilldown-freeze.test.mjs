@@ -15,7 +15,9 @@
 // (4) nachträglich Deny-gewordene Adressen fallen aus DOM und Export,
 // (5) Total-Leerung bei Köder-Treffer bleibt, (6) close() (Escape) wirft den
 // Freeze raus, neues Öffnen rendert den Live-Stand, (7) Sprachwechsel malt
-// die Freeze-Labels neu, (8) Name-Chips nur hinter dem Host-Gate.
+// die Freeze-Labels neu, (8) Name-Chips nur hinter dem Host-Gate, (9) Destination-Tag-Chips nur bei
+// Registry-Treffer des Ziels (exchangeEntryOf-Host-Gate, fail-closed), Transit-Hinweis nur bei belegter
+// transit-Kante, Freeze-Export trägt toTag/transit additiv.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -47,6 +49,8 @@ function makeEl(tag) {
     querySelectorAll() { return []; },
     appendChild() {},
     closest() { return null; },
+    click() {},   // Download-Pfad: temporäres <a download>
+    remove() {},
   };
   if (tag === "canvas") el.getContext = () => null; // WebGL-Probe schlägt auf
   return el;
@@ -330,4 +334,123 @@ test("Gate: maskierte Vollanzeige (isFullShownAddr false) zeigt Kurzform ohne Ch
   assert.ok(!table.includes(A1), "volle Adresse nicht im DOM (nur Kurzform)");
   assert.ok(table.includes(A1.slice(0, 6) + "…"), "Kurzform wie shortAddr");
   assert.ok(!table.includes("name-chip"), "kein Name-Chip an maskierter Kurzform");
+});
+
+/* ---------------- 8) Destination-Tag-Chips (tagIdentityDesign 2026-10-05) ---------------- */
+
+// Registry-Stub: nur A2 ist Hosted-Account einer Börse (A3 ohne Treffer ->
+// kein Chip, obwohl die Kante A2→A3 ein toTag trägt — Gate-Verhalten).
+const registryEntryOf = (a) =>
+  String(a) === A2 ? { exchange: "Test Exchange Two", requireDestTag: true } : null;
+// Host-Gate-Muster (app.js exchangeEntryOf): Registry-Lookup nur bei
+// erlaubter Vollanzeige (hier: nicht Deny-adressiert).
+const gatedRegistry = (a) => (!denySet.has(String(a)) ? registryEntryOf(a) : null);
+
+function makeTagGraph() {
+  const g = makeGraph("Tag-Cluster", 4);
+  g.edges = [
+    { from: A1, to: A2, type: "payment", txHash: "HASHT1", closeTime: 1, toTag: 42 },
+    { from: A2, to: A3, type: "payment", txHash: "HASHT2", closeTime: 2, toTag: 77, transit: true },
+  ];
+  return g;
+}
+
+// flowPaths-Stub: ein Pfad über alle Knoten in Knoten-Reihenfolge
+// (A1 source → A2 mid → A3 sink) — die Kette bekommt damit prevId-Kanten.
+const chainPaths = () => (nodes) => [nodes];
+
+test("Tag-Chips: Tabelle und Kette zeigen #tag nur bei Registry-Treffer des Ziels", async () => {
+  lang = "de";
+  liveGraph = makeTagGraph();
+  const dd = initClusterDrilldown(makeCtx({ exchangeEntryOf: gatedRegistry, flowPaths: chainPaths }));
+  dd.openCluster(CID);
+  await settle();
+
+  const table = q(".cluster-modal-table").innerHTML;
+  assert.ok(table.includes("tag-chip") && table.includes("#42"), "Tag-Chip #42 an A2 (Registry-Treffer)");
+  assert.ok(!table.includes("#77"), "kein Chip #77 an A3 (kein Registry-Treffer, Gate fail-closed)");
+
+  const chain = q(".cluster-modal-chain").innerHTML;
+  assert.ok(chain.includes("chain-node") && chain.includes("chain-arrow"), "Kette mit echten Kanten (flowPaths)");
+  assert.ok(chain.includes("#42"), "Tag-Chip #42 am Ziel-Knoten der Kette");
+  assert.ok(!chain.includes("#77"), "kein Chip #77 an der Kette (Gate)");
+  assert.ok(chain.includes("cluster-transit-note") && chain.includes(t("cluster.transitNote")), "Transit-Hinweis bei transit-Kante");
+});
+
+test("Tag-Chips fail-closed: ohne ctx.exchangeEntryOf keine Chips (Transit-Hinweis bleibt datengetrieben)", async () => {
+  liveGraph = makeTagGraph();
+  const dd = initClusterDrilldown(makeCtx({ flowPaths: chainPaths }));
+  dd.openCluster(CID);
+  await settle();
+  const table = q(".cluster-modal-table").innerHTML;
+  const chain = q(".cluster-modal-chain").innerHTML;
+  assert.ok(!table.includes("tag-chip"), "keine Tag-Chips ohne Host-Lookup");
+  assert.ok(!chain.includes("tag-chip"), "keine Tag-Chips in der Kette ohne Host-Lookup");
+  assert.ok(chain.includes("cluster-transit-note"), "Transit-Hinweis bleibt (reine Daten-Eigenschaft der Kante)");
+});
+
+test("Tag-Chips: maskierte Tabellenzeile (isFullShownAddr false) ohne Chips, auch mit Registry-Treffer", async () => {
+  liveGraph = makeTagGraph();
+  // Absichtlich ungegateter exchangeEntryOf: prüft die EIGENE Defense-in-
+  // Depth der Tabellenzeile (tagSet nur bei full) — die Kette ist Host-Gate-
+  // Sache (app.js exchangeEntryOf prüft isFullShownAddr selbst).
+  const dd = initClusterDrilldown(makeCtx({ isFullShownAddr: () => false, exchangeEntryOf: registryEntryOf }));
+  dd.openCluster(CID);
+  await settle();
+  const table = q(".cluster-modal-table").innerHTML;
+  assert.ok(!table.includes(A2), "volle Adresse nicht im DOM (nur Kurzform)");
+  assert.ok(!table.includes("tag-chip"), "keine Tag-Chips an maskierter Kurzform");
+});
+
+test("Freeze-Export: Kanten tragen toTag/transit additiv (ohne Tag-Felder bleiben Kanten schlank)", async () => {
+  liveGraph = makeGraph("Export-Ohne-Tags", 6);
+  const dd = initClusterDrilldown(makeCtx({ exchangeEntryOf: gatedRegistry }));
+  dd.openCluster(CID);
+  await settle();
+
+  // Download-Pfad stuben: Blob fängt den JSON-String, URL/A-Methoden no-op.
+  let captured = null;
+  class BlobStub {
+    constructor(parts) { captured = String(parts[0]); }
+  }
+  const prevBlob = globalThis.Blob;
+  const prevURL = globalThis.URL;
+  globalThis.Blob = BlobStub;
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  const prevOverlay = appendedOverlay; // body.appendChild(<a>) überschreibt den Stub-Pointer
+  try {
+    const handler = q("#cluster-json-download").listeners.click[0];
+    await handler();
+    assert.ok(captured, "Export-JSON erzeugt");
+    const payload = JSON.parse(captured);
+    assert.equal(payload.edges.length, 2);
+    assert.ok(!("toTag" in payload.edges[0]) && !("transit" in payload.edges[0]), "Kanten ohne Tag tragen keine Tag-Felder");
+  } finally {
+    appendedOverlay = prevOverlay;
+    if (prevBlob === undefined) delete globalThis.Blob; else globalThis.Blob = prevBlob;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+  }
+
+  // Jetzt mit Tags: toTag/transit additiv im Export.
+  liveGraph = makeTagGraph();
+  const dd2 = initClusterDrilldown(makeCtx({ exchangeEntryOf: gatedRegistry }));
+  dd2.openCluster(CID);
+  await settle();
+  captured = null;
+  globalThis.Blob = BlobStub;
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  const prevOverlay2 = appendedOverlay;
+  try {
+    const handler2 = q("#cluster-json-download").listeners.click[0];
+    await handler2();
+    const payload2 = JSON.parse(captured);
+    assert.equal(payload2.edges[0].toTag, 42, "toTag im Export (Kante A1→A2)");
+    assert.equal(payload2.edges[1].toTag, 77, "toTag im Export (Kante A2→A3)");
+    assert.equal(payload2.edges[1].transit, true, "transit im Export");
+    assert.ok(!("transit" in payload2.edges[0]), "transit nur bei belegter Kante");
+  } finally {
+    appendedOverlay = prevOverlay2;
+    if (prevBlob === undefined) delete globalThis.Blob; else globalThis.Blob = prevBlob;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+  }
 });

@@ -65,6 +65,16 @@
   color: var(--a6-brand-teal);
 }
 
+/* Destination-Tag am Punkt-Label (tagIdentityDesign, nur ergänzt): Mono,
+   Brand-Amber wie .tag-chip (style.css) — Adresse bleibt primärer Inhalt. */
+#globe .globe-addr-tag {
+  display: inline-block;
+  margin-inline-start: 6px;
+  font-family: var(--a6-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-brand-amber);
+}
+
 /* Pflicht-Hinweis unter der Kugel: globe.js legt ein p.graph-note.globe-note
    in die Bühne. Die Typografie (12 px, muted) liefert .graph-note aus
    style.css:508-512 — hier steht nur die Overlay-Positionierung; über den

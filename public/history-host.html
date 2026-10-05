@@ -245,7 +245,11 @@ function renderFlowGraph(graph) {
     const w = Math.round((1 + Math.min(3, Math.log10(1 + Math.max(0, drops) / 1e6))) * 100) / 100;
     const mx = Math.round(((a[0] + b[0]) / 2) * 100) / 100;
     const my = Math.round(((a[1] + b[1]) / 2) * 100) / 100;
-    const title = esc(shortAddr(e.from)) + ' \u2192 ' + esc(shortAddr(e.to)) + ' \u00b7 ' + esc(fmtXrp(drops)) + ' XRP';
+    // Tag-Suffix im Kanten-Titel (tagIdentityDesign): toTag liefert die
+    // Server-View (viewEdge, lib/flow-state.mjs) nur bei Registry-Treffer
+    // des Ziels — das Feld selbst ist das Gate, ein Tag ist keine Adresse.
+    const title = esc(shortAddr(e.from)) + ' \u2192 ' + esc(shortAddr(e.to)) + ' \u00b7 ' + esc(fmtXrp(drops)) + ' XRP'
+      + (e.toTag != null ? ' \u00b7 #' + esc(String(e.toTag)) : '');
     let label = '';
     if (labelEdgeIds.has(edgeIdentity(e))) {
       label = '<text x="' + mx + '" y="' + (my - 3) + '" font-size="9" fill="' + edgeColor + '" text-anchor="middle">' + esc(fmtXrp(drops)) + '</text>';

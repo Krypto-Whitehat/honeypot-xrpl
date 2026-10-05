@@ -916,6 +916,23 @@ main {
   color: var(--a6-muted);
 }
 
+/* Destination-Tag-Chip (Exchange-Registry, Hosted-Account): Mono-Pill im
+   Look der .name-chip, eigene Farbe zur Abgrenzung vom Namens-Badge. */
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  background: var(--a6-surface);
+  color: var(--a6-brand-amber);
+  font-family: var(--a6-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
 .cluster-metrics {
   display: flex;
   flex-wrap: wrap;

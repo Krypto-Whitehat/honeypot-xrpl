@@ -140,6 +140,9 @@ import('./drilldown.js')
         physicsCluster: PHYSICS_CLUSTER,
         addrActionsHtml,
         accountNameOf,
+        // Host-Gate der Exchange-Registry (analog accountNameOf: null für
+        // maskierte/Deny-Adressen und ohne Registry-Treffer — fail-closed).
+        exchangeEntryOf,
         flowPaths: () => flowPathsFn,
       });
     }
@@ -170,6 +173,7 @@ import('./globe.js')
         // jetzt auch im globe-ctx (globe-ctx hatte es bisher nicht —
         // Blocker-Fix 2026-10-05), damit globe lokal selbst prüfen kann.
         accountNameOf,
+        exchangeEntryOf,
         isFullShownAddr,
         hashOf,
         shortAddr,
@@ -199,6 +203,7 @@ import('./history.js')
         fmtClock,
         addrActionsHtml,
         accountNameOf,
+        exchangeEntryOf,
         ruleNames: RULE_NAME,
       });
       // Sichtbarkeit nachziehen, falls der View schon aktiv ist, bevor das
@@ -220,6 +225,7 @@ import('./account-check.js')
         fmtClock,
         addrActionsHtml,
         accountNameOf,
+        exchangeEntryOf,
         roleLabels: ROLE_LABEL,
         roleColors: ROLE_COLORS,
         ruleNames: RULE_NAME,
@@ -242,6 +248,20 @@ import('./name-index.mjs')
     if (m && typeof m.ensureNameIndex === 'function') nameIndexMod = m;
   })
   .catch(() => { /* Namensindex offline (z. B. 404); Karten laufen ohne Namen */ });
+
+/* Exchange-Registry (Destination-Tag-Identität, public/exchange-registry.mjs):
+ * dasselbe nicht-blockierende Import-Muster mit Null-Guard. Der Modul-Import
+ * ist DOM-/fetch-frei und löst NOCH keinen Request aus — der einzige Fetch
+ * pro Session startet lazy im ersten Cluster-Daten-Takt (rebuildClusterGraph),
+ * nie im Head und nie im WSS-Takt. Fehlt das Modul, zeigen alle Sichten ohne
+ * Tag-Chips und der Cluster-Graph läuft tag-frei (fail-closed, Live-Betrieb
+ * unberührt). */
+let registryMod = null;
+import('./exchange-registry.mjs')
+  .then((m) => {
+    if (m && typeof m.ensureExchangeRegistry === 'function') registryMod = m;
+  })
+  .catch(() => { /* Registry offline (z. B. 404); Karten laufen ohne Tag-Chips */ });
 
 /* Datenquellen-Modi (API-Vertrag v2, 2026-10-02; Live-Standard-Tilt 2026-10-05):
  *   'history' (Startwert + Fail-closed-Fallback, Knopf 'Archiv'):
@@ -626,6 +646,30 @@ function nameChipHtml(addr) {
   return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
 }
 
+/* HOST-GATE der Exchange-Registry (analog accountNameOf): exchangeEntryOf
+ * liefert null für jede maskierte oder Deny-Treffer-Adresse und ohne
+ * Registry-Treffer — ein Tag-Chip hängt nie an einer Kurzform-Adresse. */
+function exchangeEntryOf(addr) {
+  const a = String(addr ?? '');
+  if (!registryMod || !isFullShownAddr(a)) return null;
+  try {
+    return registryMod.exchangeEntryOf(a) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/* Tag-Chip-Markup (Muster nameChipHtml): Mono-Pill '#<Tag>' nur, wenn die
+ * Adresse ein Registry-Multi-User-Konto ist (host-seitig gegatet) UND ein
+ * gültiger Tag vorliegt. Rein ergänzend — verdrängt nie die Adresse.
+ * Tag 0 ist ein echter Tag (lib/tag-identity.mjs) und zeigt '#0'. */
+function tagChipHtml(addr, tag) {
+  if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
+  if (!exchangeEntryOf(addr)) return '';
+  const aria = t('tag.chipAria');
+  return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
+}
+
 async function copyAddress(addr) {
   const a = String(addr ?? '');
   if (!a) return false;
@@ -945,7 +989,10 @@ function updateRawGraph(cg, maxNodes = null) {
       label: typeLabel,
       // Kanten-Tooltip: volle Adressen bei geladener Allowlist und Nicht-Treffer
       // auf der Deny-Liste, sonst Kurzform (displayFindingAddr, fail-closed).
-      title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`,
+      // Tag-Suffix nur bei Registry-Treffer des Ziels (exchangeEntryOf-Gate)
+      // und belegtem toTag — an der Kurzform nie (fail-closed).
+      title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`
+        + (e.toTag != null && exchangeEntryOf(e.to) ? ` · #${e.toTag}` : ''),
       color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
       font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
@@ -974,7 +1021,12 @@ function clusterBubbleTitle(c) {
   const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : [])
     .map(displayFindingAddr)
     .join(', ');
-  return `${c.label ?? t('cluster.labelDefault')}: ${members}`;
+  // Transit-Hinweis im Bubble-Tooltip (tagIdentityDesign): nur bei belegter
+  // transit-Kante des Clusters (c.edges aus Server-View oder Graph-Neubau).
+  const transit = Array.isArray(c.edges) && c.edges.some((e) => e && e.transit === true)
+    ? ` · ${t('cluster.transitNote')}`
+    : '';
+  return `${c.label ?? t('cluster.labelDefault')}: ${members}${transit}`;
 }
 
 /* Cluster-Tab: alle Bubbles schließen (Rohzustand), Rohdaten aktualisieren,
@@ -1126,22 +1178,36 @@ const roleLabelText = (role) => t('legend.' + role);
 // (Allowlist geladen, kein Deny-Treffer); sonst Kurzform ohne beides.
 function flowChainHtml(paths, opts = {}) {
   const maxChips = Number.isFinite(opts.maxChips) ? Math.max(2, Math.floor(opts.maxChips)) : 10;
-  const chip = (x) => {
+  // Edge-Tag-Lookup (from→to → toTag) aus dem aktuellen Cluster-Graphen:
+  // Tags sind Edge-Attribute, der Chip hängt am Ziel-Knoten der Kette.
+  // Persistierte Ketten ohne Kante im Graphen (Peeling-Server-View) liefern
+  // keinen Treffer → kein Chip (fail-closed, erfundene Tags gibt es nicht).
+  const tagByPair = new Map();
+  if (lastClusterGraph && Array.isArray(lastClusterGraph.edges)) {
+    for (const e of lastClusterGraph.edges) {
+      if (e && e.toTag != null) tagByPair.set(`${String(e.from)}\u0001${String(e.to)}`, e.toTag);
+    }
+  }
+  const chip = (x, prevId) => {
     const address = String(x?.id ?? '');
     const shown = displayFindingAddr(address);
     const actions = isFullShownAddr(address) ? addrActionsHtml(address) : '';
     // Name nur hinter demselben Gate (accountNameOf ist host-seitig gegatet)
     // und nur als ergänzender Chip — der Anzeigewert bleibt die Adresse.
     const nameChip = nameChipHtml(address);
+    // Tag-Chip nur bei Registry-Treffer des Ziels (exchangeEntryOf, gleiches
+    // Gate) und belegter Kante mit toTag — nie an der Kurzform.
+    const tag = prevId != null ? tagByPair.get(`${String(prevId)}\u0001${address}`) : null;
+    const tagChip = tagChipHtml(address, tag);
     // title trägt NUR den Anzeigewert (gerenderter displayFindingAddr-Wert),
     // nie die Roheadresse (Design-Fix, Muster drilldown.js-Konten-Tabelle).
-    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}" title="${esc(shown)}">${esc(shown)}${actions}${nameChip}</span>`;
+    return `<span class="chain-node chain-${esc(x?.role ?? 'unknown')}" title="${esc(shown)}">${esc(shown)}${actions}${nameChip}${tagChip}</span>`;
   };
   const parts = [];
   let used = 0;
   for (const p of Array.isArray(paths) ? paths : []) {
     if (!Array.isArray(p) || p.length < 2 || used + p.length > maxChips) continue;
-    parts.push(p.map(chip).join('<span class="chain-arrow" aria-hidden="true">→</span>'));
+    parts.push(p.map((x, i) => chip(x, i > 0 ? p[i - 1]?.id : null)).join('<span class="chain-arrow" aria-hidden="true">→</span>'));
     used += p.length;
   }
   if (!parts.length) return '';
@@ -1189,15 +1255,20 @@ function clusterCardHtml(c, index) {
   // Transaktionen, nie rollenweise aneinandergereihte Chips ohne Kantenbezug
   // (Befund 2026-09-29).
   let chainInner = '';
+  let clusterTransit = false;
   if (flowPathsFn && lastClusterGraph) {
     const memberSet = new Set((c.memberAddresses ?? []).map(String));
     const memberNodes = (Array.isArray(lastClusterGraph.nodes) ? lastClusterGraph.nodes : [])
       .filter((n) => memberSet.has(String(n.id)))
       .map((n) => ({ id: String(n.id), role: n.role }));
     const memberEdges = (Array.isArray(lastClusterGraph.edges) ? lastClusterGraph.edges : [])
-      .filter((e) => memberSet.has(String(e.from)) && memberSet.has(String(e.to)))
-      .map((e) => ({ from: String(e.from), to: String(e.to) }));
-    chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges, { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
+      .filter((e) => memberSet.has(String(e.from)) && memberSet.has(String(e.to)));
+    // Transit-Hinweis (tagIdentityDesign): läuft eine Cluster-Kante über ein
+    // gemeinsames Börsen-Konto mit unterschiedlichen Destination-Tags
+    // (e.transit, lib/tag-identity.mjs), zeigt die Karte einen Text-Hinweis —
+    // keine Score-/Topologie-Änderung, reine Anzeigeverfeinerung.
+    if (memberEdges.some((e) => e.transit === true)) clusterTransit = true;
+    chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges.map((e) => ({ from: String(e.from), to: String(e.to) })), { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
   }
   // Persistierte Peeling-Ketten der Server-View (Kritik 4): die Flusskette
   // zeigt sie zusätzlich, wenn vorhanden — Kettenreihenfolge Seed→…→Ende,
@@ -1234,6 +1305,12 @@ function clusterCardHtml(c, index) {
     ? `<div class="cluster-names">${named.slice(0, 3).map((x) => x.chipHtml).join('')}</div>`
     : '';
 
+  // Transit-Hinweis-Zeile (tagIdentityDesign, nur bei belegter transit-Kante):
+  // reiner Text unter der Namenslinie — keine Score-/Topologie-Änderung.
+  const transitHtml = clusterTransit
+    ? `<div class="cluster-transit-note">${esc(t('cluster.transitNote'))}</div>`
+    : '';
+
   // Schaltflächen-Semantik für Screenreader: die Karte öffnet das Drilldown-
   // Modal (Klick + Enter/Leertaste) — deshalb role="button" plus sprechendes
   // aria-label (Befund 2026-09-29).
@@ -1253,6 +1330,7 @@ function clusterCardHtml(c, index) {
         ${badge}
       </div>
       ${namesHtml}
+      ${transitHtml}
       <div class="cluster-roles">${chips}</div>
       <div class="cluster-metrics">
         <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
@@ -1558,7 +1636,22 @@ async function rebuildClusterGraph() {
   for (const f of findingsWindow) {
     if (!(await isDeniedAddrAsync(f?.address))) graphFindings.push(f);
   }
-  const cg = buildClusterGraph(graphTx, graphFindings, { maxEdges: CLUSTER_MAX_EDGES });
+  // Lazy-Registry (ANDOCKSTELLE des Registry-Fetches im Live-Takt, Muster
+  // Namensindex): GENAU EIN Fetch pro Session (Guard/TTL im Modul), kein
+  // Await — Tags erscheinen ab dem nächsten Takt (fail-closed ohne Stand).
+  // Der Snapshot des letzten guten Stands geht als multiUserAccounts in den
+  // Graphen (lib/cluster.mjs: Tags sind reine Edge-Attribute, Topologie
+  // unverändert; ohne Stand: bit-identisch zu vorher).
+  if (registryMod && typeof registryMod.ensureExchangeRegistry === 'function') {
+    registryMod.ensureExchangeRegistry().catch(() => { /* ohne Tags rendern */ });
+  }
+  const multiUserAccounts = registryMod && typeof registryMod.registrySnapshot === 'function'
+    ? registryMod.registrySnapshot()
+    : null;
+  const cg = buildClusterGraph(graphTx, graphFindings, {
+    maxEdges: CLUSTER_MAX_EDGES,
+    ...(multiUserAccounts ? { multiUserAccounts } : {}),
+  });
   lastClusterGraph = cg;
   // Lazy-Namensindex (ANDOCKSTELLE des Bulk-Fetches im Live-Takt): der erste
   // Cluster-Daten-Takt stößt GENAU EINEN Bulk-Fetch pro Session an (Guard/TTL
@@ -2124,6 +2217,10 @@ async function applyFlowStateView(view) {
       edges.push({
         from: String(e.from), to: String(e.to), type: String(e.type || 'Sonstige'),
         txHash: e.txHash ? String(e.txHash) : undefined,
+        // Tag-Felder der Server-View (viewEdge, lib/flow-state.mjs) durchreichen —
+        // Kanten-Tooltip und Ketten-Chips lesen sie; ohne Feld: unverändert.
+        ...(e.toTag != null ? { toTag: e.toTag } : {}),
+        ...(e.transit === true ? { transit: true } : {}),
       });
     }
   }

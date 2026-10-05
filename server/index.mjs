@@ -36,7 +36,9 @@ import {
   checkDrainerSweepFromEntries,
   getThreatKnowledge,
   buildCheckCtx,
+  getExchangeRegistryMap,
 } from "../lib/threats-service.mjs";
+import { normalizeTag } from "../lib/tag-identity.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -415,16 +417,23 @@ async function getXrplClient() {
 
 const checkCache = new Map(); // address -> { time, result } — nur im Speicher
 
-// Gegenparteien einer Transaktion relativ zur geprüften Adresse.
+// Gegenparteien einer Transaktion relativ zur geprüften Adresse. Tag-Feld
+// (additiver Vertrag, drei synchronisierte Kopien — Sync-Kommentar in
+// lib/account-report.mjs:89-92): cp.tag != null, wenn die Transaktion einen
+// gültigen DestinationTag trägt. Die Check-Pipeline nutzt ihn NUR auf der
+// Gegenpartei-Zeile, wenn die GEGENPARTEI ein Registry-Multi-User-Konto ist
+// (Sub-Konto-Hinweis); TrustSet/OfferCreate tragen per Spec keinen
+// DestinationTag und erhalten nie ein Tag-Feld.
 function counterpartiesOf(tx, addr) {
   const out = [];
-  const add = (a, dir, note) => {
-    if (a && a !== addr) out.push({ address: a, dir, note });
+  const add = (a, dir, note, tag) => {
+    if (a && a !== addr) out.push({ address: a, dir, note, ...(tag != null ? { tag } : {}) });
   };
   const type = tx.TransactionType;
+  const destTag = normalizeTag(tx.DestinationTag);
   if (type === "Payment") {
-    if (tx.Destination === addr) add(tx.Account, "eingehend", "Zahlung erhalten von");
-    if (tx.Account === addr) add(tx.Destination, "ausgehend", "Zahlung gesendet an");
+    if (tx.Destination === addr) add(tx.Account, "eingehend", "Zahlung erhalten von", destTag);
+    if (tx.Account === addr) add(tx.Destination, "ausgehend", "Zahlung gesendet an", destTag);
   } else if (type === "TrustSet") {
     const issuer = tx.LimitAmount?.issuer;
     if (tx.Account === addr) add(issuer, "eingehend", "Trustline zu Issuer eingerichtet");
@@ -433,13 +442,13 @@ function counterpartiesOf(tx, addr) {
     if (tx.Account === addr) add(tx.LimitAmount?.issuer, "ausgehend", "DEX-Order (Issuer)");
     else add(tx.Account, "eingehend", "DEX-Order dieser Adresse");
   } else if (type === "EscrowCreate" || type === "CheckCreate" || type === "PaymentChannelCreate") {
-    if (tx.Account === addr) add(tx.Destination, "ausgehend", `${type} gesendet an`);
-    if (tx.Destination === addr) add(tx.Account, "eingehend", `${type} erhalten von`);
+    if (tx.Account === addr) add(tx.Destination, "ausgehend", `${type} gesendet an`, destTag);
+    if (tx.Destination === addr) add(tx.Account, "eingehend", `${type} erhalten von`, destTag);
   } else {
     // generisch: Absender/Ziel-Beteiligung. NFToken-Käufer/Verkäufer werden
     // über die Offer-Ids nicht aufgelöst (dokumentierte Grenze, siehe README).
-    if (tx.Account === addr) add(tx.Destination, "ausgehend", type);
-    else add(tx.Account, "eingehend", type);
+    if (tx.Account === addr) add(tx.Destination, "ausgehend", type, destTag);
+    else add(tx.Account, "eingehend", type, destTag);
   }
   return out;
 }
@@ -484,7 +493,17 @@ app.get("/api/check/:address", async (req, res) => {
     const knowledgeResult = await getThreatKnowledge(localKnowledgeOpts());
     const threatByAddress = knowledgeResult.knowledge;
 
+    // contacts: strikt DIREKTE Gegenparteien (unveränderte Semantik).
+    // Tag-Feld (additiv): ist die GEPÜFTE Adresse ein Registry-Multi-User-
+    // Konto, zeigt die Gegenpartei-Zeile das Hosted-Sub-Konto — destinationTag
+    // bei eingehend, sourceTag bei ausgehend (rein informativ). Auf
+    // Gegenparteien-Adressen wäre ein Tag-Feld toter Code: Registry-Adressen
+    // werden aus der Wissens-Map ausgeschlossen und erscheinen daher nie als
+    // contact (Konsistenz zu lib/threats-service.mjs).
     const contacts = [];
+    const registryMap = getExchangeRegistryMap();
+    const hostedSelf = registryMap.get(addr) ?? null;
+    const hostedIdentities = new Set(); // Identitäten des geprüften Hosted-Kontos
     for (const entry of entries) {
       if (entry?.validated === false) continue;
       const tx = entry.tx_json ?? entry.tx ?? entry;
@@ -494,10 +513,15 @@ app.get("/api/check/:address", async (req, res) => {
         (typeof tx.date === "number" && Number.isFinite(tx.date)
           ? new Date((tx.date + 946684800) * 1000).toISOString()
           : null);
+      const destTag = normalizeTag(tx.DestinationTag);
+      const srcTag = normalizeTag(tx.SourceTag);
+      if (hostedSelf && tx.TransactionType === "Payment" && tx.Destination === addr) {
+        hostedIdentities.add(destTag != null ? `t${destTag}` : "none");
+      }
       for (const cp of counterpartiesOf(tx, addr)) {
         const t = threatByAddress.get(cp.address);
         if (!t) continue;
-        contacts.push({
+        const contact = {
           txType: tx.TransactionType,
           time,
           direction: cp.dir,
@@ -505,7 +529,10 @@ app.get("/api/check/:address", async (req, res) => {
           counterparty: cp.address,
           risk: t.risk ?? "suspect",
           source: Array.isArray(t.sources) && t.sources.length ? t.sources[0] : "bait",
-        });
+        };
+        if (hostedSelf && cp.dir === "eingehend" && destTag != null) contact.destinationTag = destTag;
+        if (hostedSelf && cp.dir === "ausgehend" && srcTag != null) contact.sourceTag = srcTag;
+        contacts.push(contact);
       }
     }
 
@@ -540,6 +567,20 @@ app.get("/api/check/:address", async (req, res) => {
       checkedTxCount: entries.length,
       truncated,
       selfListed,
+      // Hosted-Account-Verfeinerung (additiv, nur bei Registry-Treffer der
+      // geprüften Adresse): exchange + requireDestTag (Anzeige-Hinweis) und
+      // transit (>= 2 verschiedene Tag-Identitäten eingehender Zahlungen —
+      // "kein Tag" zählt als eigene Identität, lib/tag-identity.mjs).
+      // Kein Score-/verdict-Einfluss (Formel unverändert).
+      ...(hostedSelf
+        ? {
+            hostedAccount: {
+              exchange: hostedSelf.exchange || null,
+              requireDestTag: hostedSelf.requireDestTag === true,
+              transit: hostedIdentities.size >= 2,
+            },
+          }
+        : {}),
       // selfListed -> 'bad' VOR der contacts-Verzweigung (Runde 3, identisch
       // zu checkAddress/lib/account-report.mjs): eine selbst gelistete
       // Adresse ohne Kontakte war bisher 'clean' und widersprach dem
@@ -777,7 +818,10 @@ app.get("/api/ledger", async (req, res) => {
 // hier, bricht die gesamte Modul-Evaluation des Live-Dashboards (404).
 // name-resolve.mjs (2026-10-05): reiner Parser für public/name-index.mjs
 // (XRPScan-Well-known-Aliase) — identische Liste zu api/lib-detector.js.
-const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs"]);
+// tag-identity.mjs (2026-10-05): DOM-freie Tag-Pure-Bibliothek — cluster.mjs
+// importiert sie für Destination-Tag-Kantenattribute; fehlt sie hier, bricht
+// die Modul-Evaluation des Browser-Clusters (404, Muster stride.mjs).
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs"]);
 app.get("/lib/:name", (req, res) => {
   if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
   res.sendFile(path.join(ROOT, "lib", req.params.name));

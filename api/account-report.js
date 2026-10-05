@@ -33,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAccountReport } from "../lib/account-report.mjs";
-import { getThreatKnowledge, buildCheckCtx } from "../lib/threats-service.mjs";
+import { getThreatKnowledge, buildCheckCtx, getExchangeRegistryMap } from "../lib/threats-service.mjs";
 
 export const maxDuration = 30; // Präzedenz api/ledger.js:25
 
@@ -177,6 +177,9 @@ export default async function handler(req, res, opts = {}) {
     const knowledgeResult = await knowledge(opts);
     const threatsByAddress = knowledgeResult.knowledge;
     const engineCtx = buildCheckCtx(knowledgeResult);
+    // Exchange-Registry (fail-open, lib/threats-service.mjs): hostedAccount-
+    // Verfeinerung + Kontakt-Tags im Report (lib/tag-identity.mjs).
+    const registryMap = getExchangeRegistryMap();
     let report;
     try {
       const { entries, truncated } = await fetchAccountTxs(address, CHECK_MAX_TX);
@@ -191,6 +194,7 @@ export default async function handler(req, res, opts = {}) {
         knownBad: engineCtx.knownBad,
         firstSeenAt: engineCtx.firstSeenAt,
         history: engineCtx.history,
+        registryMap,
       });
     } catch (err) {
       const msg = String(err?.data?.error ?? err?.message ?? err);
@@ -216,6 +220,7 @@ export default async function handler(req, res, opts = {}) {
           knownBad: engineCtx.knownBad,
           firstSeenAt: engineCtx.firstSeenAt,
           history: engineCtx.history,
+          registryMap,
         });
       } else {
         // Fix 2026-10-04: generische Meldung statt Upstream-Detail-Interpolation

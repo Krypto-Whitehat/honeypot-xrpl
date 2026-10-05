@@ -246,6 +246,29 @@ export function initGlobe(ctx) {
     return `<span class="globe-addr-name">${esc(label)}</span>`;
   };
 
+  // Tag-Span für Punkt-Labels (tagIdentityDesign): nur für Registry-Multi-
+  // User-Konten (eigene Globe-Registry countryData.registry — dieselbe Datei
+  // wie lib/threats-service.mjs:140) PLUS Defense-in-Depth isFullShownAddr
+  // PLUS belegtem toTag auf eingehenden Kanten (tagsByAddr aus buildDatasets).
+  // Bogen-Labels bleiben unverändert (Clutter-Grenze, Plan). Tag 0 ist ein
+  // echter Tag (lib/tag-identity.mjs) und zeigt '#0'.
+  const tagSpanHtml = (addr, tagsByAddr) => {
+    const a = String(addr ?? '');
+    const tags = tagsByAddr ? tagsByAddr.get(a) : null;
+    if (!tags || !tags.size) return '';
+    if (!isFullShownAddr(a)) return '';
+    const reg = countryData.registry && countryData.registry.byAddress instanceof Map
+      ? countryData.registry.byAddress
+      : null;
+    if (!reg || !reg.has(a)) return '';
+    const aria = esc(t('tag.chipAria'));
+    return [...tags]
+      .sort((x, y) => x - y)
+      .slice(0, 3)
+      .map((tg) => `<span class="globe-addr-tag" role="img" aria-label="${aria}">#${esc(String(tg))}</span>`)
+      .join('');
+  };
+
   function reducedMotion() {
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
     catch { return false; }
@@ -612,6 +635,18 @@ export function initGlobe(ctx) {
     const nodes = cg && Array.isArray(cg.nodes) ? cg.nodes : [];
     const edges = cg && Array.isArray(cg.edges) ? cg.edges : [];
 
+    // Tags je Adresse (distinct toTags eingehender Kanten) für Punkt-Labels
+    // (tagSpanHtml). Tags sind Edge-Attribute der Cluster-Kanten (toTag aus
+    // lib/cluster.mjs / viewEdge lib/flow-state.mjs); ohne Feld: kein Span.
+    const tagsByAddr = new Map();
+    for (const e of edges) {
+      if (!e || e.toTag == null) continue;
+      const key = String(e.to ?? '');
+      if (!key) continue;
+      if (!tagsByAddr.has(key)) tagsByAddr.set(key, new Set());
+      tagsByAddr.get(key).add(e.toTag);
+    }
+
     // KNOTEN-GATE (Defense-in-Depth, Muster drilldown.js:252-254): Der Host
     // filtert bereits vor buildClusterGraph; diese Schicht sichert zusätzlich
     // Graphen ab, die diesen Weg nicht gegangen sind. Kanten fallen automatisch
@@ -719,7 +754,7 @@ export function initGlobe(ctx) {
         // pointLabel/arcLabel als HTML in eine klassenlose CSS2D-Div; ohne
         // eigenes Element greift keine Wrap-Regel (Kritik 2026-10-04). Die
         // Wrap-Regel steht in globe.css (#globe .globe-addr-label).
-        label: `<span class="globe-addr-label">${esc(displayAddr(id))}${nameSpanHtml(id)}</span>`,
+        label: `<span class="globe-addr-label">${esc(displayAddr(id))}${nameSpanHtml(id)}${tagSpanHtml(id, tagsByAddr)}</span>`,
         clusterId: n.clusterId != null ? String(n.clusterId) : null,
         _drops: drops, // nur für den GLOBE_MAX_POINTS-Deckel unten, wird entfernt
       });

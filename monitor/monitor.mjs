@@ -33,6 +33,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "xrpl";
 import { analyzeLedger, DEFAULT_THRESHOLDS } from "../lib/detector.mjs";
+import { normalizeTag } from "../lib/tag-identity.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -382,6 +383,12 @@ async function handleTx(event) {
   const isBait = (a) => baitByAddress.has(a);
   const time = eventTime(event, tx);
   const shortHash = String(txHash).slice(0, 8);
+  // DestinationTag als optionales Evidenz-Feld (kein neuer Rule-Zweig, kein
+  // Score-/Risk-Einfluss): dokumentiert, welches Hosted-Sub-Konto betroffen
+  // war. Nur interner Store — das öffentliche Evidence-Schema
+  // (lib/sanitize.mjs:40-51) exportiert das Feld nicht (dokumentiert).
+  const txDestTag = normalizeTag(tx.DestinationTag);
+  const tagEvidence = txDestTag != null ? { destinationTag: txDestTag } : {};
 
   // ---------- Fall A: ein Köder-Konto hat selbst initiiert ----------
   if (isBait(tx.Account)) {
@@ -404,7 +411,7 @@ async function handleTx(event) {
         address: tx.Account, // intern die Köder-Adresse; der Server ersetzt sie öffentlich durch das Label
         risk: "suspect",
         reason: `${hpLabel} initiierte ${txType} gegen das DEX-Orderbuch (Gegenpartei unbekannt)`,
-        evidence: { txHash, type: txType, time, honeypot: hpLabel },
+        evidence: { txHash, type: txType, time, honeypot: hpLabel, ...tagEvidence },
         time,
       });
       saveThreats();
@@ -419,7 +426,7 @@ async function handleTx(event) {
       address: tx.Account,
       risk: "malicious",
       reason: `${hpLabel} initiierte ${txType}-Transaktion selbst (mögliche Kompromittierung)`,
-      evidence: { txHash, type: txType, time, honeypot: hpLabel },
+      evidence: { txHash, type: txType, time, honeypot: hpLabel, ...tagEvidence },
       time,
     });
     if (rec.fundingNeeded) {
@@ -460,7 +467,7 @@ async function handleTx(event) {
     address: counterparty,
     risk,
     reason,
-    evidence: { txHash, type: txType, time, honeypot: hpLabel },
+    evidence: { txHash, type: txType, time, honeypot: hpLabel, ...tagEvidence },
     time,
   });
 
