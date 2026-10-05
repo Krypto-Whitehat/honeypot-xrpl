@@ -40,9 +40,15 @@ jobs:
         continue-on-error: true
         env:
           ADVANCE_CHAIN: ${{ vars.ADVANCE_CHAIN }}
+          CHAIN_TOKEN: *** secrets.ADVANCE_CHAIN_TOKEN }}
         run: |
           # Kill-Switch: Repo-Variable ADVANCE_CHAIN=off stoppt die Kette.
           if [ "${ADVANCE_CHAIN:-on}" = "off" ]; then echo "Kette aus (Kill-Switch)"; exit 0; fi
+          # GITHUB_TOKEN allein darf workflow_dispatch nicht auslösen (live
+          # 05.10.2026 gemessen: dispatch HTTP 401) — die Kette nutzt das
+          # Repo-Secret ADVANCE_CHAIN_TOKEN (Scope workflow). Ohne Secret:
+          # keine Kette, die drei Crons bleiben der Backstop.
+          if [ -z "$CHAIN_TOKEN" ]; then echo "kein CHAIN_TOKEN -> keine Kette (Cron-Backstop)"; exit 0; fi
           # Kette nur auf Erfolgspfad: 502/503-Ticks verlängern nicht.
           if [ "$tick_code" != "200" ]; then echo "Tick $tick_code -> keine Kette (Cron-Backstop)"; exit 0; fi
           # Spin-Schutz (Prüfer 3): +0-Tick MIT Fehlerfeld (Netzwerk-/RPC-
@@ -65,7 +71,7 @@ jobs:
           if [ "$lag" -gt 300 ]; then
             curl -s --max-time 10 -o /dev/null -w "dispatch HTTP %{http_code}\n" \
               -X POST \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Authorization: Bearer $CHAIN_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/advance-cron-c.yml/dispatches" \
               -d '{"ref":"main"}'
