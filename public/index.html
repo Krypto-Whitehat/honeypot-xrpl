@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ffffff">
+  <!-- Theme-Farbe der Browser-Chrome: Noir ist Erstbesuch-Default (Hell
+       wählbar und unter 'hx-theme' persistiert). i18n.mjs applyTheme/setTheme
+       hält dieses Meta beim Theme-Wechsel aktuell. -->
+  <meta name="theme-color" content="#0c0b14">
   <title>Honeypot XRPL – Live Ledger Analysis</title>
   <meta name="description" content="Live ledger analysis of the XRPL: validated blocks are checked in real time for malware, spam and draining patterns, and the detected actors are grouped into clusters (source, drainer, collector, relay).">
   <link rel="stylesheet" href="style.css">
@@ -13,7 +16,22 @@
   <link rel="stylesheet" href="account-check.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
-<body data-a6>
+<body data-a6 data-theme="noir">
+  <!-- Theme-Bootstrap (kein FOUC): Noir ist statisch im Markup (Erstbesuch-
+       Default); nur eine persistierte Wahl von 'light' wird VOR dem ersten
+       Paint zurückgeschaltet — guardiert wie i18n.mjs storageGet (Private
+       Mode/gesperrter Storage: Noir bleibt). Pendant in about.html und
+       history-host.html; der laufende Wechsel läuft über i18n.mjs
+       initThemeSwitcher/setTheme (hx:themechange). -->
+  <script>
+    try {
+      if (localStorage.getItem('hx-theme') === 'light') {
+        document.body.dataset.theme = 'light';
+        var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeColorMeta) themeColorMeta.setAttribute('content', '#ffffff');
+      }
+    } catch (e) { /* Storage gesperrt: Noir bleibt */ }
+  </script>
   <!-- App-Kopfzeile (Console-Shell): links Marke, rechts Status-Cluster —
        Verbindungs-LED (#conn/#conn-dot, app.js setConn), Netzwerk-Chip und
        Uhr (#stat-network/#stat-last) — angereiht die Kopf-KPIs
@@ -61,6 +79,7 @@
     </div>
 
     <div class="lang-switch" id="lang-switch"></div>
+    <div class="theme-switch" id="theme-switch"></div>
   </header>
 
   <!-- Live-Statusleiste statt Landing-Hero (Astra-6 .a6-stage-Muster, Profil

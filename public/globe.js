@@ -40,8 +40,9 @@
  *
  * ctx (nur Host-Funktionen des Hosts app.js): getClusterGraph, displayAddr
  * (displayFindingAddr), isDeniedAddr, shortAddr, esc, fmtXrp, roleColors
- * (ROLE_COLORS), edgeColors (EDGE_COLORS), edgeDefault, hashOf (SHA-256-Cache),
- * openCluster(clusterId).
+ * (ROLE_COLORS), edgeColors (EDGE_COLORS), edgeDefault (Theme-Thunk
+ * () => EDGE_DEFAULT — String wird abwärtskompatibel als Konstante
+ * behandelt), hashOf (SHA-256-Cache), openCluster(clusterId).
  *
  * SICHERHEIT (Grundprinzip drilldown.js:16-23): Adressen werden NIEMALS roh
  * gerendert — ausschließlich über ctx.displayAddr (fail-closed). Zusätzlich
@@ -166,7 +167,12 @@ export function initGlobe(ctx) {
   const hashOf = typeof ctx.hashOf === 'function' ? ctx.hashOf : null;
   const roleColors = ctx.roleColors || {};
   const edgeColors = ctx.edgeColors || {};
-  const edgeDefault = typeof ctx.edgeDefault === 'string' ? ctx.edgeDefault : null;
+  // Theme-Thunk (Noir): app.js übergibt () => EDGE_DEFAULT — der letzte
+  // Fallback wird je ZUGRIFF gelesen statt beim Init eingefroren.
+  // Abwärtskompatibel: ein String-ctx bleibt als Konstante nutzbar.
+  const edgeDefaultOf = typeof ctx.edgeDefault === 'function'
+    ? ctx.edgeDefault
+    : (ctx.edgeDefault != null ? () => ctx.edgeDefault : () => null);
   const openCluster = typeof ctx.openCluster === 'function' ? ctx.openCluster : null;
   // Namens-Badge-Lookup (XRPScan-Aliase): HOST-GATE accountNameOf (liefert
   // null für maskierte/Deny-Adressen) PLUS Defense-in-Depth isFullShownAddr
@@ -374,9 +380,12 @@ export function initGlobe(ctx) {
    * ≈ #E3E3E5 unter dem WCAG-Grafikkontrast (3:1) und wäre praktisch
    * unsichtbar (gleiche Größenordnung wie die Graticules). Damit der
    * Layer-Zweck „Grenzen sichtbar" hält, fällt die Kette bei rgba-Alpha
-   * unter 0.5 auf den dokumentierten Fallback derselben Kette durch:
-   * EDGE_DEFAULT (#62626b, neutral, Kontrast ≈ 5,6:1). Opake Token-Werte
-   * und solche mit Alpha >= 0.5 werden unverändert übernommen. */
+   * unter 0.5 über den neutralen KANTEN-Token (--a6-edge-neutral — Noir:
+   * #8f8da0, 5.7:1 auf der dunklen Bühne; der frühere Direktsprung auf
+   * EDGE_DEFAULT #62626b hätte in Noir nur ~2.2:1 erreicht) und von dort
+   * auf den dokumentierten Fallback derselben Kette durch: EDGE_DEFAULT
+   * (#62626b, neutral, Kontrast ≈ 5,6:1). Opake Token-Werte und solche mit
+   * Alpha >= 0.5 werden unverändert übernommen. */
   function resolveStrokeColor() {
     const raw = cssToken('--a6-line');
     if (raw) {
@@ -385,7 +394,7 @@ export function initGlobe(ctx) {
       const a = m[1].endsWith('%') ? parseFloat(m[1]) / 100 : parseFloat(m[1]);
       if (Number.isFinite(a) && a >= 0.5) return raw; // ausreichend deckend
     }
-    return edgeDefault; // dokumentierter Fallback der Vertragskette
+    return cssToken('--a6-edge-neutral') || edgeDefaultOf(); // Vertragskette
   }
 
   /* Länder-Daten EINMAL lazy laden (erster activate()): Registry + TopoJSON
@@ -537,9 +546,11 @@ export function initGlobe(ctx) {
   }
 
   // Atmosphärenfarbe aus dem Token --a6-globe-atmosphere (globe.css). Der
-  // Alpha-Anteil wird über Weiß geblendet, weil die WebGL-Atmosphärenfarbe
-  // (new THREE.Color, Bundle-Check) keinen Alphakanal auswertet — so bleibt
-  // der hauchzarte Charakter des Tokens erhalten.
+  // Alpha-Anteil wird über die BÜHNENFARBE geblendet (Token
+  // --a6-graph-canvas; Fallback Weiß = Bestandsverhalten), weil die WebGL-
+  // Atmosphärenfarbe (new THREE.Color, Bundle-Check) keinen Alphakanal
+  // auswertet — so bleibt der hauchzarte Charakter des Tokens erhalten und
+  // Noir mischt über der dunklen statt der weißen Bühne.
   function resolveAtmosphereColor() {
     const raw = cssToken('--a6-globe-atmosphere');
     if (!raw) return null;
@@ -556,18 +567,26 @@ export function initGlobe(ctx) {
     }
     a = Math.min(1, Math.max(0, a));
     if (a >= 1) return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
-    const mix = (ch) => Math.round(ch * a + 255 * (1 - a)); // Bühne ist weiß
-    return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+    // Mischziel: Bühnen-Token als Hex (Style-CSS, Theme-geführt); ungültig →
+    // Weiß (dokumentierter Fallback, Bestandsverhalten im Hell-Theme).
+    const surface = cssToken('--a6-graph-canvas');
+    const sm = /^#([0-9a-f]{6})$/i.exec(String(surface ?? ''));
+    const target = sm
+      ? [parseInt(sm[1].slice(0, 2), 16), parseInt(sm[1].slice(2, 4), 16), parseInt(sm[1].slice(4, 6), 16)]
+      : [255, 255, 255];
+    const mix = (ch, i) => Math.round(ch * a + target[i] * (1 - a));
+    return `rgb(${mix(r, 0)}, ${mix(g, 1)}, ${mix(b, 2)})`;
   }
 
   // Schweregrad-Farben ausschließlich aus den bestehenden CSS-Tokens
-  // (style.css:70-73, --a6-sev-*) — kein zweites Farbsystem in diesem Modul.
-  // Letzter Fallback ist die neutrale Kantenfarbe des Hosts (edgeDefault).
+  // (style.css, --a6-sev-*) — kein zweites Farbsystem in diesem Modul.
+  // Letzter Fallback ist die neutrale Kantenfarbe des Hosts (edgeDefaultOf,
+  // Theme-Thunk).
   function sevTokenColor(sev) {
     const primary = cssToken(`--a6-sev-${sev}`);
     if (primary) return primary;
     const alt = sev === 'malicious' ? '--a6-error' : sev === 'suspect' ? '--a6-warn' : '--a6-info';
-    return cssToken(alt) || cssToken('--a6-sev-neutral') || edgeDefault || null;
+    return cssToken(alt) || cssToken('--a6-sev-neutral') || edgeDefaultOf() || null;
   }
 
   function showNote(el, text, isAlert) {
@@ -743,7 +762,7 @@ export function initGlobe(ctx) {
       // derselben Rolle (#62626b, Kontrast ≈ 5,3:1) — genau der Rand, den die
       // Legende für unknown zeigt; dunkle Rollenfarben bleiben unverändert.
       const bg = typeof rc === 'string' ? rc
-        : (rc && typeof rc.background === 'string' ? rc.background : edgeDefault);
+        : (rc && typeof rc.background === 'string' ? rc.background : edgeDefaultOf());
       let color = bg;
       const lum = relLuminance(bg);
       if (lum !== null && lum > 0.82) {
@@ -838,7 +857,7 @@ export function initGlobe(ctx) {
           lng: c.centroid[1],
           text: esc(c.name),
           size: 0.5,
-          color: cssToken('--a6-ink') || edgeDefault,
+          color: cssToken('--a6-ink') || edgeDefaultOf(),
           dotRadius: 0.1,
           altitude: 0.01, // knapp über der Polygon-Fläche (0.006)
         });
@@ -890,7 +909,7 @@ export function initGlobe(ctx) {
       const b = posOf.get(to);
       // Farbe exakt EDGE_COLORS/EDGE_DEFAULT (app.js:382-395) — dieselbe
       // Codierung wie Legende und Graph-Tab.
-      const color = edgeColors[String(e.type ?? '')] || edgeDefault;
+      const color = edgeColors[String(e.type ?? '')] || edgeDefaultOf();
       if (typeof color !== 'string') continue;
       const flagged = (SEV_RANK[sevByNode.get(from)] ?? 1) >= SEV_RANK.malicious
         || (SEV_RANK[sevByNode.get(to)] ?? 1) >= SEV_RANK.malicious;
@@ -1532,6 +1551,19 @@ export function initGlobe(ctx) {
     // Ring-Takt — idempotent zur Sichtbarkeits-Selbstpause des Observers.
     syncAnimation();
   }
+
+  /* Theme-Wechsel (hx:themechange, i18n.mjs initThemeSwitcher): die
+   * WebGL-Farben (Stroke, Kugel-Material, Atmosphäre) sind BAUZEIT-Werte je
+   * Instanz — ein echter rebuildGlobe() (bewährter contextlost-Pfad) ist
+   * hier der korrekte Weg, kein Options-Patch. Nur bei gebauter Kugel; vor
+   * dem ersten activate() baut construct() ohnehin im aktuellen Theme,
+   * nach buildFailed bleibt der Terminalzustand. Das Puffer-Prinzip von
+   * latestDs erhält die Daten, showNote/syncGlobeAria laufen im Neubau. */
+  try {
+    document.addEventListener('hx:themechange', () => {
+      if (buildDone && !buildFailed && globe) void rebuildGlobe();
+    });
+  } catch { /* Noop ohne addEventListener */ }
 
   return { activate, deactivate, refresh };
 }

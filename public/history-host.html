@@ -3,13 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ffffff">
+  <!-- Theme-Farbe der Browser-Chrome: Noir ist Erstbesuch-Default (identisch
+       zu index.html; i18n.mjs applyTheme/setTheme hält das Meta aktuell). -->
+  <meta name="theme-color" content="#0c0b14">
   <title>Honeypot XRPL – Flow-Host</title>
   <meta name="description" content="Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
-<body data-a6>
+<body data-a6 data-theme="noir">
+  <!-- Theme-Bootstrap (kein FOUC, Muster index.html): Noir ist statisch im
+       Markup; nur eine persistierte Wahl von 'light' wird vor dem ersten
+       Paint zurückgeschaltet — guardiert (Private Mode: Noir bleibt). -->
+  <script>
+    try {
+      if (localStorage.getItem('hx-theme') === 'light') {
+        document.body.dataset.theme = 'light';
+        var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeColorMeta) themeColorMeta.setAttribute('content', '#ffffff');
+      }
+    } catch (e) { /* Storage gesperrt: Noir bleibt */ }
+  </script>
   <header class="topbar">
     <!-- Marke identisch zu index.html (Design P1, Design P1-Pflegehinweis im
          Kopf-Kommentar dort): Gravur-Logo .brand-mark inline, aria-hidden,
@@ -22,6 +36,7 @@
       </div>
     </div>
     <div class="lang-switch" id="lang-switch"></div>
+    <div class="theme-switch" id="theme-switch"></div>
   </header>
 
   <nav class="view-nav graph-tabs" aria-label="Navigation" data-i18n-aria="fh.navAria">
@@ -76,7 +91,7 @@
  * Formatter-Locale folgt der Sprache); statische Texte via data-i18n. */
 
 import {
-  t, fmtNum, fmtXrp, fmtDateTime, applyLang, applyStatic, initLangSwitcher,
+  t, fmtNum, fmtXrp, fmtDateTime, applyLang, applyStatic, initLangSwitcher, initThemeSwitcher,
 } from './i18n.mjs';
 /* Adress-Chip-Zeile (Börsen-Name + Destination-Tag), Coverage-Fix 2026-10-06:
  * derselbe DOM-freie Shared-Helfer wie im Live-Host (public/cluster-chips.mjs,
@@ -219,14 +234,16 @@ function cssToken(name) {
 // Rollenfarbe ausschließlich aus den bestehenden Tokens; unknown/Fallback ->
 // derselbe Teller wie ROLE_COLORS.unknown in public/app.js (#f0f0f2 mit
 // Randton #62626b als Knotenrand) — vorher war der Fallback #62626b und
-// damit von einem echten Relay-Knoten nicht zu unterscheiden.
+// damit von einem echten Relay-Knoten nicht zu unterscheiden. Noir-Theme:
+// die Tokens sind theme-geführt, der Literale-Fallback bleibt der
+// Hell-Wert (Node-Tests).
 function roleColor(role) {
   const token = { source: '--a6-role-source', drainer: '--a6-role-drainer', collector: '--a6-role-collector', relay: '--a6-role-relay' }[role];
   if (token) {
     const v = cssToken(token);
     if (v) return v;
   }
-  return '#f0f0f2';
+  return cssToken('--a6-swatch-unknown') || '#f0f0f2';
 }
 
 // Deterministische Kurzform für Labels (volle Adresse im title-Tooltip).
@@ -317,7 +334,12 @@ function buildFlowGraph(clusters) {
 function renderFlowGraph(graph) {
   const labelNodes = graph.nodes.length <= NODE_LABEL_MAX;
   const labelEdgeIds = new Set(graph.edges.slice(0, EDGE_LABEL_MAX).map(edgeIdentity));
+  // Token-Weg (Noir-Theme): Kanten-/Label-/Kontur-Töne LIVE aus den Tokens
+  // (--a6-edge-neutral ist theme-geführt; Noir #8f8da0 statt #62626b);
+  // Literale nur als Hell-Fallback.
   const edgeColor = cssToken('--a6-edge-neutral') || '#62626b';
+  const inkColor = cssToken('--a6-ink') || '#141416';
+  const nodeStroke = cssToken('--a6-cluster-border') || '#17171b';
   const parts = [];
   parts.push('<svg viewBox="0 0 ' + GW + ' ' + GH + '" style="width:100%;height:auto;display:block" role="img" aria-label="' + esc(t('fh.graphAria')) + '">');
   for (const e of graph.edges) {
@@ -350,9 +372,9 @@ function renderFlowGraph(graph) {
       const ly = Math.round((p[1] + (dy / len) * 13) * 100) / 100;
       const anchor = dx > 8 ? 'start' : dx < -8 ? 'end' : 'middle';
       const labelInner = nodeLabelSvg(nd.id).replaceAll('__X__', String(lx));
-      label = '<text x="' + lx + '" y="' + (ly + 3) + '" font-size="8" fill="#141416" text-anchor="' + anchor + '">' + labelInner + '</text>';
+      label = '<text x="' + lx + '" y="' + (ly + 3) + '" font-size="8" fill="' + inkColor + '" text-anchor="' + anchor + '">' + labelInner + '</text>';
     }
-    parts.push('<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + GNODE_R + '" fill="' + fill + '" stroke="#17171b" stroke-width="1"><title>' + title + '</title></circle>' + label);
+    parts.push('<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + GNODE_R + '" fill="' + fill + '" stroke="' + nodeStroke + '" stroke-width="1"><title>' + title + '</title></circle>' + label);
   }
   parts.push('</svg>');
   return parts.join('');
@@ -480,11 +502,18 @@ els.refresh.addEventListener('click', load);
 
 // Sprach-Basisteil: Titel/Meta/lang, statische data-i18n-Texte, Umschalter;
 // dynamische Sichten (Cluster-Karten, Graph, Status) re-rendern auf hx:langchange.
+// Theme-Teil (Noir): der Flow-Graph malt seine SVG-Farben als Attribute bei
+// JEDEM Render aus den Live-Tokens (--a6-role-*, --a6-edge-neutral, --a6-ink,
+// --a6-cluster-border) — nach einem hx:themechange reicht also ein Re-Render.
 applyLang();
 applyStatic(document);
 initLangSwitcher(document.getElementById('lang-switch'));
+initThemeSwitcher(document.getElementById('theme-switch'));
 document.addEventListener('hx:langchange', () => {
   applyStatic(document);
+  if (lastData) renderView(lastData);
+});
+document.addEventListener('hx:themechange', () => {
   if (lastData) renderView(lastData);
 });
 

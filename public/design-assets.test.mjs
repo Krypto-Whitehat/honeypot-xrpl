@@ -34,12 +34,28 @@
  *     Drainer-Ring (nodeThreeObjectExtend, Deckel 12, kein Emissive —
  *     Plan-Kritik 7b/8), Ring-Legende über i18n in beiden Wörterbüchern,
  *     forced-colors-Rücknahme der Vignette.
+ *  9) Noir-Theme (2026-10-06): data-theme="noir" als zweites VOLLTHEMA über
+ *     die Token-SSOT — vollständiger Override-Block (inkl. color-scheme:
+ *     dark), KEINE hartcodierten Hex außerhalb der beiden Token-Blöcke,
+ *     --a6-on-ink/--a6-info-soft/--a6-stage-bg/--a6-stage-glow statt der
+ *     früheren Hell-Literale, Theme-Mechanik (Bootstrap 'hx-theme', Toggle-
+ *     Fixture, aria) und Kontrast-Regeltests der Kern-Paare in BEIDEN Themes
+ *     (WCAG 2.x: Text ≥ 4.5:1, UI ≥ 3:1, Soft-Flächen komposit über der
+ *     Surface), JS-Canvas-Paletten (app.js THEME_JS_COLORS inkl. unknown)
+ *     und die Module-Verdrahtung (drilldown/globe/Flow-Host).
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+/* Noir-Theme (2026-10-06): die Theme-Mechanik (i18n.mjs) ist DOM-frei
+ * importierbar (Modul-Vertrag) — der Fixture-Test unten stubt
+ * document/localStorage je Test und räumt in finally auf. */
+import {
+  DEFAULT_THEME, THEMES, THEME_KEY, THEME_META_COLORS,
+  getTheme, resolveTheme, setTheme, initThemeSwitcher,
+} from './i18n.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, rel), 'utf8');
@@ -53,6 +69,8 @@ const historyHostHtml = read('history-host.html');
 const aboutHtml = read('about.html');
 const historyJs = read('history.js');
 const historyCss = read('history.css');
+const accountCheckCss = read('account-check.css');
+const globeJs = read('globe.js');
 const i18nMjs = read('i18n.mjs');
 const appJs = read('app.js');
 
@@ -419,4 +437,365 @@ test('3D-Speed-Budget: kein Postprocessing, keine neue Abhängigkeit, Deckel unv
   // aus Instanzen der aktiven Instanz rekonstruiert (resolve3dRingClasses).
   assert.doesNotMatch(code, /window\.THREE\s*=/, 'kein injiziertes window.THREE');
   assert.match(code, /import \{ t, fmtNum, fmtClock, sevText, getLang \} from '\.\/i18n\.mjs';/, 'Import-Set unverändert (keine neue Abhängigkeit)');
+});
+
+/* ---------------- Noir-Theme (data-theme="noir", 2026-10-06) ----------------
+ * Extraktion der Token-Blöcke: [data-a6] (Hell/SSOT) und
+ * [data-a6][data-theme="noir"] (Overrides). Beide Blöcke sind
+ * klammerfrei in den Deklarationen — die non-grease \n}-Grenze greift. */
+
+const lightBlock = styleCss.match(/\[data-a6\]\s*\{[\s\S]*?\n\}/);
+const noirBlock = styleCss.match(/\[data-a6\]\[data-theme="noir"\]\s*\{[\s\S]*?\n\}/);
+
+function parseTokens(block) {
+  const map = {};
+  for (const m of block.matchAll(/(--a6-[a-z0-9-]+)\s*:\s*([^;]+);/g)) {
+    map[m[1]] = m[2].trim();
+  }
+  return map;
+}
+
+const lightTokens = parseTokens(lightBlock[0]);
+const noirTokens = parseTokens(noirBlock[0]);
+const noirView = { ...lightTokens, ...noirTokens }; // Noir = Light + Overrides
+
+test('Noir: Token-Override-Block vollständig (Flächen, Status, Akzent, Graph, Kanten, Rollen, Swatches, Stage) + color-scheme: dark', () => {
+  assert.ok(lightBlock, '[data-a6]-Light-Block gefunden');
+  assert.ok(noirBlock, '[data-a6][data-theme="noir"]-Block gefunden');
+  assert.match(noirBlock[0], /color-scheme:\s*dark/, 'Scrollbars/Form-Controls dunkel');
+  // Vollständigkeitsliste: jeder Token, den eine Komponente in Noir anders
+  // braucht, MUSS im Override-Block stehen (sonst leckt Hell durch).
+  const required = [
+    '--a6-bg', '--a6-surface', '--a6-surface-alt', '--a6-ink', '--a6-body', '--a6-muted',
+    '--a6-line', '--a6-line-strong', '--a6-control-line', '--a6-focus',
+    '--a6-error', '--a6-error-soft', '--a6-warn', '--a6-warn-soft',
+    '--a6-success', '--a6-success-soft', '--a6-info', '--a6-info-soft',
+    '--a6-inset-highlight', '--a6-e1', '--a6-e2', '--a6-e3',
+    '--a6-accent', '--a6-accent-hi', '--a6-accent-text', '--a6-on-accent', '--a6-accent-soft',
+    '--a6-brand-blue', '--a6-brand-teal', '--a6-brand-amber',
+    '--a6-graph-canvas', '--a6-graph-grid', '--a6-graph-line', '--a6-graph-line-soft',
+    '--a6-cluster-fill', '--a6-cluster-border', '--a6-cluster-hover',
+    '--a6-edge-payment', '--a6-edge-trustset', '--a6-edge-offer', '--a6-edge-escrow',
+    '--a6-edge-accountset', '--a6-edge-check', '--a6-edge-nft', '--a6-edge-neutral', '--a6-edge-ink',
+    '--a6-role-source', '--a6-role-source-border', '--a6-role-drainer', '--a6-role-drainer-border',
+    '--a6-role-collector', '--a6-role-collector-border', '--a6-role-relay', '--a6-role-relay-border',
+    '--a6-sev-malicious', '--a6-sev-suspect', '--a6-sev-info', '--a6-sev-neutral',
+    '--a6-ink-fill', '--a6-on-ink', '--a6-card-line',
+    '--a6-swatch-payment', '--a6-swatch-other', '--a6-swatch-unknown', '--a6-swatch-unknown-line',
+    '--a6-swatch-cluster-line', '--a6-unknown-fill',
+    '--a6-stage-bg', '--a6-stage-glow', '--a6-globe-atmosphere',
+  ];
+  const missing = required.filter((t) => !(t in noirTokens));
+  assert.deepEqual(missing, [], 'fehlende Noir-Overrides');
+  // Spot-Werte: die Noir-Identität (Indigo-Schwarz + Violett-Akzent) und die
+  // PFLICHTKORREKTUR-8-unknown-Tafel.
+  assert.equal(noirTokens['--a6-bg'], '#0c0b14');
+  assert.equal(noirTokens['--a6-ink'], '#f2f1f8');
+  assert.equal(noirTokens['--a6-accent'], '#8f7bff');
+  assert.equal(noirTokens['--a6-edge-neutral'], '#8f8da0');
+  assert.equal(noirTokens['--a6-on-ink'], '#0c0b14');
+  assert.equal(noirTokens['--a6-cluster-fill'], '#262436');
+  assert.equal(noirTokens['--a6-swatch-unknown-line'], '#8f8da0');
+  // Hell bleibt unangetastet (Spot): die SSOT-Werte stehen weiter im Light-Block.
+  assert.equal(lightTokens['--a6-bg'], '#f6f6f7');
+  assert.equal(lightTokens['--a6-accent'], '#ec5b00');
+  assert.equal(lightTokens['--a6-on-ink'], '#ffffff');
+});
+
+test('Noir: keine hartcodierten Hex außerhalb der beiden Token-Blöcke (style.css)', () => {
+  const stripped = styleCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const rest = stripped
+    .replace(/\[data-a6\]\s*\{[\s\S]*?\n\}/, '') // erster Treffer = Light-Block
+    .replace(/\[data-a6\]\[data-theme="noir"\]\s*\{[\s\S]*?\n\}/, '');
+  // \b-Grenze: ID-Selektoren (#feed-more) matchen nicht (Wortzeichen nach
+  // dem Hex-Präfix erzeugen keine Grenze); Farbwerte (#fff/#ffffff) schon.
+  const leaks = [...rest.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+  assert.deepEqual(leaks, [], 'Hex-Literale außerhalb der Token-Blöcke');
+});
+
+test('Noir: color:#fff entfernt — Auswahl-/Pressed-/Primär-Regeln auf --a6-on-ink', () => {
+  for (const [name, css] of [['style.css', styleCss], ['account-check.css', accountCheckCss]]) {
+    assert.doesNotMatch(css, /color:\s*#fff(?:fff)?\s*;/, `${name}: kein hartcodiertes Weiß als Textfarbe`);
+  }
+  for (const sel of [
+    String.raw`\.graph-tab\[aria-selected="true"\]`,
+    String.raw`\.view-tab\[aria-current="page"\]`,
+    String.raw`\.density-btn\[aria-pressed="true"\]`,
+    String.raw`\.lang-btn\[aria-pressed="true"\]`,
+  ]) {
+    const rule = styleCss.match(new RegExp(`${sel}\\s*\\{[^}]*\\}`));
+    assert.ok(rule, `Regel ${sel} vorhanden`);
+    assert.match(rule[0], /color:\s*var\(--a6-on-ink\)/, `${sel} auf on-ink`);
+  }
+  const go = accountCheckCss.match(/#check-go\s*\{[^}]*\}/);
+  assert.ok(go, '#check-go-Regel vorhanden');
+  assert.match(go[0], /color:\s*var\(--a6-on-ink\)/, '#check-go auf on-ink');
+  // Weitere Tokenisierungen des Noir-Umbaus (Spot-Guards):
+  assert.match(styleCss, /\.badge-info\s*\{[^}]*var\(--a6-info-soft\)/, 'badge-info-Fläche auf Token');
+  assert.match(styleCss, /\.swatch-cluster\s*\{[^}]*var\(--a6-cluster-fill\)/, 'Cluster-Swatch auf Token');
+  assert.match(styleCss, /\.swatch-escrow\s*\{[^}]*var\(--a6-edge-escrow\)/, 'escrow-Swatch auf Token');
+  assert.match(styleCss, /\.swatch-check\s*\{[^}]*var\(--a6-edge-check\)/, 'check-Swatch auf Token');
+  assert.match(styleCss, /\.hx-stage\s*\{[^}]*background:\s*var\(--a6-stage-bg\)/, 'Bühnen-Verlauf auf Token');
+  assert.match(styleCss, /\.hx-stage::before\s*\{[^}]*background:\s*var\(--a6-stage-glow\)/, 'Bühnen-Glow auf Token');
+  assert.match(styleCss, /\.hx-kpi\s*\{[^}]*border:\s*1px solid var\(--a6-card-line\)/, 'KPI-Rand auf card-line');
+  assert.match(styleCss, /--a6-e1:\s*var\(--a6-inset-highlight\)/, 'Elevation nutzt das Inset-Token');
+});
+
+test('Noir: Theme-Default + Bootstrap + Toggle-Container in allen drei HTML-Seiten', () => {
+  for (const [name, html] of [
+    ['index.html', indexHtml],
+    ['about.html', aboutHtml],
+    ['history-host.html', historyHostHtml],
+  ]) {
+    assert.match(html, /<body data-a6 data-theme="noir">/, `${name}: Noir als statischer Default (kein FOUC)`);
+    assert.match(html, /meta name="theme-color" content="#0c0b14"/, `${name}: Browser-Chrome in Noir-Farbe`);
+    assert.match(html, /localStorage\.getItem\('hx-theme'\)\s*===\s*'light'/, `${name}: Bootstrap liest 'hx-theme'`);
+    assert.match(html, /document\.body\.dataset\.theme = 'light'/, `${name}: Bootstrap schaltet Hell vor dem ersten Paint`);
+    assert.match(html, /<div class="theme-switch" id="theme-switch"><\/div>/, `${name}: Toggle-Container neben dem Sprachumschalter`);
+    // index.html verdrahtet über app.js (Host-Modul), die Nebenseiten über
+    // ihr Inline-Modul.
+    if (html === indexHtml) {
+      assert.match(appJs, /initThemeSwitcher\(document\.getElementById\('theme-switch'\)\)/, 'app.js verdrahtet den Umschalter');
+    } else {
+      assert.match(html, /initThemeSwitcher\(document\.getElementById\('theme-switch'\)\)/, `${name}: Umschalter verdrahtet`);
+    }
+  }
+  // Schlüssel-Hygiene: 'hx-theme' kollidiert nicht mit 'hx-lang'/'hx-density'.
+  assert.equal(THEME_KEY, 'hx-theme');
+  assert.notEqual(THEME_KEY, 'hx-lang');
+  assert.notEqual(THEME_KEY, 'hx-density');
+});
+
+test('Noir: Theme-Mechanik im DOM-Fixture — Toggle, Persistenz, Event, aria', () => {
+  // Stubs (Muster lib/i18n.test.mjs: globalThis je Test setzen, in finally
+  // zurückstellen). CustomEvent nur stubben, wenn die Laufzeit ihn fehlt.
+  const store = new Map();
+  const storageStub = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => { store.set(k, String(v)); },
+  };
+  const listeners = {};
+  const metaAttrs = {};
+  const docStub = {
+    body: { dataset: { theme: 'noir' } }, // HTML-Default: Noir statisch
+    querySelector: (sel) => (sel === 'meta[name="theme-color"]'
+      ? { setAttribute: (k, v) => { metaAttrs[k] = v; } }
+      : null),
+    addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
+    dispatchEvent: (ev) => { for (const fn of listeners[ev.type] ?? []) fn(ev); return true; },
+    createElement: () => {
+      const attrs = {};
+      const elListeners = {};
+      return {
+        type: '', className: '', textContent: '',
+        attrs, elListeners,
+        setAttribute(k, v) { attrs[k] = v; },
+        getAttribute(k) { return k in attrs ? attrs[k] : null; },
+        addEventListener(type, fn) { (elListeners[type] = elListeners[type] || []).push(fn); },
+      };
+    },
+  };
+  const prevStorage = globalThis.localStorage;
+  const prevDoc = globalThis.document;
+  const prevCustomEvent = globalThis.CustomEvent;
+  if (prevCustomEvent === undefined) {
+    globalThis.CustomEvent = class { constructor(type, opts) { this.type = type; this.detail = opts?.detail; } };
+  }
+  globalThis.localStorage = storageStub;
+  globalThis.document = docStub;
+  try {
+    // Default und Validierung.
+    assert.equal(DEFAULT_THEME, 'noir');
+    assert.deepEqual(THEMES, ['noir', 'light']);
+    assert.equal(getTheme(), 'noir', 'ohne Storage: Noir');
+    // setTheme validiert, persistiert, wendet an und sendet das Event.
+    let themeEvents = 0;
+    docStub.addEventListener('hx:themechange', () => { themeEvents += 1; });
+    assert.equal(setTheme('light'), 'light');
+    assert.equal(docStub.body.dataset.theme, 'light');
+    assert.equal(store.get(THEME_KEY), 'light');
+    assert.equal(metaAttrs.content, THEME_META_COLORS.light, 'meta theme-color hell');
+    assert.equal(themeEvents, 1, 'hx:themechange gesendet');
+    assert.equal(setTheme('bogus'), 'noir', 'ungültiger Wert fällt auf den Default');
+    assert.equal(docStub.body.dataset.theme, 'noir');
+    assert.equal(metaAttrs.content, THEME_META_COLORS.noir, 'meta theme-color noir');
+    assert.equal(resolveTheme('light', storageStub), 'light', 'resolveTheme persistiert injiziert');
+    assert.equal(store.get(THEME_KEY), 'light');
+    // Toggle-Fixture: EIN Button, aria-pressed spiegelt Noir, Klick wechselt.
+    // Deterministischer Start: Storage/Body zurück auf Noir (HTML-Default).
+    store.delete(THEME_KEY);
+    docStub.body.dataset.theme = 'noir';
+    const themeEventsBefore = themeEvents;
+    const container = {
+      attrs: {},
+      children: [],
+      setAttribute(k, v) { this.attrs[k] = v; },
+      appendChild(el) { this.children.push(el); },
+    };
+    const switcher = initThemeSwitcher(container);
+    assert.ok(switcher && typeof switcher.sync === 'function', 'initThemeSwitcher liefert sync');
+    assert.equal(container.attrs.role, 'group');
+    assert.ok(container.attrs['aria-label'] && container.attrs['aria-label'].length > 0, 'Gruppe trägt aria-label');
+    const btn = container.children[0];
+    assert.ok(btn, 'genau ein Button im Container');
+    assert.equal(container.children.length, 1, 'EIN Toggle-Button (kein zweites Sprach-Muster)');
+    assert.equal(btn.className, 'lang-btn theme-btn', 'Pille via .lang-btn-Komposition, Identität via .theme-btn');
+    assert.equal(btn.getAttribute('aria-pressed'), 'true', 'Noir aktiv → pressed');
+    assert.ok(btn.getAttribute('aria-label'), 'Button trägt die Aktions-Beschreibung');
+    // Echter Klick-Pfad über den registrierten Button-Handler:
+    assert.equal(themeEvents, themeEventsBefore, 'Vorbedingung: noch kein Theme-Event');
+    for (const fn of btn.elListeners.click ?? []) fn();
+    assert.equal(docStub.body.dataset.theme, 'light', 'Klick wechselt Noir → Hell');
+    assert.equal(btn.getAttribute('aria-pressed'), 'false', 'aria-pressed nach dem Wechsel');
+    assert.equal(store.get(THEME_KEY), 'light', 'Wahl persistiert');
+    assert.equal(themeEvents, themeEventsBefore + 1, 'Klick sendet genau ein Event');
+    assert.ok(btn.textContent.length > 0, 'Label zeigt den aktuellen Theme-Namen');
+    // sync-Rückruf (z. B. nach hx:langchange) stellt Label/aria wieder her.
+    switcher.sync();
+    assert.equal(btn.getAttribute('aria-pressed'), 'false');
+    // Ungültiger Wert fällt auf den Default und sendet ebenfalls ehrlich.
+    assert.equal(setTheme('bogus'), 'noir');
+    assert.equal(docStub.body.dataset.theme, 'noir');
+    assert.equal(metaAttrs.content, THEME_META_COLORS.noir, 'meta theme-color noir');
+    assert.equal(resolveTheme('light', storageStub), 'light', 'resolveTheme persistiert injiziert');
+    assert.equal(store.get(THEME_KEY), 'light');
+  } finally {
+    if (prevStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = prevStorage;
+    if (prevDoc === undefined) delete globalThis.document; else globalThis.document = prevDoc;
+    if (prevCustomEvent === undefined) delete globalThis.CustomEvent; else globalThis.CustomEvent = prevCustomEvent;
+  }
+});
+
+/* ---------------- Noir-Kontrast (WCAG 2.x, beide Themes) ---------------- */
+
+function hexLuminance(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(String(hex ?? ''));
+  if (!m) return null;
+  const lin = (h) => {
+    const v = parseInt(h, 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(m[1].slice(0, 2)) + 0.7152 * lin(m[1].slice(2, 4)) + 0.0722 * lin(m[1].slice(4, 6));
+}
+
+function contrastRatio(fg, bg) {
+  const l1 = hexLuminance(fg);
+  const l2 = hexLuminance(bg);
+  if (l1 === null || l2 === null) return null;
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
+// rgba-Soft-Fläche komposit über der Surface (so rendert der Browser sie).
+function compositeOver(rgba, bgHex) {
+  const m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?\s*\)$/i.exec(String(rgba ?? ''));
+  if (!m) return rgba; // opak
+  const bg = bgHex.replace('#', '');
+  const a = m[4] !== undefined ? parseFloat(m[4]) : 1;
+  const ch = (fg, i) => Math.round(parseInt(fg, 10) * a + parseInt(bg.slice(i, i + 2), 16) * (1 - a));
+  const c = [ch(m[1], 0), ch(m[2], 2), ch(m[3], 4)];
+  return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+const CONTRAST_PAIRS = [
+  // [Token fg, Token bg, Mindestkontrast, Art]
+  ['ink', 'bg', 4.5, 'Text'], ['ink', 'surface', 4.5, 'Text'], ['ink', 'surface-alt', 4.5, 'Text'],
+  ['body', 'surface', 4.5, 'Text'], ['body', 'surface-alt', 4.5, 'Text'],
+  ['muted', 'surface', 4.5, 'Text'], ['muted', 'surface-alt', 4.5, 'Text'],
+  ['control-line', 'surface', 3, 'UI'], ['control-line', 'surface-alt', 3, 'UI'],
+  ['sev-neutral', 'surface-alt', 3, 'UI'],
+  ['error', 'surface', 4.5, 'Text'], ['warn', 'surface', 4.5, 'Text'],
+  ['success', 'surface', 4.5, 'Text'], ['info', 'surface', 4.5, 'Text'],
+  ['error', 'surface-alt', 4.5, 'Text'], ['warn', 'surface-alt', 4.5, 'Text'],
+  ['success', 'surface-alt', 4.5, 'Text'], ['info', 'surface-alt', 4.5, 'Text'],
+  ['on-ink', 'ink-fill', 4.5, 'Text'],
+  ['brand-blue', 'surface', 4.5, 'Text'], ['brand-teal', 'surface', 4.5, 'Text'], ['brand-amber', 'surface', 4.5, 'Text'],
+  ['accent', 'surface', 3, 'UI'], ['on-accent', 'accent', 4.5, 'Text'], ['accent-text', 'surface', 4.5, 'Text'],
+  ['cluster-border', 'cluster-fill', 3, 'UI'],
+  ['edge-payment', 'surface', 3, 'UI'], ['edge-trustset', 'surface', 3, 'UI'], ['edge-offer', 'surface', 3, 'UI'],
+  ['edge-escrow', 'surface', 3, 'UI'], ['edge-accountset', 'surface', 3, 'UI'], ['edge-check', 'surface', 3, 'UI'],
+  ['edge-nft', 'surface', 3, 'UI'], ['edge-neutral', 'surface', 3, 'UI'], ['edge-neutral', 'surface-alt', 3, 'UI'],
+  ['edge-ink', 'surface', 3, 'UI'],
+  ['role-source', 'surface', 3, 'UI'], ['role-source-border', 'surface', 3, 'UI'],
+  ['role-drainer', 'surface', 3, 'UI'], ['role-drainer-border', 'surface', 3, 'UI'],
+  ['role-collector', 'surface', 3, 'UI'], ['role-collector-border', 'surface', 3, 'UI'],
+  ['role-relay', 'surface', 3, 'UI'], ['role-relay-border', 'surface', 3, 'UI'],
+  ['swatch-unknown-line', 'swatch-unknown', 3, 'UI'],
+  ['swatch-other', 'surface', 3, 'UI'],
+];
+
+test('Noir: Kontrast-Regeltests der Kern-Paare — berechnet aus den Token-Werten, BEIDE Themes (Text ≥ 4.5, UI ≥ 3)', () => {
+  for (const [themeName, tokens] of [['Hell', lightTokens], ['Noir', noirView]]) {
+    const messages = [];
+    for (const [fgKey, bgKey, min, kind] of CONTRAST_PAIRS) {
+      const fg = tokens[`--a6-${fgKey}`];
+      const bg = tokens[`--a6-${bgKey}`];
+      assert.ok(fg, `${themeName}: Token --a6-${fgKey} fehlt`);
+      assert.ok(bg, `${themeName}: Token --a6-${bgKey} fehlt`);
+      const ratio = contrastRatio(fg, bg);
+      assert.ok(ratio !== null, `${themeName}: --a6-${fgKey} ist kein 6-stelliger Hex (${fg})`);
+      if (ratio < min) messages.push(`--a6-${fgKey} auf --a6-${bgKey}: ${ratio.toFixed(2)} < ${min} (${kind})`);
+    }
+    // Severity-Text auf der KOMPOSITEN Soft-Fläche (rgba über Surface).
+    for (const [softKey, fgKey] of [
+      ['error-soft', 'error'], ['warn-soft', 'warn'], ['success-soft', 'success'], ['info-soft', 'info'],
+    ]) {
+      const surfaceComposite = compositeOver(tokens[`--a6-${softKey}`], tokens['--a6-surface']);
+      const ratio = contrastRatio(tokens[`--a6-${fgKey}`], surfaceComposite);
+      assert.ok(ratio !== null, `${themeName}: Soft-Komposit ${softKey} nicht berechenbar`);
+      if (ratio < 4.5) messages.push(`--a6-${fgKey} auf ${softKey}(komposit): ${ratio.toFixed(2)} < 4.5 (Text)`);
+    }
+    assert.deepEqual(messages, [], `${themeName}: Kontrast-Verletzungen`);
+  }
+});
+
+test('Noir: JS-Canvas-Paletten — THEME_JS_COLORS deckt Kanten/Rollen (inkl. unknown)/Cluster+Fonts ab, Module folgen', () => {
+  // app.js: Tafel vorhanden, Light-Werte = heutige Literale, Noir-Werte =
+  // Token-Tafel (Spot), unknown AUSDRÜCKLICH in beiden Themes.
+  assert.match(appJs, /const THEME_JS_COLORS = \{/, 'THEME_JS_COLORS definiert');
+  assert.match(appJs, /function applyThemeColors\(theme\)/, 'applyThemeColors definiert');
+  assert.match(appJs, /applyThemeColors\(currentJsTheme\(\)\);/, 'Startwert vor dem ersten Canvas-Render angewandt');
+  assert.match(appJs, /network\.setOptions\(/, 'vis-Options-Defaults über setOptions nachgeführt (Konstruktions-Lesezeit)');
+  assert.match(appJs, /edgeDefault: \(\) => EDGE_DEFAULT/, 'edgeDefault als Theme-Thunk in beiden ctx');
+  // Light-Spots (Identität zur Alt-Palette):
+  assert.match(appJs, /Payment: '#b3261e'/, 'Light-Payment unverändert');
+  assert.match(appJs, /background: '#f0f0f2', border: '#62626b'/, 'Light-unknown unverändert');
+  // Noir-Spots (PFLICHTKORREKTUR 7/8: unknown + Canvas-Fonts):
+  assert.match(appJs, /canvasInk: '#f2f1f8'/, 'Noir-Canvas-Ink = --a6-ink');
+  assert.match(appJs, /canvasBody: '#c9c7d6'/, 'Noir-Canvas-Body = --a6-body');
+  assert.match(appJs, /unknown: \{ background: '#262436', border: '#8f8da0'/, 'Noir-unknown auf Swatch-Teller');
+  assert.match(appJs, /fontColor: '#f2f1f8'/, 'Noir-Cluster-Font hell');
+  // Renderpfade lesen die theme-geführten Variablen statt Hex (die
+  // Initialwerte der Tabellen selbst sind bewusst die Hell-Literale —
+  // applyThemeColors mutiert sie in place; geprüft wird der RENDER-PFAD):
+  assert.match(appJs, /font: \{ color: canvasInk, size: 13/, 'initGraph-Knotenfont theme-geführt');
+  assert.match(appJs, /color: \{ color: EDGE_DEFAULT, highlight: canvasInk, hover: canvasInk \}/, 'Rohkanten theme-geführt');
+  assert.match(appJs, /font: \{ color: canvasBody, size: 12/, 'Rohkanten-Font theme-geführt');
+  assert.match(appJs, /getPropertyValue\('--a6-graph-canvas'\)/, 'PNG-Export über den Bühnen-Token');
+  assert.doesNotMatch(appJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').replace(/const THEME_JS_COLORS = \{[\s\S]*?\n\};/, ''), /highlight: '#141416'/, 'Kanten-Highlight nicht mehr hartcodiert');
+  assert.match(appJs, /document\.addEventListener\('hx:themechange'/, 'Host-Listener für hx:themechange');
+  // drilldown.js: Ring-Material-Refresh (PFLICHTKORREKTUR 9), Accessor-Re-Set,
+  // Noir-Faded-Ton, Token-Fonts, edgeDefault-Adapter.
+  assert.match(drilldownJs, /GRAPH3D_LINK_FADED_NOIR = '#514e66'/, 'Noir-Kontrolllinien-Ton definiert');
+  assert.match(drilldownJs, /export const GRAPH3D_LINK_FADED = '#c9c9cf';/, 'Import-Vertrag des Freeze-Tests bleibt (Hell-Wert)');
+  assert.match(drilldownJs, /document\.addEventListener\('hx:themechange'/, 'Drilldown-Theme-Listener');
+  assert.match(drilldownJs, /ring3dMat\.color\.set\(roleColors\.drainer\.background\)/, 'Ring-Material folgt dem Theme (kein Stale-Rot)');
+  assert.match(drilldownJs, /fg3d\.linkColor\(linkColor3dAccessor\(\)\)/, '3D-Kanten über Accessor-Re-Set');
+  assert.match(drilldownJs, /const edgeDefaultOf = typeof ctx\.edgeDefault === 'function'/, 'edgeDefault-Adapter (Thunk abwärtskompatibel)');
+  assert.match(drilldownJs, /getPropertyValue\('--a6-ink'\)/, '2D-Fonts über Token-Weg (ink)');
+  assert.match(drilldownJs, /getPropertyValue\('--a6-body'\)/, '2D-Fonts über Token-Weg (body)');
+  assert.doesNotMatch(
+    drilldownJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, ''),
+    /font: \{ color: '#141416'|font: \{ color: '#484850'/,
+    'keine hartcodierten Canvas-Fonts im 2D-Fallback',
+  );
+  // globe.js: Stroke-Fallback über den neutralen Kanten-Token (Noir 5.7:1),
+  // Atmosphären-Mischziel = Bühnen-Token, Theme-Wechsel über rebuildGlobe.
+  assert.match(globeJs, /cssToken\('--a6-edge-neutral'\) \|\| edgeDefaultOf\(\)/, 'Stroke-Vertragskette mit edge-neutral');
+  assert.match(globeJs, /cssToken\('--a6-graph-canvas'\)/, 'Mischziel/Material über Bühnen-Token');
+  assert.match(globeJs, /document\.addEventListener\('hx:themechange'[\s\S]{0,200}rebuildGlobe\(\)/, 'Theme-Wechsel: echter Rebuild (Bauzeit-Werte)');
+  // Flow-Host-SVG (history-host.html): Token-Lese statt Hell-Literale.
+  assert.match(historyHostHtml, /cssToken\('--a6-swatch-unknown'\)/, 'Flow-Graph unknown über Token');
+  assert.match(historyHostHtml, /cssToken\('--a6-ink'\) \|\| '#141416'/, 'Flow-Graph Labels über Ink-Token');
+  assert.match(historyHostHtml, /cssToken\('--a6-cluster-border'\) \|\| '#17171b'/, 'Flow-Graph Kontur über Token');
+  assert.match(historyHostHtml, /document\.addEventListener\('hx:themechange'/, 'Flow-Host rendert bei Theme-Wechsel neu');
 });

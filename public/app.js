@@ -91,7 +91,7 @@ import('/lib/rate-gate.mjs')
 import {
   t, ruleName, noteText, sevText, serverPhrase,
   fmtNum, fmtXrp, fmtClock, fmtDateTime,
-  applyStatic, applyLang, initLangSwitcher,
+  applyStatic, applyLang, initLangSwitcher, initThemeSwitcher,
 } from './i18n.mjs';
 /* Adress-Chip-Zeile der Cluster-Karten (Börsen-Name + Destination-Tag):
  * DOM-freier Shared-Helfer mit public/history-host.html (Muster
@@ -152,7 +152,11 @@ import('./drilldown.js')
         fmtClock,
         roleColors: ROLE_COLORS,
         edgeColors: EDGE_COLORS,
-        edgeDefault: EDGE_DEFAULT,
+        // Theme-Thunk (Noir-Theme): der Modul-Kontext ist einmalig — als
+        // Funktion liest das Drilldown EDGE_DEFAULT je Zugriff mit (die
+        // Tabellen-Objekte EDGE_COLORS/ROLE_COLORS wandern by-reference und
+        // sind über die In-place-Mutation ohnehin aktuell).
+        edgeDefault: () => EDGE_DEFAULT,
         roleLabels: ROLE_LABEL,
         physicsCluster: PHYSICS_CLUSTER,
         addrActionsHtml,
@@ -165,6 +169,15 @@ import('./drilldown.js')
         // Registry-Lookups (Coverage-Fix 2026-10-05).
         multiUserEntryOf,
         flowPaths: () => flowPathsFn,
+        // Nachladen aus dem persistierten Bestand (Stale-Overlay-Fix
+        // 2026-10-06): das Drilldown kann einen node-losen Merged-Cluster
+        // (Karte ohne Fenster-Knoten im Live-Graphen) aus dem akkumulierten
+        // Bestand rekonstruieren — Quelle in dieser Reihenfolge:
+        // lastClusterGraph → serverFlowClusters/sessionFlowClusters →
+        // bedingter Refetch /api/flow-state (60-s-Cache). Köder-Gates bleiben
+        // beim Host/im Drilldown (sync isDeniedAddr-Gate + Maske + Export-
+        // Nachprüfung); diese Funktion liefert nur Rohbestand.
+        getPersistedClusterById,
       });
     }
   })
@@ -201,7 +214,10 @@ import('./globe.js')
         esc,
         roleColors: ROLE_COLORS,
         edgeColors: EDGE_COLORS,
-        edgeDefault: EDGE_DEFAULT,
+        // Theme-Thunk (Noir-Theme, Muster drilldown-ctx): edgeDefault je
+        // Zugriff lesen, damit der Globe-Neuaufbau (hx:themechange →
+        // rebuildGlobe) die Noir-Fallbacks sieht.
+        edgeDefault: () => EDGE_DEFAULT,
         openCluster: openClusterModal,
       });
       // Trifft das Modul erst nach dem Tab-Wechsel ein, wird die Aktivierung
@@ -763,7 +779,12 @@ const EDGE_COLORS = {
   NFTokenMint: '#a21caf',
   NFTokenAcceptOffer: '#a21caf',
 };
-const EDGE_DEFAULT = '#62626b';
+// Neutraler Kanten-Ton — let (nicht const): applyThemeColors() tauscht den
+// Wert beim Theme-Wechsel (Noir #8f8da0 = --a6-edge-neutral, 5.68:1 auf der
+// dunklen Bühne; #62626b wäre dort nur ~2.2:1). Unbekannte Kanten-Typen
+// lesen den Wert je Render, Kontext-Verbraucher (drilldown/globe) über den
+// edgeDefault-Thunk.
+let EDGE_DEFAULT = '#62626b';
 
 // Rollen-Farbcodierung (Design-Vorgabe Astra 6): weiße/tonale Fläche,
 // 1px abgedunkelter Tintenrand je Rolle.
@@ -811,6 +832,132 @@ const CLUSTER_NODE_PROPERTIES = {
   font: { color: '#141416', size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', multi: false },
   shapeProperties: { borderRadius: 12, borderDashes: false },
 };
+
+/* ------------------------------------------------------------------ */
+/* Theme-JS-Palette (Noir-Theme 2026-10-06)                            */
+/* ------------------------------------------------------------------ */
+
+/* Die Canvas-Layer (vis-network 2D, 3d-force-graph, Globe) lesen CSS-Tokens
+ * nicht live — ihre Farben stehen als JS-Literale. THEME_JS_COLORS ist die
+ * JS-Gegentafel zu den Token-Blöcken in style.css ([data-a6] und
+ * [data-a6][data-theme="noir"]; Werte dort als Kontrasttabelle geprüft,
+ * Text ≥ 4.5 / UI ≥ 3 je Paar — Regeltests in design-assets.test.mjs).
+ * applyThemeColors(theme) MUTIERT die bestehenden Objekte in place —
+ * drilldown.js/globe.js halten Referenzen auf genau diese Objekte (ctx),
+ * die Identität bleibt also gültig. Unbekannte Rolle 'unknown' ist aus-
+ * drücklich Teil der Tabelle (Noir: Füllung #262436 / Rand #8f8da0 wie
+ * --a6-swatch-unknown — derselbe Teller wie die CSS-Seite). */
+const THEME_JS_COLORS = {
+  light: {
+    canvasInk: '#141416',      // = --a6-ink (Hell)
+    canvasBody: '#484850',     // = --a6-body
+    edgeDefault: '#62626b',    // = --a6-edge-neutral
+    edgeHighlight: '#141416',
+    edge: {
+      Payment: '#b3261e', TrustSet: '#b45309', OfferCreate: '#a16207', OfferCancel: '#a16207',
+      AccountSet: '#1d4ed8', EscrowCreate: '#6d28d9', EscrowFinish: '#6d28d9',
+      CheckCreate: '#0f766e', PaymentChannelCreate: '#0f766e',
+      NFTokenMint: '#a21caf', NFTokenAcceptOffer: '#a21caf',
+    },
+    roles: {
+      source: { background: '#16305c', border: '#0f2445', highlight: { background: '#2a4a7c', border: '#0f2445' }, hover: { background: '#2a4a7c', border: '#0f2445' } },
+      drainer: { background: '#b3261e', border: '#7f1d1d', highlight: { background: '#d03b33', border: '#7f1d1d' }, hover: { background: '#d03b33', border: '#7f1d1d' } },
+      collector: { background: '#b45309', border: '#7c3a06', highlight: { background: '#c96a1f', border: '#7c3a06' }, hover: { background: '#c96a1f', border: '#7c3a06' } },
+      relay: { background: '#0f766e', border: '#115e59', highlight: { background: '#1a8d84', border: '#115e59' }, hover: { background: '#1a8d84', border: '#115e59' } },
+      unknown: { background: '#f0f0f2', border: '#62626b', highlight: { background: '#e2e2e6', border: '#3f3f46' }, hover: { background: '#e2e2e6', border: '#3f3f46' } },
+    },
+    cluster: {
+      color: { background: '#ffffff', border: '#17171b', highlight: { background: '#f6f6f7', border: '#141416' }, hover: { background: '#f6f6f7', border: '#141416' } },
+      fontColor: '#141416',
+    },
+  },
+  noir: {
+    canvasInk: '#f2f1f8',      // = --a6-ink (Noir) 16.38 ✓
+    canvasBody: '#c9c7d6',     // = --a6-body 11.05 ✓
+    edgeDefault: '#8f8da0',    // = --a6-edge-neutral 5.68 ✓
+    edgeHighlight: '#f2f1f8',  // 16.38 ✓
+    edge: {
+      Payment: '#ff7a70', TrustSet: '#ffb45e', OfferCreate: '#f2b872', OfferCancel: '#f2b872',
+      AccountSet: '#8ab4ff', EscrowCreate: '#b79cff', EscrowFinish: '#b79cff',
+      CheckCreate: '#3ecfbb', PaymentChannelCreate: '#3ecfbb',
+      NFTokenMint: '#e879f9', NFTokenAcceptOffer: '#e879f9',
+    },
+    roles: {
+      source: { background: '#7d9bff', border: '#5f7ddb', highlight: { background: '#9db5ff', border: '#5f7ddb' }, hover: { background: '#9db5ff', border: '#5f7ddb' } },
+      drainer: { background: '#ff7a70', border: '#d95f56', highlight: { background: '#ff9d94', border: '#d95f56' }, hover: { background: '#ff9d94', border: '#d95f56' } },
+      collector: { background: '#ffb45e', border: '#c98a45', highlight: { background: '#ffcb8f', border: '#c98a45' }, hover: { background: '#ffcb8f', border: '#c98a45' } },
+      relay: { background: '#3ecfbb', border: '#2fa393', highlight: { background: '#74ded0', border: '#2fa393' }, hover: { background: '#74ded0', border: '#2fa393' } },
+      unknown: { background: '#262436', border: '#8f8da0', highlight: { background: '#343149', border: '#8f8da0' }, hover: { background: '#343149', border: '#8f8da0' } },
+    },
+    cluster: {
+      color: { background: '#262436', border: '#f2f1f8', highlight: { background: '#322f47', border: '#f2f1f8' }, hover: { background: '#322f47', border: '#f2f1f8' } },
+      fontColor: '#f2f1f8',
+    },
+  },
+};
+
+// Aktuell angezeigte Canvas-Tinten (von applyThemeColors gesetzt); die
+// Renderpfade (updateRawGraph/initGraph) lesen diese Variablen statt
+// hartcodierter Hex.
+let canvasInk = '#141416';
+let canvasBody = '#484850';
+
+// Aktuell ANGEWANDES Theme (body[data-theme]; Inline-Bootstrap und
+// initThemeSwitcher halten es synchron). Guard: ohne DOM/Body → Hell
+// (Verhalten aller Node-Tests unverändert).
+function currentJsTheme() {
+  try {
+    return document.body && document.body.dataset && document.body.dataset.theme === 'noir' ? 'noir' : 'light';
+  } catch { return 'light'; }
+}
+
+// Tiefes Zusammenführen NUR über die in der Tabelle vorhandenen Schlüssel —
+// Zielobjekte (und deren Identität) bleiben bestehen, Nested-Objekte
+// (highlight/hover/color/font) werden rekursiv in place überschrieben.
+function assignColorFields(target, src) {
+  for (const key of Object.keys(src)) {
+    const val = src[key];
+    if (val && typeof val === 'object' && target[key] && typeof target[key] === 'object') {
+      assignColorFields(target[key], val);
+    } else {
+      target[key] = val;
+    }
+  }
+}
+
+// Palette auf die Canvas-Objekte anwenden. Das vis-Network-Optionsobjekt
+// wird bei Konstruktion gelesen — nachträgliche Mutation allein greift
+// nicht, die Options-Defaults werden deshalb über network.setOptions()
+// nachgeführt (etablierter Re-Set-Pfad; die DataSets färbt der Theme-
+// Listener über den nächsten renderLiveGraph-Durchlauf um).
+function applyThemeColors(theme) {
+  const pal = THEME_JS_COLORS[theme] || THEME_JS_COLORS.light;
+  canvasInk = pal.canvasInk;
+  canvasBody = pal.canvasBody;
+  assignColorFields(EDGE_COLORS, pal.edge);
+  EDGE_DEFAULT = pal.edgeDefault;
+  assignColorFields(ROLE_COLORS, pal.roles);
+  assignColorFields(CLUSTER_NODE_PROPERTIES, pal.cluster);
+  if (network) {
+    try {
+      network.setOptions({
+        nodes: {
+          font: { color: canvasInk },
+          color: {
+            background: CLUSTER_NODE_PROPERTIES.color.background,
+            border: CLUSTER_NODE_PROPERTIES.color.border,
+            highlight: { ...CLUSTER_NODE_PROPERTIES.color.highlight },
+            hover: { ...CLUSTER_NODE_PROPERTIES.color.hover },
+          },
+        },
+        edges: {
+          color: { highlight: canvasInk, hover: canvasInk },
+          font: { color: canvasBody },
+        },
+      });
+    } catch { /* egal — der Theme-Listener zieht die DataSets separat nach */ }
+  }
+}
 
 // Zwei-Zeilen-Knotenlabel (B2): volle Adresse nur bei isFullShownAddr (Allowlist
 // geladen, kein Deny-Treffer — dasselbe Gate wie displayFindingAddr, 1454-1458);
@@ -924,23 +1071,27 @@ function initGraph() {
       autoResize: true,
       physics: PHYSICS_LIVE,
       interaction: { hover: true, tooltipDelay: 120, zoomView: true, dragView: true, hoverConnectedEdges: true, selectConnectedEdges: false },
+      // Options-Defaults theme-geführt (Noir-Theme): initGraph läuft lazy —
+      // applyThemeColors(currentJsTheme()) hat zum Startzeitpunkt bereits
+      // die Tafel angewandt; der Theme-Wechsel läuft später über
+      // network.setOptions() (Optionsobjekt wird hier gelesen).
       nodes: {
         shape: 'dot',
         borderWidth: 1,
         borderWidthSelected: 2,
-        font: { color: '#141416', size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
+        font: { color: canvasInk, size: 13, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
         color: {
-          background: '#ffffff',
-          border: '#17171b',
-          highlight: { background: '#f6f6f7', border: '#141416' },
-          hover: { background: '#f6f6f7', border: '#141416' },
+          background: CLUSTER_NODE_PROPERTIES.color.background,
+          border: CLUSTER_NODE_PROPERTIES.color.border,
+          highlight: { ...CLUSTER_NODE_PROPERTIES.color.highlight },
+          hover: { ...CLUSTER_NODE_PROPERTIES.color.hover },
         },
       },
       edges: {
         width: 1,
         smooth: { type: 'curvedCW', roundness: 0.14 },
         arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-        color: { color: '#62626b', highlight: '#141416', hover: '#141416' },
+        color: { color: EDGE_DEFAULT, highlight: canvasInk, hover: canvasInk },
       },
     }
   );
@@ -1034,8 +1185,8 @@ function updateRawGraph(cg, maxNodes = null) {
       // toTag — an der Kurzform nie (fail-closed).
       title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`
         + (e.toTag != null && multiUserEntryOf(e.to) ? ` · #${e.toTag}` : ''),
-      color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: '#141416', hover: '#141416' },
-      font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
+      color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: canvasInk, hover: canvasInk },
+      font: { color: canvasBody, size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
   });
 
@@ -1099,14 +1250,15 @@ function applyClustering(cg) {
     }
   }
 
-  // Cluster-zu-Cluster-Kanten dezent: 1px, gestrichelt, neutrale Töne.
+  // Cluster-zu-Cluster-Kanten dezent: 1px, gestrichelt, neutrale Töne
+  // (theme-geführt — EDGE_DEFAULT/canvasInk lesen applyThemeColors).
   for (const e of edgesDS.get()) {
     if (isClusterNode(e.from) && isClusterNode(e.to)) {
       edgesDS.update({
         id: e.id,
         width: 1,
         dashes: [6, 4],
-        color: { color: '#62626b', highlight: '#141416', hover: '#141416' },
+        color: { color: EDGE_DEFAULT, highlight: canvasInk, hover: canvasInk },
       });
     }
   }
@@ -1642,7 +1794,13 @@ function exportGraphPng() {
   target.height = h;
   const ctx2d = target.getContext('2d');
   if (!ctx2d) return;
-  ctx2d.fillStyle = '#ffffff';
+  // Bühnenfarbe über den dokumentierten Token-Weg (--a6-graph-canvas, live
+  // gelesen): Noir-Exporte bekommen die dunkle Bühne statt hartem Weiß.
+  let stageColor = '#ffffff';
+  try {
+    stageColor = getComputedStyle(document.body).getPropertyValue('--a6-graph-canvas').trim() || '#ffffff';
+  } catch { /* ohne CSS-Zugang: Hell-Fallback */ }
+  ctx2d.fillStyle = stageColor;
   ctx2d.fillRect(0, 0, w, h);
   ctx2d.drawImage(src, 0, 0);
   target.toBlob((blob) => {
@@ -2497,6 +2655,7 @@ async function pollFlowState() {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const body = await res.json();
   flowData = body;
+  lastFlowStateAt = Date.now(); // Bestands-Zeitstempel (modal.persisted-Banner im Drilldown)
   if (feedMode === 'history') {
     await applyFlowStateView(body);
   } else {
@@ -2508,6 +2667,86 @@ async function pollFlowState() {
     serverFlowClusters = serverClustersFromView(body);
     if (txWindow.length === 0) void rebuildClusterGraph();
   }
+}
+
+/* ---------- Persistierten Bestand nachladen (Stale-Overlay-Fix 2026-10-06) ----------
+ * Das Drilldown-Modal kann einen Cluster öffnen, dessen Karte im akkumulierten
+ * Bestand lebt (mergeClusterViews/Session-Schicht — persistierte Cluster
+ * verschwinden nicht mehr, wenn sie im FIFO-Fenster still sind), dessen
+ * KNOTEN aber nicht mehr im Live-Graphen liegen (cg.nodes bleibt fenster-
+ * basiert). Ohne Nachladen degenerierte das offene Modal zur leeren Hülle
+ * mit modal.gone-Banner (Forensik 2026-10-06: 12/30 Karten betroffen,
+ * Flapping je Poll-Tick). getPersistedClusterById(id) rekonstruiert nodes/
+ * edges nach dem applyFlowStateView-Muster (rolesByAddress → Knoten, edges
+ * durchreichen); NICHT lieferbare Knoten-Metadaten (inDrops/outDrops/Grade)
+ * werden bewusst nicht erfunden — die Tabelle zeigt '–', der Graph nutzt die
+ * neutrale Minimalgröße. Köder-Sicherheit: die Funktion liefert nur
+ * Rohbestand; die Gates (sync isDeniedAddr-Knoten-Gate im Drilldown,
+ * Anzeige-Maske displayFindingAddr, async Export-Nachprüfung, Freeze-Recheck)
+ * laufen unverändert downstream. */
+let lastFlowStateAt = 0;        // Zeitpunkt des letzten erfolgreichen flow-state-Lesevorgangs
+let persistedRestoreCache = null; // { at, clusters[] } — 60-s-Cache des bedingten Refetches
+const PERSISTED_RESTORE_TTL_MS = 60000;
+
+function buildPersistedClusterView(c, at) {
+  const rolesByAddress = c?.rolesByAddress && typeof c.rolesByAddress === 'object'
+    ? c.rolesByAddress
+    : (c?.roles && typeof c.roles === 'object' ? c.roles : {});
+  const severityByAddress = c?.severityByAddress && typeof c.severityByAddress === 'object'
+    ? c.severityByAddress
+    : {};
+  const memberAddresses = (Array.isArray(c?.memberAddresses) ? c.memberAddresses : Object.keys(rolesByAddress))
+    .map(String);
+  const nodes = memberAddresses.map((addr) => ({
+    id: addr,
+    role: ROLE_COLORS[rolesByAddress[addr]] ? rolesByAddress[addr] : 'unknown',
+    clusterId: c.id,
+    severity: severityByAddress[addr] ?? 'info',
+    // inDrops/outDrops/degreeIn/degreeOut fehlen im persistierten Bestand —
+    // NICHT erfinden (Tabelle '–', Graph neutrale Größe).
+  }));
+  const edges = (Array.isArray(c?.edges) ? c.edges : [])
+    .filter((e) => e && e.from && e.to)
+    .map((e) => ({
+      from: String(e.from), to: String(e.to), type: String(e.type || 'Sonstige'),
+      txHash: e.txHash ? String(e.txHash) : undefined,
+      // Tag-Felder wie in applyFlowStateView durchreichen (Kanten-Tooltip/
+      // Ketten-Chips/Export lesen sie); ohne Feld: unverändert.
+      ...(e.toTag != null ? { toTag: e.toTag } : {}),
+      ...(e.transit === true ? { transit: true } : {}),
+    }));
+  return { cluster: c, nodes, edges, at };
+}
+
+async function getPersistedClusterById(id) {
+  const key = String(id ?? '');
+  if (!key) return null;
+  // Stufe 1+2 (kein Netz): gemergte Karten im aktuellen Graphen, dann die
+  // Akkumulationsschichten (Server-View + Session-Schicht).
+  const cg = lastClusterGraph;
+  const sources = [
+    ...(cg && Array.isArray(cg.clusters) ? cg.clusters : []),
+    ...serverFlowClusters,
+    ...sessionFlowClusters.values(),
+  ];
+  let hit = sources.find((c) => c && String(c.id) === key) || null;
+  // Stufe 3: bedingter Refetch (60-s-Cache, Muster pollFlowState). Auch ein
+  // FEHLSCHLAG wird 60 s gecacht (clusters: []) — der Poll-Takt (~4-5 s)
+  // erzeugt nie einen Refetch-Sturm.
+  if (!hit && Date.now() - (persistedRestoreCache?.at ?? 0) > PERSISTED_RESTORE_TTL_MS) {
+    let view = null;
+    try {
+      const res = await fetch('/api/flow-state', { cache: 'no-store' });
+      if (res.ok) view = await res.json();
+    } catch { /* Netz-Fehler: Bestand bleibt der zuletzt gecachte Stand */ }
+    if (view) lastFlowStateAt = Date.now();
+    persistedRestoreCache = { at: Date.now(), clusters: serverClustersFromView(view) };
+  }
+  if (!hit && persistedRestoreCache && Array.isArray(persistedRestoreCache.clusters)) {
+    hit = persistedRestoreCache.clusters.find((c) => c && String(c.id) === key) || null;
+  }
+  if (!hit) return null;
+  return buildPersistedClusterView(hit, lastFlowStateAt || Date.now());
 }
 
 async function serverPollTick() {
@@ -3057,6 +3296,12 @@ function bindLive() {
 // Daten). bindGraph bleibt hier: seine Handler (Tab-Klicks, Karten, Export)
 // brauchen vis nicht.
 bindGraph();
+// Theme-JS-Palette VOR dem ersten Canvas-Render auf das angewandte Theme
+// stellen (body[data-theme]; das Inline-Bootstrap nach <body> hat bei
+// persistiertem 'light' bereits zurückgeschaltet — Noir ist Markup-Default).
+// Ohne diesen Aufruf bliebe die erste Graph-/Drilldown-Zeichnung in der
+// Hell-Palette, obwohl die CSS-Bühne schon dunkel ist.
+applyThemeColors(currentJsTheme());
 // Verdichtungs-Wahl vor dem ersten listen-Rendertick anwenden (persistierte
 // Stufe oder Default 'comfortable'); syncClusterDensityUi setzt data-density
 // an #cluster-list und aria-pressed an der Segment-Control.
@@ -3092,6 +3337,7 @@ setInterval(() => { refetchBaitHashes(true); }, BAIT_HASH_REFETCH_MS);
 applyLang();
 applyStatic(document);
 initLangSwitcher(document.getElementById('lang-switch'));
+initThemeSwitcher(document.getElementById('theme-switch'));
 document.addEventListener('hx:langchange', () => {
   applyStatic(document);
   buildRuleFilter();
@@ -3113,6 +3359,20 @@ document.addEventListener('hx:langchange', () => {
   if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh(true);
   if (historyMod && typeof historyMod.refresh === 'function') historyMod.refresh();
   if (checkMod && typeof checkMod.reRender === 'function') checkMod.reRender();
+});
+
+/* ---------- Theme-Bootstrap (Noir, hx:themechange) ----------
+ * Die Canvas-Objekte sind bereits zur Laufzeit mutiert (applyThemeColors in
+ * applyTheme-Phase oben); hier werden nach jedem Wechsel die GERENDERTEN
+ * Ebenen nachgezogen: vis-DataSets über den nächsten renderLiveGraph-Durchlauf
+ * (Knoten lesen ROLE_COLORS je Render, Kanten EDGE_COLORS/EDGE_DEFAULT) und
+ * die Cluster-Bubbles über applyClustering (liest CLUSTER_NODE_PROPERTIES).
+ * Das CSS-seitige DOM färbt sich allein über die Token-Overrides. Drilldown
+ * (offenes Modal, 3D-Accessoren + Drainer-Ring-Material) und Weltkugel
+ * (kompletter rebuildGlobe) re-agieren in ihren eigenen Modulen. */
+document.addEventListener('hx:themechange', () => {
+  applyThemeColors(currentJsTheme());
+  if (lastClusterGraph) renderLiveGraph(lastClusterGraph);
 });
 
 /* ---------- Statische Illustrationen (Design P0, public/icons.mjs) ---------

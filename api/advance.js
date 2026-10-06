@@ -110,6 +110,7 @@ import {
   ENTITY_MAX_BYTES,
   fetchEntitySnapshots,
   buildEntityLinks,
+  freshEvidence,
 } from "../lib/entity-resolve.mjs";
 import {
   readGitHubContents,
@@ -154,7 +155,9 @@ export const FETCH_PARALLEL = 4; // 4/0,708 s ≈ 5,7 req/s < 10/s steady
 // 140 + REPLAY 40 + ENTITY 20 + Seed 1 = 201 <= TICK_REQUEST_BUDGET 250;
 // die 19-s-Walk-Fenster (Deadline minus PERSIST_MARGIN_MS) kappen bei live
 // gemessener Latenz 1,1-1,8 s ohnehin auf ~55-108 Blöcke/Tick. ENV
-// ADVANCE_BUDGET überschreibt.
+// ADVANCE_BUDGET überschreibt — budgetOf klemmt JEDEN ENV-Wert gegen
+// MAX_WALK_BUDGET 189 (siehe dort; Bilanz 189 + 40 + 20 + 1 = 250 <= 250,
+// V7-Kalibrier-Tiefschnitt kann die Bilanz nie kippen).
 export const DEFAULT_BUDGET = 140;
 // Entity-Layer-Cap (Grenze 3): account_info-Calls pro Tick nach dem Block-
 // Walk. Budget-Bilanz (doku, lib/advance-batch.test.mjs):
@@ -423,7 +426,9 @@ async function rpc(method, params, tries = 3) {
 // Reads, lib/threats-service.mjs getThreatKnowledge).
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const HISTORY_SEED_MAX = 20000; // Speicher-Obergrenze für firstSeen/history-Seeds
-async function buildCtx(doc) {
+// Export (Test-Seam, Muster setRpcForTests): die Handler-Tests prüfen den
+// verifiedFresh-fail-open-Pfad (entityDoc null -> leeres Set) direkt.
+export async function buildCtx(doc, entityDoc) {
   const knownBad = new Set();
   // Merged Wissen (fail-open je Schicht): live-Ableitung + persistierte
   // History-Members + Flow-State severityByAddress, Exchange-Registry
@@ -468,6 +473,30 @@ async function buildCtx(doc) {
       }
     }
   }
+  // V5 verifiedFresh (entity-resolve.mjs freshEvidence): Entity-Dokument liegt
+  // ab (i.2) vor, das Set ist reine In-Memory-Arithmetik über die Tabelle —
+  // +0 honeycluster-Requests. FP-Guards über das exclude-Set: Exchange-Registry
+  // (∪ multiUser — Börsen sind per Definition hochfrequent, sonst False-
+  // malicious-Kaskade über known-bad-hit), config-benign-Konten und Köder
+  // (Defense-in-Depth, der Persistenz-Filter hat sie bereits raus). Beide
+  // Threats-Maps sind gecacht (Registry 60 s, multiUser ~10 min) — die Calls
+  // treffen den Tick-Cache, keine zusätzlichen GitHub-Roundtrips. entityDoc
+  // null/fehlend -> leeres Set (fail-open, Verhalten bitgleich ohne Layer).
+  const excludeFresh = new Set(baitLabels.keys());
+  for (const a of config.benign_accounts || []) {
+    if (typeof a === "string") excludeFresh.add(a);
+  }
+  try {
+    for (const a of getExchangeRegistryMap().keys()) excludeFresh.add(a);
+  } catch {
+    /* Registry-Layer optional (fail-open) */
+  }
+  try {
+    for (const a of (await getMultiUserAccountsMap()).keys()) excludeFresh.add(a);
+  } catch {
+    /* Multi-User-Layer optional (fail-open) */
+  }
+  const verifiedFresh = freshEvidence(entityDoc ?? null, { exclude: excludeFresh });
   return {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
@@ -475,6 +504,7 @@ async function buildCtx(doc) {
     threats: new Map(),
     firstSeenAt,
     history,
+    verifiedFresh,
   };
 }
 
@@ -538,10 +568,19 @@ async function fetchBlock(ledgerIndex, ctx) {
 // Fail-closed: Advance/Persistenz erfordert den Token (nur aus ENV).
 const hasPersistence = () => Boolean(process.env.GITHUB_HISTORY_TOKEN);
 
-// ENV-konfigurierbares Budget (Default 100 Blöcke/Tick).
-function budgetOf() {
+// ENV-konfigurierbares Budget (Default 140 Blöcke/Tick). KLEMME (V7/Budget-
+// Korrektur 2026-10-06): budgetOf klemmt gegen die Tick-Bilanz — Walk-Budget
+// + REPLAY_TICK_CAP 40 + ENTITY_TICK_CAP 20 + Seed 1 <= TICK_REQUEST_BUDGET 250
+// -> Walk max. 189 (MAX_WALK_BUDGET). Ein einmaliger Kalibrier-Tiefschnitt via
+// ADVANCE_BUDGET-ENV (V7-Replay-Kalibrierung: dedizierter Tick, REPLAY_TICK_CAP
+// konsumiert die existierenden 40 Replay-Requests) kann die Bilanz dadurch nie
+// kippen — der Deckel ist im Code (nicht nur im Bilanztest) festgeschrieben
+// und in lib/advance-batch.test.mjs geprüft.
+export const MAX_WALK_BUDGET = TICK_REQUEST_BUDGET - REPLAY_TICK_CAP - ENTITY_TICK_CAP - 1; // 189
+export function budgetOf() {
   const n = Number(process.env.ADVANCE_BUDGET);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BUDGET;
+  const raw = Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_BUDGET;
+  return Math.min(raw, MAX_WALK_BUDGET);
 }
 
 // ENV-konfigurierbarer Lookback (Default 0 = Live-Edge). Ein positiver
@@ -640,8 +679,9 @@ export default async function handler(req, res) {
     }
     const entityAddresses = new Set(Object.keys(entityDoc?.addresses ?? {}));
     // (ii) Engine-Kontext EINMAL pro Tick (siehe buildCtx-Kommentar):
-    // firstSeenAt/history werden aus dem persistierten Flow-State geseedet.
-    const ctx = await buildCtx(doc);
+    // firstSeenAt/history werden aus dem persistierten Flow-State geseedet,
+    // verifiedFresh aus der Entity-Tabelle (ii.2) abgeleitet.
+    const ctx = await buildCtx(doc, entityDoc);
     // (ii.5) Cursor-Seeding: ein frischer/leerer Cursor startet am Live-Edge
     // (minus Lookback), nicht bei Genesis — sonst würde der Walk nie vorrücken.
     const cursor = await seedCursorIfFresh(doc.cursor);

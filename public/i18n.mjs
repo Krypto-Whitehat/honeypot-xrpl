@@ -18,6 +18,12 @@
  *     Description neu und sendet CustomEvent 'hx:langchange' am document —
  *     dynamische Sichten (Graph, Cluster-Karten, Log, Drilldown, Weltkugel,
  *     Historie, Konto-Check) re-rendern daraufhin.
+ *   - Theme (Noir-Theme, 2026-10-06): dieselbe Vertragsform —
+ *     getTheme()/setTheme()/applyTheme()/initThemeSwitcher(), Persistenz
+ *     unter 'hx-theme' (Default 'noir'), Event 'hx:themechange' nach
+ *     body[data-theme]- und meta-theme-color-Setzung (Canvas-Layer färben
+ *     darauf um; CSS-Seite läuft allein über die Token-Overrides in
+ *     style.css).
  *
  * PROTOKOLL-GRENZE (bewusst, siehe Plan-Tradeoff): Serverseitige deutsche
  * Strings bleiben Protokollwerte, weil Clients sie per String-Vergleich
@@ -34,6 +40,19 @@
 export const LANG_KEY = 'hx-lang';
 export const LANGS = ['en', 'de'];
 export const DEFAULT_LANG = 'en';
+
+/* Theme (Noir-Theme 2026-10-06): dieselbe Vertragsform wie die Sprache —
+ * Konstanten, validierte Persistenz unter eigenem Schlüssel ('hx-theme',
+ * kollidiert nicht mit 'hx-lang'/'hx-density'), DOM-frei beim Import.
+ * Noir ist DEFAULT (statisch im Markup der drei HTML-Seiten über
+ * data-theme="noir"); das Inline-Bootstrap direkt nach <body> schaltet bei
+ * persistiertem 'light' vor dem ersten Paint zurück (kein FOUC). */
+export const THEME_KEY = 'hx-theme';
+export const THEMES = ['noir', 'light'];
+export const DEFAULT_THEME = 'noir';
+/* meta[name=theme-color]-Werte der Browser-Chrome je Theme (alle drei Heads
+ * tragen den Noir-Wert statisch; applyTheme hält das Meta aktuell). */
+export const THEME_META_COLORS = { noir: '#0c0b14', light: '#ffffff' };
 
 /* ------------------------------------------------------------------ */
 /* Wörterbuch (flache Keys; EN und DE haben dieselbe Schlüsselmenge —  */
@@ -131,6 +150,15 @@ export const DICT = {
     'lang.de': 'DE',
     'lang.enAria': 'Switch language to English',
     'lang.deAria': 'Sprache auf Deutsch umstellen',
+
+    /* Theme-Umschalter (initThemeSwitcher, Noir-Theme 2026-10-06): EIN Button,
+       Label = aktueller Theme-Name, aria-pressed spiegelt 'noir', der
+       aria-/title-Text beschreibt die Aktion (Wechsel zum anderen Theme). */
+    'theme.switchAria': 'Color theme',
+    'theme.noir': 'Noir',
+    'theme.light': 'Light',
+    'theme.toNoirAria': 'Switch to the noir theme',
+    'theme.toLightAria': 'Switch to the light theme',
 
     /* app.js — Adressaktionen */
     'defang.bait': 'Bait (address hidden)',
@@ -261,6 +289,7 @@ export const DICT = {
     'modal.stale': 'As of {time} – cluster no longer in the current observation window.',
     'modal.frozen': 'Snapshot from {time} – contents stay frozen until you close; the list behind keeps updating.',
     'modal.gone': 'Cluster no longer current – it no longer belongs to the current observation window.',
+    'modal.persisted': 'As of {time} from the persisted inventory – cluster is no longer in the live window.',
     'modal.rolesTitle': 'Role distribution',
     'modal.roleBarAria': '{role}: {count} of {total} accounts ({pct} %)',
     'modal.timelineTitle': 'Transaction timeline',
@@ -438,18 +467,20 @@ export const DICT = {
     'about.roleRelayD': 'A pass-through account with balanced inflow and outflow (difference at most 50 % of the larger value) — a waypoint for the money, not an offender by itself.',
     'about.patternsTitle': 'Patterns and connections',
     'about.patDrainerT': 'Draining (drainer sweep)',
-    'about.patDrainerD': 'A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation is the finding classified as malicious; without it, it stays suspect.',
+    'about.patDrainerD': 'A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation — or with an entity-snapshot proof of fresh account activity across ticks — is the finding classified as malicious; without it, it stays suspect.',
     'about.patCrossLedgerT': 'Cross-ledger sweep',
     'about.patCrossLedgerD': 'Funding and sweeping across block boundaries: when an account is funded in ledger N and only swept in ledger N+1, the cross-ledger memory of the engine keeps the sweep visible. Stretched dusting campaigns are caught the same way, via the union of their tiny destinations over the window.',
     'about.patPeelingT': 'Peeling chains',
     'about.patPeelingD': 'Staged forwarding of 60 to 95 % of the inflow across unflagged 1:1 relays, from three hops onwards. Detection runs on the transaction view and follows inconspicuous intermediate accounts without assigning them a role.',
     'about.patWashT': 'Wash trading (self-transfers)',
     'about.patWashD': 'At least three self-payments of the same account within one ledger (sender and destination are identical) — volume generation without a real counterparty, a typical washing pattern.',
+    'about.patWashCycleT': 'Wash cycle (cross-account)',
+    'about.patWashCycleD': 'At least two payments in each direction between the same two accounts (A→B and B→A) with at least 80 % volume conservation within one hour — volume generated across two identities. Single payment pairs stay exempt (normal refunds and market moves), exchanges never take part as cycle members; the finding class is suspect.',
     'about.patHubT': 'Hub connections',
     'about.patHubD': 'Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.',
     'about.patKnownBadT': 'Known-bad contact',
     'about.patKnownBadD': 'When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.',
-    'about.detectNote': 'The engine rule catalog holds eleven rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.',
+    'about.detectNote': 'The engine rule catalog holds twelve rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.',
     'about.glossaryTitle': 'Glossary',
     'about.glossaryHint': 'The terms of the interface — short and precise',
     'about.gClusterT': 'Cluster',
@@ -492,6 +523,7 @@ export const DICT = {
     'rule.offer-spam': 'Offer spam (OfferCreate cascades without fill)',
     'rule.wash-self-transfer': 'Self-Transfer Washing',
     'rule.peeling-chain': 'Peeling chain (staged forwarding 60–90 %)',
+    'rule.wash-cycle': 'Wash cycle (cross-account loop with volume conservation)',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Known-malicious address involved ({type}).',
@@ -603,6 +635,15 @@ export const DICT = {
     'lang.de': 'DE',
     'lang.enAria': 'Sprache auf Englisch umstellen',
     'lang.deAria': 'Sprache auf Deutsch umstellen',
+
+    /* Theme-Umschalter (initThemeSwitcher, Noir-Theme 2026-10-06): EIN Button,
+       Label = aktueller Theme-Name, aria-pressed spiegelt 'noir', der
+       aria-/title-Text beschreibt die Aktion (Wechsel zum anderen Theme). */
+    'theme.switchAria': 'Farbthema',
+    'theme.noir': 'Noir',
+    'theme.light': 'Hell',
+    'theme.toNoirAria': 'Zum Noir-Thema wechseln',
+    'theme.toLightAria': 'Zum hellen Thema wechseln',
 
     /* app.js — Adressaktionen */
     'defang.bait': 'Köder (Adresse verborgen)',
@@ -733,6 +774,7 @@ export const DICT = {
     'modal.stale': 'Stand {time} – Cluster nicht mehr im aktuellen Beobachtungsfenster.',
     'modal.frozen': 'Momentaufnahme vom {time} – Inhalte bleiben bis zum Schließen erhalten; die Liste dahinter läuft weiter.',
     'modal.gone': 'Cluster nicht mehr aktuell – dieser Cluster gehört nicht mehr zum aktuellen Beobachtungsfenster.',
+    'modal.persisted': 'Stand {time} aus dem persistierten Bestand – Cluster ist nicht mehr im Live-Fenster.',
     'modal.rolesTitle': 'Rollen-Verteilung',
     'modal.roleBarAria': '{role}: {count} von {total} Konten ({pct} %)',
     'modal.timelineTitle': 'Zeitachse der Transaktionen',
@@ -910,18 +952,20 @@ export const DICT = {
     'about.roleRelayD': 'Ein Durchleitungskonto mit ausgeglichenem Ein- und Ausgang (Differenz höchstens 50 % des größeren Werts) — Zwischenstation auf dem Weg des Geldes, nicht selbst Täter.',
     'about.patternsTitle': 'Muster und Verbindungen',
     'about.patDrainerT': 'Draining (Drainer-Sweep)',
-    'about.patDrainerD': 'Ein frisch finanziertes Konto wird sofort wieder abgeräumt: Mindestens 90 % des Guthabens gehen in einer Zahlung an ein einziges Ziel. Nur mit Ledger-Beleg der Kontoerstellung wird der Fund als maliziös eingestuft, ohne Beleg bleibt er verdächtig.',
+    'about.patDrainerD': 'Ein frisch finanziertes Konto wird sofort wieder abgeräumt: Mindestens 90 % des Guthabens gehen in einer Zahlung an ein einziges Ziel. Nur mit Ledger-Beleg der Kontoerstellung — oder mit Entity-Snapshot-Beleg frischer Kontoaktivität über Tick-Grenzen hinweg — wird der Fund als maliziös eingestuft, ohne Beleg bleibt er verdächtig.',
     'about.patCrossLedgerT': 'Cross-Ledger-Sweep',
     'about.patCrossLedgerD': 'Füttern und Abräumen über Blockgrenzen hinweg: Wird ein Konto in Ledger N finanziert und erst in Ledger N+1 abgeräumt, hält das Fenster-Gedächtnis der Engine den Sweep sichtbar. Auch zeitlich gestreckte Dusting-Kampagnen werden auf dieselbe Weise erkannt — über die Vereinigung ihrer Mini-Ziele im Fenster.',
     'about.patPeelingT': 'Peeling-Ketten',
     'about.patPeelingD': 'Gestaffelte Weiterleitung von 60 bis 95 % des Eingangs über ungeflaggte 1:1-Relays, ab drei Hops. Die Erkennung läuft über die Transaktionssicht und folgt auch unauffälligen Zwischenkonten, ohne ihnen eine Rolle zuzuweisen.',
     'about.patWashT': 'Wash Trading (Selbsttransfers)',
     'about.patWashD': 'Mindestens drei Selbstzahlungen desselben Kontos in einem Ledger (Absender und Empfänger sind identisch) — Volumenerzeugung ohne echte Gegenpartei, ein typisches Washing-Muster.',
+    'about.patWashCycleT': 'Wash-Zyklus (Kreuz-Konto-Kreislauf)',
+    'about.patWashCycleD': 'Mindestens zwei Zahlungen je Richtung zwischen denselben zwei Konten (A→B und B→A) mit mindestens 80 % Volumenerhalt innerhalb einer Stunde — Volumenerzeugung über zwei Identitäten. Einzelpaare bleiben ausgenommen (normale Rückerstattungen und Marktbewegungen), Börsen sind nie Zykelglied; die Fundklasse ist verdächtig.',
     'about.patHubT': 'Hub-Verbindungen',
     'about.patHubD': 'Ungeflaggte Knoten mit mehr als 20 Fund-Kanten (Börsen-, Faucet- oder Sammel-Konten) werden aus der Cluster-Vereinigung herausgeschnitten: Zwei unabhängige Szenen verschmelzen nicht über eine gemeinsame Börse. Verbindungen, die über ein gemeinsames Börsen-Konto laufen (transit), werden als Durchleitung gekennzeichnet, nicht als direkte Nachbarschaft.',
     'about.patKnownBadT': 'Known-Bad-Kontakt',
     'about.patKnownBadD': 'Berührt eine Transaktion eine Adresse aus der Bedrohungsliste (kuratiert und aus der Honeypot-Historie abgeleitet), wird das als Treffer gemeldet — direkte Konto- oder Zahlungsberührung als maliziös, bloße Trustline- oder NFT-Positionen nur als verdächtig.',
-    'about.detectNote': 'Der Regelkatalog der Engine umfasst elf Regeln — neben den obigen unter anderem Memo-Phishing (URLs und Seed-Muster in Zahlungsmemos), Dusting (Mini-XRP an frische Konten), Fake-NFT-Betrug, Airdrop-TrustSet-Spam, Zahlungs-Bursts und Offer-Spam. Jede Regel trägt einen Schweregrad; alle Zuordnungen sind Heuristiken, kein Schuldnachweis.',
+    'about.detectNote': 'Der Regelkatalog der Engine umfasst zwölf Regeln — neben den obigen unter anderem Memo-Phishing (URLs und Seed-Muster in Zahlungsmemos), Dusting (Mini-XRP an frische Konten), Fake-NFT-Betrug, Airdrop-TrustSet-Spam, Zahlungs-Bursts und Offer-Spam. Jede Regel trägt einen Schweregrad; alle Zuordnungen sind Heuristiken, kein Schuldnachweis.',
     'about.glossaryTitle': 'Begriffs-Glossar',
     'about.glossaryHint': 'Die Begriffe der Oberfläche — kurz und präzise',
     'about.gClusterT': 'Cluster',
@@ -964,6 +1008,7 @@ export const DICT = {
     'rule.offer-spam': 'Offer-Spam (OfferCreate-Kaskaden ohne Fill)',
     'rule.wash-self-transfer': 'Washing — Selbsttransfer (Volumenerzeugung)',
     'rule.peeling-chain': 'Peeling-Kette (gestaffelte Weiterleitung 60–90 %)',
+    'rule.wash-cycle': 'Wash-Zyklus (Kreuz-Konto-Kreislauf mit Volumenerhalt)',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Bekannt-maliziöse Adresse beteiligt ({type}).',
@@ -1017,6 +1062,31 @@ export function resolveLang(raw, storage) {
   const s = storage !== undefined ? storage : (typeof localStorage !== 'undefined' ? localStorage : null);
   const value = LANGS.includes(raw) ? raw : DEFAULT_LANG;
   try { if (s) s.setItem(LANG_KEY, value); } catch { /* flüchtig */ }
+  return value;
+}
+
+/* ---------- Theme: Persistenz + Lookup (Vertrag wie Sprache) ---------- */
+
+function themeStorageGet() {
+  try {
+    if (typeof localStorage === 'undefined' || localStorage === null) return null;
+    return localStorage.getItem(THEME_KEY);
+  } catch { return null; } // Private Mode / Storage gesperrt
+}
+
+// Aktuelles Theme: persistierter Wert (validiert), sonst Default 'noir'.
+export function getTheme() {
+  const raw = themeStorageGet();
+  return THEMES.includes(raw) ? raw : DEFAULT_THEME;
+}
+
+// Persistierbares Theme als reine Funktion (Muster resolveLang): validiert
+// gegen THEMES, sonst Default; schreibt über den übergebenen Storage
+// (Injektion für Tests; ohne Argument das globale localStorage).
+export function resolveTheme(raw, storage) {
+  const s = storage !== undefined ? storage : (typeof localStorage !== 'undefined' ? localStorage : null);
+  const value = THEMES.includes(raw) ? raw : DEFAULT_THEME;
+  try { if (s) s.setItem(THEME_KEY, value); } catch { /* flüchtig */ }
   return value;
 }
 
@@ -1228,6 +1298,60 @@ export function setLang(lang) {
   const value = resolveLang(lang);
   applyLang();
   return value;
+}
+
+/* ---------- Theme: DOM-Anwendung + Umschalter (guardiert — ohne DOM Noop) --
+ * applyTheme setzt body[data-theme] (die Token-Overrides in style.css),
+ * hält meta[name=theme-color] auf der Browser-Chrome-Farbe des Themes und
+ * sendet 'hx:themechange' am document — dynamische Sichten (2D-/3D-Graph,
+ * Weltkugel, Flow-Host-SVG) färben daraufhin ihre Canvas-Layer um. */
+export function applyTheme() {
+  const theme = getTheme();
+  if (typeof document === 'undefined' || document === null) return theme;
+  try { document.body.dataset.theme = theme; } catch { /* Noop */ }
+  try {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta && THEME_META_COLORS[theme]) meta.setAttribute('content', THEME_META_COLORS[theme]);
+  } catch { /* Noop */ }
+  try { document.dispatchEvent(new CustomEvent('hx:themechange', { detail: { theme } })); } catch { /* Noop */ }
+  return theme;
+}
+
+// Theme setzen: validieren, persistieren, DOM anwenden, Event senden
+// (Vertragsform setLang).
+export function setTheme(theme) {
+  const value = resolveTheme(theme);
+  applyTheme();
+  return value;
+}
+
+// Theme-Umschalter: EIN native Button (44-px-Zielhöhe via .lang-btn-Basis,
+// Zusatzklasse .theme-btn für Identität), Label zeigt den AKTUELLEN Theme-
+// Namen, aria-pressed spiegelt 'noir', title/aria-label beschreiben die
+// Aktion (Wechsel zum anderen Theme).
+export function initThemeSwitcher(container) {
+  if (!container || typeof document === 'undefined' || document === null) return null;
+  container.setAttribute('role', 'group');
+  container.setAttribute('aria-label', t('theme.switchAria'));
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'lang-btn theme-btn';
+  const sync = () => {
+    const current = getTheme();
+    btn.textContent = t('theme.' + current);
+    btn.setAttribute('aria-pressed', String(current === 'noir'));
+    const actionKey = current === 'noir' ? 'theme.toLightAria' : 'theme.toNoirAria';
+    btn.setAttribute('title', t(actionKey));
+    btn.setAttribute('aria-label', t(actionKey));
+  };
+  btn.addEventListener('click', () => {
+    setTheme(getTheme() === 'noir' ? 'light' : 'noir');
+  });
+  container.appendChild(btn);
+  try { document.addEventListener('hx:themechange', sync); } catch { /* Noop */ }
+  try { document.addEventListener('hx:langchange', sync); } catch { /* Noop */ } // Labels in der neuen Sprache
+  sync();
+  return { sync };
 }
 
 // Sprachumschalter: zwei native Buttons EN/DE (44-px-Zielhöhe via CSS),

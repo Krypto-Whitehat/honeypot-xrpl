@@ -75,7 +75,9 @@
   min-height: 44px;
   background: var(--a6-ink-fill);
   border-color: var(--a6-ink-fill);
-  color: #fff;
+  /* on-ink-Token statt #fff (Noir-Theme): die Primärfläche ist in Noir hell,
+     der Text darauf dunkel. */
+  color: var(--a6-on-ink);
 }
 
 .check-error {

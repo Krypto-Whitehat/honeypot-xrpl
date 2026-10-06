@@ -172,10 +172,48 @@ export const GRAPH3D_LINK_WIDTHS = Object.freeze({ payment: 1.4, structured: 1, 
 export const GRAPH3D_LINK_OPACITY = 0.85;
 // ausgegraute Kantenfarbe für den Hover-Fokus (nicht beteiligte Kanten);
 // Kontrolllinien-Ton — kein neues Farbsystem, keine Severity-Überladung.
+// Bewusst exportiertes const (Import-Vertrag drilldown-freeze.test.mjs) und
+// bewusst der HELL-Wert: THREE.Color parst kein rgba, die graute Farbe kann
+// also nicht aus dem Alpha-Token --a6-line-strong gelesen werden. Noir
+// erhält den Pendants GRAPH3D_LINK_FADED_NOIR; der Accessor wählt je
+// jsTheme() (beide Töne absichtlich UNTER 3:1 — ausgegraute Kanten sind
+// wie in Hell die bewusst rezessive Ebene hinter dem Hover-Fokus).
 export const GRAPH3D_LINK_FADED = '#c9c9cf';
+export const GRAPH3D_LINK_FADED_NOIR = '#514e66';
 // Deckel der Drainer-Ringe (Design P3.2: „Customizing ≤ 12 Knoten ist der
 // Performance-Schlüssel" — genau ein zusätzliches Mesh je markiertem Knoten).
 export const GRAPH3D_RING_CAP = 12;
+
+/* ---------------- Theme (Noir, 2026-10-06) ----------------
+ * Die Farb-TABELLEN dieses Moduls (ctx.roleColors/ctx.edgeColors) mutiert
+ * der Host in place (app.js applyThemeColors) — die Accessoren lesen sie je
+ * Aufruf und brauchen keine eigene Kopie. Nur die CANVAS-FONTS der 2D-
+ * Ausweichansicht folgen hier dem dokumentierten Token-Weg: --a6-ink/
+ * --a6-body LIVE aus dem computed style (Fallback = heutige Hell-Literale,
+ * damit Node-Tests ohne DOM unverändert bleiben); jsTheme() liest das
+ * angewandte body[data-theme] (Default Hell ohne DOM). */
+function jsTheme() {
+  try {
+    const th = typeof document !== 'undefined' && document.body && document.body.dataset
+      ? document.body.dataset.theme
+      : null;
+    return th === 'noir' ? 'noir' : 'light';
+  } catch { return 'light'; }
+}
+
+function canvasInkColor() {
+  try { return (getComputedStyle(document.body).getPropertyValue('--a6-ink') || '').trim() || '#141416'; }
+  catch { return '#141416'; }
+}
+
+function canvasBodyColor() {
+  try { return (getComputedStyle(document.body).getPropertyValue('--a6-body') || '').trim() || '#484850'; }
+  catch { return '#484850'; }
+}
+
+function graph3dLinkFaded() {
+  return jsTheme() === 'noir' ? GRAPH3D_LINK_FADED_NOIR : GRAPH3D_LINK_FADED;
+}
 
 // Kantenbreite nach Transaktionstyp. Schlüssel wie EDGE_COLORS (app.js):
 // großgeschriebene XRPL-Typnamen; unbekannte Typen fallen auf 0.8 zurück.
@@ -233,7 +271,11 @@ export function initClusterDrilldown(ctx) {
   const fmtClock = ctx.fmtClock;
   const roleColors = ctx.roleColors;
   const edgeColors = ctx.edgeColors;
-  const edgeDefault = ctx.edgeDefault;
+  // Theme-Thunk (Noir): app.js übergibt () => EDGE_DEFAULT — der Fallback-Ton
+  // unbekannter Kantentypen wird je ZUGRIFF gelesen, nicht beim Init
+  // eingefroren. Abwärtskompatibel: ein String-ctx (Node-Tests, makeCtx)
+  // bleibt als Konstante nutzbar.
+  const edgeDefaultOf = typeof ctx.edgeDefault === 'function' ? ctx.edgeDefault : () => ctx.edgeDefault;
   const roleLabels = ctx.roleLabels;
   const addrActionsHtml = ctx.addrActionsHtml;
   // Namens-Badge-Lookup (XRPScan-Aliase): HOST-SEITIG GEGATET —
@@ -279,6 +321,17 @@ export function initClusterDrilldown(ctx) {
   // 2D-Canvas-Label in Kurzform (Design-Fix): shortAddr kommt bereits im ctx
   // des Hosts (app.js); Fallback displayAddr, falls ein Host es nicht liefert.
   const shortAddrFn = (typeof ctx.shortAddr === 'function') ? ctx.shortAddr : ctx.displayAddr;
+  // Nachladen aus dem persistierten Bestand (Stale-Overlay-Fix 2026-10-06):
+  // HOST-SEITIG GEGATET — ctx.getPersistedClusterById (app.js) liefert das
+  // gemergte Cluster-Objekt (memberAddresses/rolesByAddress/severityByAddress/
+  // edges) samt Knoten-Rekonstruktion. Fallback ohne Host-Funktion: null
+  // (fail-closed — das Nachladen ist dann schlicht nicht möglich und der
+  // Aufrufer fällt auf die Missing-Semantik zurück; Muster isDeniedAddrAsync
+  // oben). Die Köder-Gates bleiben in jedem Fall beim Host bzw. im Modul
+  // (sync isDeniedAddr-Knoten-Gate + Anzeige-Maske + Export-Nachprüfung).
+  const getPersistedClusterById = typeof ctx.getPersistedClusterById === 'function'
+    ? ctx.getPersistedClusterById
+    : null;
 
   // Zwei-Zeilen-Graphlabel (B8, Muster B2 in app.js): volle Adresse nur bei
   // isFullShownAddr (Allowlist geladen, kein Deny-Treffer), sonst unverändert
@@ -333,6 +386,10 @@ export function initClusterDrilldown(ctx) {
   let fg3d = null;              // aktive 3D-Instanz
   let fg3dResizeObs = null;     // ResizeObserver der 3D-Bühne
   let vis2d = null;             // 2D-Ausweich-Instanz
+  // Letzter build2D-Input (Knoten/Kanten/Container): der Theme-Wechsel baut
+  // die 2D-Ausweichansicht daraus neu (per-node-Farben sind Konstruktions-
+  // werte, ein reines setOptions reicht nicht); teardown2D löscht ihn.
+  let last2dBuild = null;
   const highlightSet = new Set();
   // Hover-Fokus (Design P3.4): rohe Knoten-Id des gehoverten Knotens plus
   // ihr Anzeige-Wert-Pendant im highlightSet (Tabellen-Hover nutzt denselben
@@ -535,6 +592,36 @@ export function initClusterDrilldown(ctx) {
     // Live-Pfad ist über den Sprache-Digest-Anteil nicht mehr sprachblind.
     try {
       document.addEventListener('hx:langchange', () => { if (isOpen) render(); });
+    } catch { /* Noop ohne addEventListener */ }
+    // Theme-Wechsel (hx:themechange, i18n.mjs initThemeSwitcher): die Farb-
+    // Tabellen des Hosts (roleColors/edgeColors) sind zu diesem Zeitpunkt
+    // bereits in place mutiert. Nachziehen: (1) Drainer-Ring-Material —
+    // einmalig gebaut und für die Modal-Lebensdauer gecacht, ohne explizites
+    // color.set bliebe es im alten Rot; (2) 3D-Stil über den etablierten
+    // Accessor-Re-Set-Pfad (Muster on3dNodeHover); (3) 2D-Fallback aus den
+    // zuletzt gebauten Daten neu erzeugen (per-node-Farben sind
+    // Konstruktionswerte — ein reines setOptions reicht nicht).
+    try {
+      document.addEventListener('hx:themechange', () => {
+        try {
+          if (ring3dMat && roleColors.drainer && roleColors.drainer.background) {
+            ring3dMat.color.set(roleColors.drainer.background);
+          }
+        } catch { /* Material-API fehlt: Rebuild-Pfad greift beim nächsten Öffnen */ }
+        try {
+          if (fg3d) {
+            fg3d.nodeColor(nodeColorAccessor());
+            fg3d.linkColor(linkColor3dAccessor());
+            fg3d.linkWidth(linkWidth3dAccessor());
+          }
+        } catch { /* Accessor-Set nicht verfügbar */ }
+        try {
+          if (vis2d && last2dBuild) {
+            teardown2D();
+            build2D(last2dBuild.nodes, last2dBuild.edges, last2dBuild.el);
+          }
+        } catch { /* 2D-Rebuild optional — Modal bleibt funktionsfähig */ }
+      });
     } catch { /* Noop ohne addEventListener */ }
   }
 
@@ -795,15 +882,63 @@ export function initClusterDrilldown(ctx) {
   // .cluster-modal-stale-Zeile. staleShown=true hält den Auto-Ausblend-
   // Timer des Übernahme-Hinweises fern (showTakeoverNotice: 'if (staleShown)
   // return') und wird je Tick neu gesetzt, weil paintCluster/endStaleState
-  // die Zeile im Sprachwechsel-Pfad kurz ausräumen.
+  // die Zeile im Sprachwechsel-Pfad kurz ausräumen. Freezes, die aus dem
+  // persistierten Bestand nachgeladen wurden (frozen.fromPersisted), zeigen
+  // stattdessen modal.persisted — der Hinweis bleibt so je Tick erhalten,
+  // statt sich nach einem Tick zum modal.frozen-Text zu wandeln.
   function showFrozenNote() {
     if (!frozen) return;
     staleShown = true;
     const note = overlay.querySelector('.cluster-modal-stale');
     if (note) {
-      note.textContent = t('modal.frozen', { time: fmtClock(frozen.at) });
+      note.textContent = frozen.fromPersisted
+        ? t('modal.persisted', { time: fmtClock(frozen.persistedAt ?? frozen.at) })
+        : t('modal.frozen', { time: fmtClock(frozen.at) });
       note.hidden = false;
     }
+  }
+
+  /* Nachladen aus dem persistierten Bestand (Stale-Overlay-Fix 2026-10-06,
+   * Richtung b): Ein Cluster, dessen Karte im akkumulierten Bestand lebt
+   * (mergeClusterViews/Session-Schicht), dessen Knoten aber aus dem FIFO-
+   * Fenster gerollt sind, wird hier aus dem persistierten Stand rekonstruiert
+   * und voll gemalt — statt einer leeren Hülle mit nachfolgendem modal.gone-
+   * Flapping. Köder-Sicherheit: der rekonstruierte Knotensatz durchläuft
+   * DASSELBE synchrone isDeniedAddr-Knoten-Gate wie der Vollrender; bleiben
+   * 0 Knoten übrig (alles Köder), gewinnt der Köder-Deny als Terminalzustand
+   * (clearToEmptyState, KEIN Reload-Wiederversuch, Invariante Plan-Korrektur
+   * 1). Die asynchrone Nachprüfung bleibt unverändert vor dem Export (je
+   * Download) und je Freeze-Tick (recheckFrozen) aktiv. Liefert der Bestand
+   * nichts, kehrt die Funktion mit false zurück — der Aufrufer routet dann
+   * explizit in die Missing-Semantik (renderMissingCluster). */
+  async function tryRestorePersistedCluster(els, cluster, token) {
+    if (!getPersistedClusterById) return false;
+    let persisted = null;
+    try {
+      persisted = await getPersistedClusterById(String(cluster.id));
+    } catch { /* Bestand nicht erreichbar: ehrlicher Fallback unten */ }
+    if (token !== renderToken || !isOpen) return true; // zwischenzeitlich neu gerendert/geschlossen
+    if (!persisted || !Array.isArray(persisted.nodes) || !persisted.nodes.length) return false;
+    // SYNC KÖDER-GATE (Muster des Knoten-Gates im Vollrender): rekonstruierte
+    // Knoten filtern wie Live-Knoten — Köder erreichen nie Tabelle oder Graph.
+    const restoredNodes = (typeof isDeniedAddr === 'function')
+      ? persisted.nodes.filter((n) => !isDeniedAddr(String(n.id)))
+      : persisted.nodes;
+    if (!restoredNodes.length) {
+      // ALLES Köder: Total-Leerung — Köder-Deny > Freeze/Nachladen bleibt
+      // die erste Auswertungsreihenfolge (Sicherheitsinvariante).
+      clearToEmptyState(els);
+      return true;
+    }
+    const restoredIds = new Set(restoredNodes.map((n) => String(n.id)));
+    const restoredEdges = (Array.isArray(persisted.edges) ? persisted.edges : [])
+      .filter((e) => restoredIds.has(String(e.from)) && restoredIds.has(String(e.to)));
+    // Fallback-ANKER aus dem restaurierten Bestand (Semantik der ersten
+    // erfolgreichen Renderung) — nie aus einer leeren Knotenmenge setzen,
+    // sonst bliebe der Anker dauerhaft unbrauchbar.
+    if (!originMembers) originMembers = new Set(restoredIds);
+    await paintCluster(els, persisted.cluster, restoredNodes, restoredEdges, token, false, true, persisted.at ?? null);
+    return true;
   }
 
   /* Freeze-Tick (render() leitet jeden Tick hierher um): der offene Stand
@@ -835,7 +970,19 @@ export function initClusterDrilldown(ctx) {
       if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
     }
     if (!frozen) return; // clearToEmptyState hat den Freeze bereits verworfen
-    if (!frozen.nodes.length) { clearToEmptyState(els); return; }
+    if (!frozen.nodes.length) {
+      // Köder-Deny Kompletttreffer (removed): Total-Leerung bleibt der
+      // legitime Terminalzustand — Köder-Deny schlägt Freeze (Invariante).
+      if (removed) { clearToEmptyState(els); return; }
+      // Leerer Freeze-Satz OHNE Deny-Treffer (seit dem paintCluster-Guard
+      // 'Freeze nur bei clusterNodes.length > 0' unerreichbar, defensiv
+      // gehalten): Zustand halten und Hinweis zeigen — NIE total leeren,
+      // sonst degeneriert das offene Modal zur leeren Hülle mit Banner
+      // (Massenbefund 2026-10-06) und flappt je Tick zwischen leerer Hülle
+      // und modal.gone.
+      showFrozenNote();
+      return;
+    }
     if (removed || getLang() !== frozenLang) {
       // Deny-Treffer ODER Sprachwechsel: Title/Badge/Metriken/Rollen/
       // Zeitachse/Kette/Tabelle/Graph aus dem (gekappten) Freeze-Satz neu
@@ -906,12 +1053,41 @@ export function initClusterDrilldown(ctx) {
     // diese Schicht sichert zusätzlich Graphen ab, die diesen Weg nicht
     // gegangen sind. Fail-closed: ohne isDeniedAddr wird nicht gefiltert
     // (die Anzeige-Maske displayAddr greift dann weiterhin).
+    // RAW-Menge VOR dem Gate (Stale-Overlay-Fix 2026-10-06): sie trennt
+    // 'alle Fenster-Knoten Köder' (Deny-Kompletttreffer → Leerung) vom
+    // 'Cluster ohne Fenster-Knoten' (persistierte Merged-Karte → Nachladen).
+    const rawClusterNodes = allNodes.filter((n) => n.clusterId === cluster.id);
     const visibleNodes = (typeof isDeniedAddr === 'function')
       ? allNodes.filter((n) => !isDeniedAddr(String(n.id)))
       : allNodes;
     // let statt const: die asynchrone Deny-Nachprüfung vor dem Export- Gate
     // kann clusterNodes nachträglich um Deny-Treffer verkleinern.
     let clusterNodes = visibleNodes.filter((n) => n.clusterId === cluster.id);
+    // KÖDER-DENY KOMPLETTTREFFER (Invariante, Plan-Korrektur 1): Fenster-
+    // Knoten existierten, nach dem sync-Gate bleibt keiner übrig → Total-
+    // Leerung. Köder-Deny gewinnt vor Freeze/Nachladen; die Anzeige-Maske
+    // displayAddr bleibt zusätzlich aktiv.
+    if (clusterNodes.length === 0 && rawClusterNodes.length > 0) {
+      clearToEmptyState(els);
+      return;
+    }
+    // NODE-LOS (Massenfall, Forensik 2026-10-06): die Karte lebt im
+    // akkumulierten Bestand (mergeClusterViews/Session-Schicht), aber
+    // cg.nodes trägt keinen Fenster-Zwilling — der alte Pfad malte eine
+    // leere Hülle, fror einen LEEREN Freeze-Satz ein, und recheckFrozen
+    // leerte ihn je Tick (modal.gone-Flapping alle ~4-5 s, live 12/30
+    // Karten betroffen). Stattdessen: aus dem persistierten Bestand
+    // nachladen; scheitert das, greift explizit die Missing-Semantik
+    // (renderMissingCluster: Köder-Gate → !snapshot/Kappe → modal.gone-
+    // Leerung, sonst LETZTER Stand + Alterungshinweis — Plan-Korrektur 2:
+    // dieser Zweig liegt NACH dem Cluster-Fund und muss das Verhalten
+    // selbst herbeiführen, renderMissingCluster läuft hier sonst nie).
+    if (rawClusterNodes.length === 0) {
+      const restored = await tryRestorePersistedCluster(els, cluster, token);
+      if (token !== renderToken || !isOpen) return;
+      if (!restored) renderMissingCluster(els);
+      return;
+    }
     const nodeIds = new Set(clusterNodes.map((n) => String(n.id)));
     // Fallback-ANKER einfrieren (Befund 2026-09-30): Mitglieder des originär
     // geöffneten Clusters bei der ERSTEN erfolgreichen Renderung nach
@@ -956,6 +1132,14 @@ export function initClusterDrilldown(ctx) {
         }
       } catch { /* Nachprüfung fehlgeschlagen: Payload bleibt auf sync gefilterter Basis */ }
       if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
+      if (!clusterNodes.length) {
+        // ASYNC Komplett-Deny (Invariante wie beim sync-Gate): Köder-Deny
+        // gewinnt — Total-Leerung statt leerem Freeze/Vollrender. Kein
+        // Wiederversuch im selben Tick; der nächste Tick durchläuft erneut
+        // alle Gates (Deny-Rotation darf den Cluster später freigeben).
+        clearToEmptyState(els);
+        return;
+      }
     }
     exportPayload = buildExportPayload(cluster, clusterNodes, clusterEdges);
     const dlBtnEl = overlay.querySelector('#cluster-json-download');
@@ -983,8 +1167,11 @@ export function initClusterDrilldown(ctx) {
    * Title/Badge/Metriken/Rollen/Zeitachse/Kette/Tabelle/Graph aus dem
    * (freeze-geprüften) Knoten- und Kantensatz. Läuft im Live-Pfad beim
    * ersten Vollrender und im Freeze-Pfad beim Sprachwechsel — die Daten
-   * stammen dann aus dem Freeze-Satz, nicht aus dem Live-Graphen. */
-  async function paintCluster(els, cluster, clusterNodes, clusterEdges, token, takeoverPending) {
+   * stammen dann aus dem Freeze-Satz, nicht aus dem Live-Graphen. Der
+   * Nachlade-Pfad (tryRestorePersistedCluster) ruft mit fromPersisted=true
+   * auf: Der Freeze-Satz trägt dann fromPersisted/persistedAt, und der
+   * Hinweis zeigt modal.persisted statt modal.frozen (showFrozenNote). */
+  async function paintCluster(els, cluster, clusterNodes, clusterEdges, token, takeoverPending, fromPersisted = false, persistedAt = null) {
     const { titleEl, badgeEl, metricsEl, rolesEl, timelineEl, chainEl, tableEl, graphEl, noteEl } = els;
     titleEl.textContent = cluster.label ?? t('cluster.labelDefault');
     const sev = clusterSeverity(cluster, clusterNodes);
@@ -1019,7 +1206,14 @@ export function initClusterDrilldown(ctx) {
     // der Freeze-Satz bleibt davon unberührt. cooldownTicks(0) friest die
     // Physik ein (graphData-Austausch als einziger Wiederaufheiz-Punkt
     // liegt im Live-Pfad, den der Freeze nie wieder erreicht).
-    if (!frozen) {
+    // HARTER INVARIANTEN-GUARD (Stale-Overlay-Fix 2026-10-06, Plan-
+    // Korrektur 1): ein LEERER Knotensatz wird nie eingefroren — ein leerer
+    // Freeze-Satz war die Wurzel des modal.gone-Flappings (recheckFrozen
+    // leerte ihn je Tick). Alle 0-Knoten-Pfade werden upstream abgefangen
+    // (Köder-Komplett-Deny → clearToEmptyState, node-los → Nachladen/
+    // Missing-Semantik); dieser Guard hält die Invariante auch dann, wenn
+    // ein neuer Pfad paintCluster mit leerer Menge erreicht.
+    if (!frozen && clusterNodes.length > 0) {
       frozen = {
         clusterId: cluster.id,
         at: Date.now(),
@@ -1028,6 +1222,10 @@ export function initClusterDrilldown(ctx) {
         nodes: clusterNodes.map((n) => ({ ...n })),
         edges: clusterEdges.map((e) => ({ ...e })),
         members: [...memberIds],
+        // Nachgeladene Bestands-Freezes (Stale-Overlay-Fix): Hinweis-Kennung
+        // für showFrozenNote (modal.persisted statt modal.frozen).
+        fromPersisted: fromPersisted === true,
+        persistedAt: fromPersisted === true ? (persistedAt ?? Date.now()) : null,
       };
     }
     frozenLang = getLang();
@@ -1199,7 +1397,7 @@ export function initClusterDrilldown(ctx) {
     const PAD_PCT = 4;
     const xOf = (ep) => (PAD_PCT + ((ep - min) / span) * (100 - 2 * PAD_PCT)).toFixed(2);
     const dots = points.map((p) =>
-      `<circle cx="${xOf(p.ep)}%" cy="${CY}" r="3" fill="${esc(edgeColors[p.type] || edgeDefault)}" opacity="0.85"></circle>`
+      `<circle cx="${xOf(p.ep)}%" cy="${CY}" r="3" fill="${esc(edgeColors[p.type] || edgeDefaultOf())}" opacity="0.85"></circle>`
     ).join('');
     const minIso = new Date(min).toISOString();
     const maxIso = new Date(max).toISOString();
@@ -1335,15 +1533,24 @@ export function initClusterDrilldown(ctx) {
           tagChips = tags.slice(0, 3).map((tg) => tagChipHtml(id, tg)).join('');
           if (tags.length > 3) tagChips += '<span class="cluster-table-dash">+</span>';
         }
+        // Drops/Grade (Stale-Overlay-Fix 2026-10-06): Knoten aus dem
+        // nachgeladenen persistierten Bestand tragen diese Metadaten nicht —
+        // ehrlich '–' statt 0 erfinden (cluster-table-dash wie bei Severity/
+        // Aktionen ohne Wert).
+        const inCell = n.inDrops == null ? '<span class="cluster-table-dash">–</span>' : esc(fmtXrp(n.inDrops));
+        const outCell = n.outDrops == null ? '<span class="cluster-table-dash">–</span>' : esc(fmtXrp(n.outDrops));
+        const degreeCell = (n.degreeIn == null && n.degreeOut == null)
+          ? '<span class="cluster-table-dash">–</span>'
+          : `${n.degreeIn == null ? '–' : num(n.degreeIn)} / ${n.degreeOut == null ? '–' : num(n.degreeOut)}`;
         return `<tr data-addr="${esc(full ? id : shown)}">
           <td class="cluster-td-addr" title="${esc(shown)}">${esc(shown)}</td>
           <td class="cluster-td-exchange">${nameChip}</td>
           <td class="cluster-td-tag">${tagChips}</td>
           <td><span class="role-chip role-${esc(role)}"><span class="swatch swatch-${esc(role)}"></span>${esc(roleLabelText(role))}</span></td>
           <td>${badge}</td>
-          <td class="cluster-td-num">${esc(fmtXrp(n.inDrops))}</td>
-          <td class="cluster-td-num">${esc(fmtXrp(n.outDrops))}</td>
-          <td class="cluster-td-num">${num(n.degreeIn)} / ${num(n.degreeOut)}</td>
+          <td class="cluster-td-num">${inCell}</td>
+          <td class="cluster-td-num">${outCell}</td>
+          <td class="cluster-td-num">${degreeCell}</td>
           <td>${actions}</td>
         </tr>`;
       }).join('');
@@ -1441,9 +1648,9 @@ export function initClusterDrilldown(ctx) {
   // globale Abblendung auf 0.35 würde die fokussierten Kanten mit treffen).
   function linkColor3dAccessor() {
     return (l) => {
-      const base = edgeColors[String(l.type)] || edgeDefault;
+      const base = edgeColors[String(l.type)] || edgeDefaultOf();
       if (!hover3dNodeId) return base;
-      return linkTouches3d(l, hover3dNodeId) ? base : GRAPH3D_LINK_FADED;
+      return linkTouches3d(l, hover3dNodeId) ? base : graph3dLinkFaded();
     };
   }
 
@@ -1818,6 +2025,7 @@ export function initClusterDrilldown(ctx) {
   function build2D(clusterNodes, clusterEdges, graphEl) {
     teardown3D();
     graphEl.innerHTML = '';
+    last2dBuild = { nodes: clusterNodes, edges: clusterEdges, el: graphEl };
     const vNodes = new window.vis.DataSet(clusterNodes.map((n) => {
       const role = roleColors[n.role] ? n.role : 'unknown';
       return {
@@ -1839,7 +2047,7 @@ export function initClusterDrilldown(ctx) {
       // Gate) und belegtem toTag (fail-closed).
       title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`
         + (e.toTag != null && multiUserEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
-      color: { color: edgeColors[String(e.type)] || edgeDefault, highlight: '#141416', hover: '#141416' },
+      color: { color: edgeColors[String(e.type)] || edgeDefaultOf(), highlight: canvasInkColor(), hover: canvasInkColor() },
       arrows: { to: { enabled: true, scaleFactor: 0.5 } },
       width: 1,
     })));
@@ -1849,14 +2057,16 @@ export function initClusterDrilldown(ctx) {
       interaction: { hover: true, tooltipDelay: 120, zoomView: true, dragView: true },
       nodes: {
         borderWidth: 1,
-        font: { color: '#141416', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
+        // Canvas-Fonts über den Token-Weg (--a6-ink, live gelesen; Noir
+        // liefert die helle Tinte) — Literale nur als Node-Test-Fallback.
+        font: { color: canvasInkColor(), size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace' },
       },
       edges: {
         smooth: { type: 'curvedCW', roundness: 0.14 },
         // size 12 wie der Hauptpfad (app.js): Schrift unter 12 px ist
         // Astra-6-Microtype und verboten (globe.css-Designprinzipien) —
-        // Befund 2026-09-29 (war 10 px).
-        font: { color: '#484850', size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
+        // Befund 2026-09-29 (war 10 px). Kanten-Labels in --a6-body-Töne.
+        font: { color: canvasBodyColor(), size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
       },
     });
     if (reducedMotion()) {
@@ -1906,6 +2116,7 @@ export function initClusterDrilldown(ctx) {
     if (!vis2d) return;
     try { vis2d.destroy(); } catch { /* egal */ }
     vis2d = null;
+    last2dBuild = null;
   }
 
   return { openCluster, refresh };

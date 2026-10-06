@@ -76,6 +76,7 @@
   --a6-success: #066348;
   --a6-success-soft: #e7f4ef;
   --a6-info: #1d4ed8;
+  --a6-info-soft: #eef3fd; /* Badge-Info-Fläche (.badge-info) — vorher Hex im Badge-Regelblock */
   --a6-r-sm: 0.75rem;
   --a6-r-md: 1rem;
   --a6-r-lg: 1.375rem;
@@ -92,9 +93,22 @@
   --a6-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --a6-fast: 180ms;
   --a6-ui: 280ms;
-  --a6-e1: 0 1px 0 #fff inset, 0 14px 32px -26px rgba(20, 20, 22, 0.28);
-  --a6-e2: 0 1px 0 #fff inset, 0 28px 60px -42px rgba(20, 20, 22, 0.34);
-  --a6-e3: 0 1px 0 #fff inset, 0 44px 90px -54px rgba(20, 20, 22, 0.38);
+  /* Inset-Glanzlicht der Hell-Elevation als eigener Token (Noir-Theme): die
+     dunkle Bühne trägt kein Weiß-Inset — der Noir-Block setzt den Token auf
+     transparent und definiert die Tiefe komplett neu. */
+  --a6-inset-highlight: 0 1px 0 #ffffff inset;
+  --a6-e1: var(--a6-inset-highlight), 0 14px 32px -26px rgba(20, 20, 22, 0.28);
+  --a6-e2: var(--a6-inset-highlight), 0 28px 60px -42px rgba(20, 20, 22, 0.34);
+  --a6-e3: var(--a6-inset-highlight), 0 44px 90px -54px rgba(20, 20, 22, 0.38);
+
+  /* Hero-Bühne (.hx-stage) als Token (Noir-Theme): Verlaufsfläche und der
+     EINE Radial-Glow der Seite sind Werte, keine Komponenten-Regeln — der
+     Noir-Block tauscht beide gegen die dunkle Indigo-Verlaufsbühne mit
+     Violett-/Teal-Glow (Sherlock-Richtung). */
+  --a6-stage-bg: linear-gradient(155deg, #ffffff 0%, #fbfbfc 58%, #eeeef1 100%);
+  --a6-stage-glow:
+    radial-gradient(ellipse at 95% 0%, rgba(22, 48, 92, 0.10), transparent 55%),
+    radial-gradient(ellipse at 0% 100%, rgba(15, 118, 110, 0.08), transparent 60%);
 
   /* Astra-6-Marke (lab_graphite): graphitfarbene Primäraktion, warmer Akzent
      nur auf der Hero-Bühne und für Status-Signale — kein Glow auf jeder Karte
@@ -178,6 +192,9 @@
      (SKILL buttons .a6-button--primary), --a6-card-line der Brand-Rand der
      Cluster-Karten (vorher D2-Regel mit Inline-rgba). */
   --a6-ink-fill: #141416;
+  /* Text auf der Ink-Primärfläche (Tabs/Buttons im Auswahlzustand, #check-go):
+     ersetzt die früheren hartcodierten #fff — Noir dreht beide Kanäle. */
+  --a6-on-ink: #ffffff;
   --a6-card-line: rgba(22, 48, 92, 0.30);
   --a6-swatch-payment: #d03b33;
   --a6-swatch-other: #3f3f46;
@@ -191,6 +208,107 @@
   font-family: var(--a6-font);
   line-height: 1.55;
   color-scheme: light;
+}
+
+/* ---------------- Noir-Theme (data-theme="noir", 2026-10-06) -------------
+   Zweites VOLLTHEMA über dieselbe Token-SSOT: tiefes Indigo-Schwarz als
+   Grundierung, Violett als EINZIGER Akzent, farbiger Glow ausschließlich auf
+   der Hero-Bühne (--a6-stage-glow) — die Sherlock-DNA (Indigo-Tiefen-
+   Surfaces #1a172f/#302c5b, Violett-Akzente, easeOutQuart-Ruhe) invertiert
+   auf die dunkle Bühne. Bewusst KEIN einziger Komponenten-Selektor: nur Token-
+   Overrides plus color-scheme: dark (Scrollbars/Form-Controls). Alle Paare
+   sind nach WCAG 2.x relativer Luminanz gerechnet und als Regeltests in
+   public/design-assets.test.mjs fixiert (Text ≥ 4,5:1, UI ≥ 3:1, beide
+   Themes). Default über <body data-a6 data-theme="noir"> (alle drei HTML-
+   Seiten), Hell über localStorage 'hx-theme' (i18n.mjs initThemeSwitcher;
+   Bootstrap-Script direkt nach <body> verhindert den FOUC). */
+[data-a6][data-theme="noir"] {
+  color-scheme: dark;
+  --a6-bg: #0c0b14;         /* Ink 17.43 ✓ */
+  --a6-surface: #14131f;    /* Ink 16.38 ✓ */
+  --a6-surface-alt: #1d1c2c; /* Body 10.06 / Muted 6.62 ✓ */
+  --a6-ink: #f2f1f8;        /* vs bg 17.43 / surface 16.38 ✓ Text */
+  --a6-body: #c9c7d6;       /* 11.05 / 10.06 ✓ */
+  --a6-muted: #a3a1b3;      /* 7.27 / 6.62 ✓ (12-px-Labels) */
+  --a6-line: rgba(242, 241, 248, 0.13);        /* Haarlinie, dekorativ wie Hell */
+  --a6-line-strong: rgba(242, 241, 248, 0.28); /* Container-Grenze; interaktiv → control-line */
+  --a6-control-line: #75718a;                  /* 3.93 / 3.57 ✓ UI */
+  --a6-focus: #b9a8ff;                         /* 8.85 / 8.06 ✓ */
+  --a6-error: #ff7a70;                         /* 7.24 / 6.59 ✓ Text */
+  --a6-error-soft: rgba(255, 122, 112, 0.12);  /* Text darauf 6.11 ✓ */
+  --a6-warn: #fbbf24;                          /* 11.01 / 10.03 ✓ */
+  --a6-warn-soft: rgba(251, 191, 36, 0.10);    /* 9.14 ✓ */
+  --a6-success: #4ade80;                       /* 10.55 / 9.60 ✓ */
+  --a6-success-soft: rgba(74, 222, 128, 0.10); /* 8.84 ✓ */
+  --a6-info: #8ab4ff;                          /* 8.80 / 8.01 ✓ */
+  --a6-info-soft: rgba(138, 180, 255, 0.12);   /* 7.15 ✓ */
+  --a6-inset-highlight: 0 0 0 transparent;     /* kein Weiß-Inset auf der dunklen Bühne */
+  --a6-e1: 0 14px 32px -26px rgba(0, 0, 0, 0.60);
+  --a6-e2: 0 28px 60px -42px rgba(0, 0, 0, 0.68);
+  /* Höchste Stufe: Violett-Glow-Rahmen nach dem Sherlock-Muster
+     (rgba(155,169,255,.5) 0 7px 15px) — wohnt weiterhin nur auf .hx-stage. */
+  --a6-e3: 0 0 0 1px rgba(143, 123, 255, 0.16), 0 24px 80px -32px rgba(143, 123, 255, 0.20);
+  --a6-accent: #8f7bff;      /* Sherlock-Violett; Grenze 5.64 ✓ UI, on-accent 6.00 ✓ */
+  --a6-accent-hi: #a996ff;   /* 7.43 ✓ */
+  --a6-accent-text: #b9a8ff; /* 8.85 ✓ */
+  --a6-on-accent: #0c0b14;   /* 6.00 auf dem Akzent ✓ */
+  --a6-accent-soft: rgba(143, 123, 255, 0.14); /* dekorative Tönung */
+  --a6-brand-blue: #7d9bff;  /* 7.01 ✓ Text (Chips, .cluster-label) */
+  --a6-brand-teal: #3ecfbb;  /* 9.49 ✓ */
+  --a6-brand-amber: #ffb45e; /* 10.45 ✓ */
+  /* Graph-Bühne dunkel; globe.js liest --a6-graph-canvas als Kugel-Material */
+  --a6-graph-canvas: #14131f;
+  --a6-graph-grid: rgba(242, 241, 248, 0.08);
+  --a6-graph-line: #f2f1f8;  /* 16.38 ✓ */
+  --a6-graph-line-soft: rgba(242, 241, 248, 0.16);
+  --a6-cluster-fill: #262436;
+  --a6-cluster-border: #f2f1f8; /* 13.48 auf der Füllung ✓ UI */
+  --a6-cluster-hover: #322f47;
+  --a6-edge-payment: #ff7a70;    /* 7.24 ✓ */
+  --a6-edge-trustset: #ffb45e;   /* 10.45 ✓ */
+  --a6-edge-offer: #f2b872;      /* 10.39 ✓ */
+  --a6-edge-escrow: #b79cff;     /* 8.06 ✓ */
+  --a6-edge-accountset: #8ab4ff; /* 8.80 ✓ */
+  --a6-edge-check: #3ecfbb;      /* 9.49 ✓ */
+  --a6-edge-nft: #e879f9;        /* 7.47 ✓ */
+  --a6-edge-neutral: #8f8da0;    /* 5.68 / 5.17 ✓ (auch globe.js-/Flow-Host-Fallback) */
+  --a6-edge-ink: #f2f1f8;
+  --a6-role-source: #7d9bff;           /* 7.01 ✓ */
+  --a6-role-source-border: #5f7ddb;    /* 4.76 ✓ */
+  --a6-role-drainer: #ff7a70;          /* 7.24 ✓ */
+  --a6-role-drainer-border: #d95f56;   /* 5.01 ✓ */
+  --a6-role-collector: #ffb45e;        /* 10.45 ✓ */
+  --a6-role-collector-border: #c98a45; /* 6.31 ✓ */
+  --a6-role-relay: #3ecfbb;            /* 9.49 ✓ */
+  --a6-role-relay-border: #2fa393;     /* 5.93 ✓ */
+  --a6-sev-malicious: #ff7a70;
+  --a6-sev-suspect: #fbbf24;
+  --a6-sev-info: #8ab4ff;
+  --a6-sev-neutral: #a3a1b3; /* Band 6.62 auf alt ✓ UI */
+  --a6-ink-fill: #f2f1f8;    /* Primärfläche invertiert */
+  --a6-on-ink: #0c0b14;      /* 17.43 auf ink-fill ✓ */
+  --a6-card-line: rgba(143, 123, 255, 0.35); /* Cluster-Kartenrand in Violett-Tinte */
+  --a6-swatch-payment: #ff7a70;
+  --a6-swatch-other: #75718a;      /* 3.93 ✓ */
+  --a6-swatch-unknown: #262436;    /* wie cluster-fill */
+  --a6-swatch-unknown-line: #8f8da0; /* 4.67 auf der Füllung ✓ */
+  --a6-swatch-cluster-line: #f2f1f8;
+  --a6-unknown-fill: #262436;
+  --a6-stage-bg: linear-gradient(155deg, #171627 0%, #14131f 60%, #100f1a 100%);
+  --a6-stage-glow:
+    radial-gradient(ellipse at 95% 0%, rgba(143, 123, 255, 0.16), transparent 55%),
+    radial-gradient(ellipse at 0% 100%, rgba(62, 207, 187, 0.10), transparent 60%);
+  /* Theme-neutrale Tokens werden bewusst NICHT wiederholt: --a6-band-width,
+     --a6-r-*, --a6-font/--a6-mono, --a6-ease/--a6-fast/--a6-ui, --a6-gutter/
+     --a6-container/--a6-stage-height. --a6-icon-accent erbt automatisch
+     (var(--a6-brand-blue) resolves hier auf #7d9bff). --a6-globe-atmosphere
+     (globe.css, niedrigere Spezifität) wird unten am Noir-Blockende
+     überschrieben. */
+  /* Atmosphäre der Weltkugel in Noir-Violett-Tönung (Override des
+     globe.css-Light-Werts rgba(29,78,216,.08); globe.js mischt den Alpha-
+     Anteil über die Bühne — Mischziel seit diesem Umbau der Token
+     --a6-graph-canvas, nicht mehr hartes Weiß). */
+  --a6-globe-atmosphere: rgba(143, 123, 255, 0.10);
 }
 
 *,
@@ -665,7 +783,7 @@ main {
 }
 
 .badge-info {
-  background: #eef3fd;
+  background: var(--a6-info-soft);
   border-color: rgba(29, 78, 216, 0.35);
   color: var(--a6-info);
 }
@@ -949,7 +1067,7 @@ main {
 .graph-tab[aria-selected="true"] {
   background: var(--a6-ink-fill);
   border-color: var(--a6-ink-fill);
-  color: #fff;
+  color: var(--a6-on-ink);
 }
 
 /* Aktuelle Seite in Anker-Navigationen (about.html trägt aria-current="page"
@@ -958,7 +1076,7 @@ main {
 .view-tab[aria-current="page"] {
   background: var(--a6-ink-fill);
   border-color: var(--a6-ink-fill);
-  color: #fff;
+  color: var(--a6-on-ink);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -984,7 +1102,7 @@ main {
 .density-btn[aria-pressed="true"] {
   background: var(--a6-ink-fill);
   border-color: var(--a6-ink-fill);
-  color: #fff;
+  color: var(--a6-on-ink);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1025,7 +1143,7 @@ main {
 .swatch-collector { background: var(--a6-role-collector); border-radius: 50%; }
 .swatch-relay { background: var(--a6-role-relay); border-radius: 50%; }
 .swatch-unknown { background: var(--a6-swatch-unknown); border-color: var(--a6-swatch-unknown-line); border-radius: 50%; }
-.swatch-cluster { background: #ffffff; border: 1px solid var(--a6-swatch-cluster-line); }
+.swatch-cluster { background: var(--a6-cluster-fill); border: 1px solid var(--a6-swatch-cluster-line); }
 
 /* Kantentyp-Swatches — Farben müssen von den Rollen-Swatches unterscheidbar
    sein (Befund: payment==drainer #b3261e und other==relay #62626b waren
@@ -1033,8 +1151,8 @@ main {
    Relay-Randton, check entspricht EDGE_COLORS für CheckCreate/
    PaymentChannelCreate in public/app.js). */
 .swatch-payment { background: var(--a6-swatch-payment); }
-.swatch-escrow { background: #6d28d9; }
-.swatch-check { background: #0f766e; }
+.swatch-escrow { background: var(--a6-edge-escrow); }
+.swatch-check { background: var(--a6-edge-check); }
 .swatch-other { background: var(--a6-swatch-other); }
 
 /* Schweregrad-Swatches — Severity-Tokens, kein zweites Farbsystem */
@@ -1515,7 +1633,9 @@ main {
   padding: clamp(0.875rem, 1.4vw, 1.25rem) clamp(1rem, 2vw, 1.75rem);
   border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-lg);
-  background: linear-gradient(155deg, #fff 0%, #fbfbfc 58%, #eeeef1 100%);
+  /* Verlauf + Glow über die Token --a6-stage-bg/--a6-stage-glow (Noir-Theme
+     tauscht beide) — vorher hartcodierte Hell-Verläufe im Selektorblock. */
+  background: var(--a6-stage-bg);
   box-shadow: var(--a6-e3);
 }
 
@@ -1526,9 +1646,7 @@ main {
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 95% 0%, rgba(22, 48, 92, 0.10), transparent 55%),
-    radial-gradient(ellipse at 0% 100%, rgba(15, 118, 110, 0.08), transparent 60%);
+  background: var(--a6-stage-glow);
 }
 
 .hx-stage-copy {
@@ -1575,9 +1693,9 @@ main {
   padding: 6px 12px;
   background: var(--a6-surface);
   /* Eine Regel statt Doppel-Deklaration (Design-Audit, ehemals D1-Folgeblock):
-     1px Rand in Brand-Blau-Tinte + dezenter Karten-Schatten — IDs
-     (#hx-kpi-malicious/-suspect/-txs) bleiben. */
-  border: 1px solid rgba(22, 48, 92, 0.35);
+     1px Rand in Brand-Tinte (--a6-card-line, Noir: Violett-Tinte) + dezenter
+     Karten-Schatten — IDs (#hx-kpi-malicious/-suspect/-txs) bleiben. */
+  border: 1px solid var(--a6-card-line);
   border-radius: var(--a6-r-pill);
   box-shadow: var(--a6-e1), 0 1px 2px rgba(22, 48, 92, 0.06);
 }
@@ -1610,6 +1728,16 @@ main {
   align-items: center;
 }
 
+/* Theme-Umschalter-Container (index.html #theme-switch + Pendants in
+   about.html/history-host.html): identische Zeilenform wie .lang-switch —
+   ein EINZIGER Button (.theme-btn, Komposition auf .lang-btn-Basis) sitzt
+   darin. */
+.theme-switch {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
 .lang-btn {
   min-height: 44px;
   min-width: 44px;
@@ -1625,10 +1753,16 @@ main {
   transition: background-color var(--a6-fast), color var(--a6-fast), transform var(--a6-ui) var(--a6-ease);
 }
 
+/* Theme-Umschalter (initThemeSwitcher in i18n.mjs): EIN Button, gleiche Pille
+   wie .lang-btn — die Zusatzklasse .theme-btn trägt nur die Identität im
+   Markup/Tests, den Stil liefert die .lang-btn-Regelgruppe darüber
+   (Kompositionsmuster wie .density-btn auf .graph-tab-Basis). */
+.theme-btn { letter-spacing: 0.02em; }
+
 .lang-btn[aria-pressed="true"] {
   background: var(--a6-ink-fill);
   border-color: var(--a6-ink-fill);
-  color: #fff;
+  color: var(--a6-on-ink);
 }
 
 @media (hover: hover) and (pointer: fine) {

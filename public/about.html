@@ -3,13 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#ffffff">
+  <!-- Theme-Farbe der Browser-Chrome: Noir ist Erstbesuch-Default (identisch
+       zu index.html; i18n.mjs applyTheme/setTheme hält das Meta aktuell). -->
+  <meta name="theme-color" content="#0c0b14">
   <title>Honeypot XRPL – About</title>
   <meta name="description" content="What Honeypot XRPL detects on the XRP Ledger: drainer, collector, source and relay roles, peeling chains, wash trading, cross-ledger sweeps, hub connections and known-bad contacts — plus glossary and honest limits.">
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
-<body data-a6>
+<body data-a6 data-theme="noir">
+  <!-- Theme-Bootstrap (kein FOUC, Muster index.html): Noir ist statisch im
+       Markup; nur eine persistierte Wahl von 'light' wird vor dem ersten
+       Paint zurückgeschaltet — guardiert (Private Mode: Noir bleibt). -->
+  <script>
+    try {
+      if (localStorage.getItem('hx-theme') === 'light') {
+        document.body.dataset.theme = 'light';
+        var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+        if (themeColorMeta) themeColorMeta.setAttribute('content', '#ffffff');
+      }
+    } catch (e) { /* Storage gesperrt: Noir bleibt */ }
+  </script>
   <!-- Info-Seite für die XRPL-Community (2026-10-06): eigenständige Seite im
        App-Shell-Look — bewusst KEIN SPA-View, sondern das etablierte Muster
        der Flow-Host-Seite (index.html-Kommentar „eigenständige Seite (kein
@@ -28,6 +42,7 @@
       </div>
     </div>
     <div class="lang-switch" id="lang-switch"></div>
+    <div class="theme-switch" id="theme-switch"></div>
   </header>
 
   <nav class="view-nav graph-tabs" aria-label="Navigation" data-i18n-aria="fh.navAria">
@@ -70,20 +85,22 @@
         <h3 data-i18n="about.patternsTitle">Patterns and connections</h3>
         <dl class="about-defs">
           <dt data-i18n="about.patDrainerT">Draining (drainer sweep)</dt>
-          <dd data-i18n="about.patDrainerD">A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation is the finding classified as malicious; without it, it stays suspect.</dd>
+          <dd data-i18n="about.patDrainerD">A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation — or with an entity-snapshot proof of fresh account activity across ticks — is the finding classified as malicious; without it, it stays suspect.</dd>
           <dt data-i18n="about.patCrossLedgerT">Cross-ledger sweep</dt>
           <dd data-i18n="about.patCrossLedgerD">Funding and sweeping across block boundaries: when an account is funded in ledger N and only swept in ledger N+1, the cross-ledger memory of the engine keeps the sweep visible. Stretched dusting campaigns are caught the same way, via the union of their tiny destinations over the window.</dd>
           <dt data-i18n="about.patPeelingT">Peeling chains</dt>
           <dd data-i18n="about.patPeelingD">Staged forwarding of 60 to 95 % of the inflow across unflagged 1:1 relays, from three hops onwards. Detection runs on the transaction view and follows inconspicuous intermediate accounts without assigning them a role.</dd>
           <dt data-i18n="about.patWashT">Wash trading (self-transfers)</dt>
           <dd data-i18n="about.patWashD">At least three self-payments of the same account within one ledger (sender and destination are identical) — volume generation without a real counterparty, a typical washing pattern.</dd>
+          <dt data-i18n="about.patWashCycleT">Wash cycle (cross-account)</dt>
+          <dd data-i18n="about.patWashCycleD">At least two payments in each direction between the same two accounts (A→B and B→A) with at least 80 % volume conservation within one hour — volume generated across two identities. Single payment pairs stay exempt (normal refunds and market moves), exchanges never take part as cycle members; the finding class is suspect.</dd>
           <dt data-i18n="about.patHubT">Hub connections</dt>
           <dd data-i18n="about.patHubD">Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.</dd>
           <dt data-i18n="about.patKnownBadT">Known-bad contact</dt>
           <dd data-i18n="about.patKnownBadD">When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.</dd>
         </dl>
       </div>
-      <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds eleven rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
+      <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds twelve rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
     </section>
 
     <section class="panel" aria-labelledby="about-glossary-title">
@@ -143,7 +160,7 @@
    unberührt (idempotenter Mount, Muster app.js mountPanelMarker). Kein
    Fetch, kein Polling, kein Vendor — die Seite bleibt statisch schnell. */
 
-import { applyLang, applyStatic, initLangSwitcher } from './i18n.mjs';
+import { applyLang, applyStatic, initLangSwitcher, initThemeSwitcher } from './i18n.mjs';
 import {
   panelMarkerRadar, panelMarkerSieve, panelMarkerLexicon, panelMarkerFrame,
 } from './icons.mjs';
@@ -160,6 +177,7 @@ function mountMarker(id, svg) {
 applyLang();
 applyStatic(document);
 initLangSwitcher(document.getElementById('lang-switch'));
+initThemeSwitcher(document.getElementById('theme-switch'));
 mountMarker('about-mission-title', panelMarkerRadar());
 mountMarker('about-detect-title', panelMarkerSieve());
 mountMarker('about-glossary-title', panelMarkerLexicon());

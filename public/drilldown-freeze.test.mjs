@@ -27,7 +27,13 @@
 // (deterministisch, Deckel 12), Stil-Flags (transparenter Clear, 0.85
 // Deckkraft, additiver nodeThreeObjectExtend, onNodeHover), Hover-Fokus
 // mit reduced-motion-Degradation und Ring-Konstruktion aus rekonstruierten
-// Bundle-Klassen — Layout-Parameter unangetastet (keine Overlap-Regression).
+// Bundle-Klassen — Layout-Parameter unangetastet (keine Overlap-Regression),
+// (12) Stale-Overlay (Forensik 2026-10-06): node-lose Merged-Karten laden aus
+// dem persistierten Bestand nach (modal.persisted-Banner, ehrliche '–'-Zellen),
+// drei Freeze-Ticks bleiben byte-identisch (kein modal.gone-Flapping), der
+// Fallback-Anker wird durch node-loses Öffnen nicht korrumpiert, und
+// Köder-Komplett-Deny bleibt in jedem Pfad (sync-Gate, async-Gate,
+// Restore-Bestand, Freeze) der legitime Total-Leerungs-Terminalzustand.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -339,6 +345,207 @@ test("hx:langchange: Freeze-Inhalte werden in der neuen Sprache neu gemalt", asy
   await settle();
   assert.equal(q("#cluster-modal-title").textContent, "Sprach-Test", "Freeze-Daten bleiben auch beim Retranslate stabil");
   lang = "de";
+});
+
+/* ---------------- 6b) Stale-Overlay (Forensik 2026-10-06): leere Hülle unmöglich ----------------
+   Massenbefund: Karten im akkumulierten Bestand (mergeClusterViews/Session-
+   Schicht), deren Knoten aus dem FIFO-Fenster gerollt sind, öffneten eine
+   LEERE Hülle; paintCluster fror den leeren Satz ein, recheckFrozen leerte
+   ihn je Tick → modal.gone-Flapping (live 12/30 Karten betroffen). Fix:
+   node-los → aus dem persistierten Bestand nachladen (getPersistedClusterById),
+   sonst Missing-Semantik; Köder-Komplett-Deny bleibt in jedem Pfad der
+   legitime Total-Leerungs-Terminalzustand. */
+
+// Merged-Card-Nachstellung: Karte im akkumulierten Bestand, aber der
+// Live-Graph trägt KEINEN Knoten mit dieser clusterId (FIFO-Fenster gerollt).
+function emptyWindowGraph(label = "Bestands-Cluster") {
+  return {
+    clusters: [{
+      id: CID, label, totalDrops: 4400, txCount: 12, distinctAccounts: 3,
+      firstSeen: "2026-10-05T10:00:00Z", lastSeen: "2026-10-05T10:09:00Z",
+      memberAddresses: [A1, A2, A3],
+    }],
+    nodes: [],
+    edges: [],
+  };
+}
+
+// Persistierter Bestand (Muster getPersistedClusterById/applyFlowStateView):
+// memberAddresses/rolesByAddress/severityByAddress/edges — KEINE Drops/Grade
+// (genau die ehrliche '–'-Situation in der Tabelle).
+function makePersistedView() {
+  return {
+    cluster: {
+      id: CID, label: "Bestands-Cluster", totalDrops: 4400, txCount: 12, distinctAccounts: 3,
+      firstSeen: "2026-10-05T10:00:00Z", lastSeen: "2026-10-05T10:09:00Z",
+      memberAddresses: [A1, A2, A3],
+      rolesByAddress: { [A1]: "source", [A2]: "mid", [A3]: "sink" },
+      severityByAddress: { [A1]: "malicious", [A2]: "suspect", [A3]: "info" },
+      edges: [
+        { from: A1, to: A2, type: "Payment", txHash: "PH1", closeTime: 3 },
+        { from: A2, to: A3, type: "Payment", txHash: "PH2", closeTime: 4 },
+      ],
+      peelingChains: [],
+    },
+    nodes: [
+      { id: A1, clusterId: CID, role: "source", severity: "malicious" },
+      { id: A2, clusterId: CID, role: "mid", severity: "suspect" },
+      { id: A3, clusterId: CID, role: "sink", severity: "info" },
+    ],
+    edges: [
+      { from: A1, to: A2, type: "Payment", txHash: "PH1", closeTime: 3 },
+      { from: A2, to: A3, type: "Payment", txHash: "PH2", closeTime: 4 },
+    ],
+    at: Date.parse("2026-10-05T12:00:00Z"),
+  };
+}
+
+test("Stale-Overlay: node-lose Merged-Karte lädt aus dem persistierten Bestand nach (Inhalt + modal.persisted, kein modal.gone)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = emptyWindowGraph();
+  const dd = initClusterDrilldown(makeCtx({
+    getPersistedClusterById: async () => makePersistedView(),
+  }));
+  dd.openCluster(CID);
+  await settle();
+
+  // Vollrender aus dem Bestand: Titel/Metriken/Rollen/Tabelle stehen.
+  assert.equal(q("#cluster-modal-title").textContent, "Bestands-Cluster", "Titel aus dem Bestand");
+  assert.ok(q(".cluster-modal-metrics").innerHTML.includes("4400"), "Metriken aus dem Bestand");
+  assert.ok(q(".cluster-modal-roles").innerHTML.includes("role-bar-row"), "Rollen-Balken aus rolesByAddress");
+  const table = q(".cluster-modal-table").innerHTML;
+  assert.ok(table.includes(A1) && table.includes(A2) && table.includes(A3), "Mitglieder aus memberAddresses");
+  assert.ok(table.includes("cluster-table-dash"), "fehlende Drops/Grade ehrlich '–' statt 0");
+  // modal.persisted-Banner sichtbar, kein modal.gone — KEINE leere Hülle.
+  const note = q(".cluster-modal-stale");
+  assert.equal(note.hidden, false, "Banner sichtbar");
+  assert.ok(note.textContent.includes("persistierten Bestand"), "modal.persisted-Banner (DE): " + note.textContent);
+  assert.ok(!q(".cluster-3d").innerHTML.includes(t("modal.gone")), "kein Gone-Banner");
+  assert.ok(table.includes("<tr"), "Kernregression: Banner-Zustand hat >0 Inhaltskinder (Tabelle gefüllt)");
+  // Freeze gesetzt: der Freeze-Tick liest den Live-Graphen nicht mehr und
+  // behält den persisted-Hinweis (kein Zurückwandeln zu modal.frozen nötig —
+  // der Text bleibt nur konsistent).
+  const callsBefore = graphCalls;
+  dd.refresh();
+  await settle();
+  assert.equal(graphCalls, callsBefore, "Bestands-Freeze liest den Live-Graphen nicht mehr");
+  assert.ok(q(".cluster-modal-stale").textContent.includes("persistierten Bestand"), "Hinweis bleibt modal.persisted je Freeze-Tick");
+});
+
+test("Stale-Overlay: drei refresh-Ticks über denselben node-losen Cluster — Modal-Inhalt byte-identisch (kein Flapping)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = emptyWindowGraph();
+  const dd = initClusterDrilldown(makeCtx({
+    getPersistedClusterById: async () => makePersistedView(),
+  }));
+  dd.openCluster(CID);
+  await settle();
+  const before = {
+    title: q("#cluster-modal-title").textContent,
+    metrics: q(".cluster-modal-metrics").innerHTML,
+    roles: q(".cluster-modal-roles").innerHTML,
+    chain: q(".cluster-modal-chain").innerHTML,
+    table: q(".cluster-modal-table").innerHTML,
+    graph: q(".cluster-3d").innerHTML,
+    note: q(".cluster-modal-stale").textContent,
+  };
+  // Live driftet währenddessen (der alte Defekt flapp-te je Poll-Tick):
+  liveGraph = makeGraph("Live-Knoten zurück", 77);
+  for (let i = 0; i < 3; i++) { dd.refresh(); await settle(); }
+  assert.equal(q("#cluster-modal-title").textContent, before.title, "Titel stabil");
+  assert.equal(q(".cluster-modal-metrics").innerHTML, before.metrics, "Metriken byte-identisch");
+  assert.equal(q(".cluster-modal-roles").innerHTML, before.roles, "Rollen byte-identisch");
+  assert.equal(q(".cluster-modal-chain").innerHTML, before.chain, "Kette byte-identisch");
+  assert.equal(q(".cluster-modal-table").innerHTML, before.table, "Tabelle byte-identisch");
+  assert.equal(q(".cluster-3d").innerHTML, before.graph, "Graph-Note byte-identisch (kein clearToEmptyState)");
+  assert.equal(q(".cluster-modal-stale").textContent, before.note, "Banner-Text stabil");
+  assert.ok(!q(".cluster-3d").innerHTML.includes(t("modal.gone")), "kein modal.gone je Tick");
+  assert.ok(q(".cluster-modal-table").innerHTML.includes("<tr"), "Freeze-Banner-Zustand behält Inhalt");
+});
+
+test("Stale-Overlay INVARIANTE: Live-Knoten komplett per sync-Gate verweigert → sofortige Total-Leerung (Köder-Deny gewinnt)", async () => {
+  lang = "de";
+  denySet.add(A1); denySet.add(A2); denySet.add(A3);
+  liveGraph = makeGraph("Komplett-Deny", 3);
+  const dd = initClusterDrilldown(makeCtx());
+  dd.openCluster(CID);
+  await settle();
+  assert.equal(q("#cluster-modal-title").textContent, t("cluster.labelDefault"), "Total-Leerung: Default-Titel");
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "modal.gone bei sync Komplett-Deny");
+  assert.equal(q(".cluster-modal-table").innerHTML, "", "Tabelle leer");
+  denySet.clear();
+});
+
+test("Stale-Overlay INVARIANTE: Restore-Bestand komplett Köder → clearToEmptyState im Nachlade-Pfad (Terminalzustand, kein Reload-Loop)", async () => {
+  lang = "de";
+  liveGraph = emptyWindowGraph();
+  const dd = initClusterDrilldown(makeCtx({
+    getPersistedClusterById: async () => makePersistedView(),
+  }));
+  denySet.add(A1); denySet.add(A2); denySet.add(A3);
+  dd.openCluster(CID);
+  await settle();
+  assert.equal(q("#cluster-modal-title").textContent, t("cluster.labelDefault"), "Total-Leerung: Default-Titel");
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "Gone-Banner (legitimer Terminalzustand Köder)");
+  assert.equal(q(".cluster-modal-table").innerHTML, "", "Tabelle geleert (Invariante Köder-Deny > Nachladen)");
+  // Terminalzustand hält unter unverändertem Deny: kein innerer Reload-
+  // Wiederversuch, stabil leeres Modal statt Flapping.
+  dd.refresh();
+  await settle();
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "Terminalzustand hält je Tick");
+  assert.equal(q("#cluster-modal-title").textContent, t("cluster.labelDefault"), "Titel bleibt Default");
+  denySet.clear();
+});
+
+test("Stale-Overlay Fallback: Restore scheitert und kein Snapshot → ehrliche modal.gone-Leerung (nie halluzinieren)", async () => {
+  lang = "de";
+  liveGraph = emptyWindowGraph();
+  let persistedCalls = 0;
+  const dd = initClusterDrilldown(makeCtx({
+    getPersistedClusterById: async () => { persistedCalls += 1; return null; },
+  }));
+  dd.openCluster(CID);
+  await settle();
+  assert.ok(persistedCalls >= 1, "Restore-Pfad befragt den Bestand");
+  assert.equal(q("#cluster-modal-title").textContent, t("cluster.labelDefault"), "Default-Titel");
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "modal.gone-Fallback");
+  assert.equal(q(".cluster-modal-table").innerHTML, "", "ehrliche Leerung (Inhalt existierte nie)");
+});
+
+test("Stale-Overlay: node-lose Öffnung korrumpiert den Fallback-Anker nicht (kein Fremd-Adopt, kein toter Zustand)", async () => {
+  lang = "de";
+  liveGraph = emptyWindowGraph();
+  const dd = initClusterDrilldown(makeCtx({ getPersistedClusterById: async () => null }));
+  dd.openCluster(CID);
+  await settle();
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "Fallback-Zustand");
+  // Fremder Cluster (nie gesehene Mitglieder): wird NICHT adoptiert — der
+  // Anker wurde nicht aus der leeren Knotenmenge gesetzt (originMembers blieb
+  // null; ohne Fix hätte render() dort ein leeres Set verankert).
+  liveGraph = {
+    clusters: [{
+      id: "cluster:" + A3, label: "Nachfolger", totalDrops: 10, txCount: 1, distinctAccounts: 2,
+      firstSeen: "2026-10-05T10:06:00Z", lastSeen: "2026-10-05T10:07:00Z",
+      memberAddresses: [A3, A2],
+    }],
+    nodes: [
+      { id: A3, clusterId: "cluster:" + A3, role: "sink", inDrops: 10, outDrops: 0, degreeIn: 1, degreeOut: 0, severity: "info" },
+      { id: A2, clusterId: "cluster:" + A3, role: "mid", inDrops: 0, outDrops: 10, degreeIn: 0, degreeOut: 1, severity: "info" },
+    ],
+    edges: [],
+  };
+  dd.refresh();
+  await settle();
+  assert.equal(q("#cluster-modal-title").textContent, t("cluster.labelDefault"), "kein Titel-Wechsel auf den Fremd-Cluster");
+  assert.ok(q(".cluster-3d").innerHTML.includes(t("modal.gone")), "kein Fremd-Adopt nach node-losem Öffnen");
+  // Und der echte Cluster kommt mit Knoten zurück → vollwertiger Vollrender
+  // (kein toter Zustand durch die node-lose Öffnung).
+  liveGraph = makeGraph("Wieder da", 3);
+  dd.refresh();
+  await settle();
+  assert.equal(q("#cluster-modal-title").textContent, "Wieder da", "Vollrender nach node-losem Fehlschlag");
 });
 
 /* ---------------- 7) Name-Chips nur hinter dem Host-Gate ---------------- */

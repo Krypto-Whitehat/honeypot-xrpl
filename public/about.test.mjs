@@ -40,7 +40,10 @@ const styleCss = read('style.css');
 test('about.html: App-Shell-Gerüst (Marke, Sprachumschalter, Nav mit aria-current, vier Panels, Footer)', () => {
   assert.match(aboutHtml, /<!DOCTYPE html>/, 'Dokumentdeklaration');
   assert.match(aboutHtml, /<html lang="en">/, 'lang="en"-Initialdokument wie index.html');
-  assert.match(aboutHtml, /<body data-a6>/, 'data-a6-Shell (Design-Tokens)');
+  // Noir-Theme (2026-10-06): die Shell trägt Noir als statischen Default
+  // (Hell wählbar/persistiert über 'hx-theme') — Theme-Attribut ist Teil
+  // der data-a6-Shell.
+  assert.match(aboutHtml, /<body data-a6 data-theme="noir">/, 'data-a6-Shell (Design-Tokens, Noir-Default)');
   assert.match(aboutHtml, /<span class="brand-mark" aria-hidden="true">/, 'Marke .brand-mark');
   assert.match(aboutHtml, /<div class="lang-switch" id="lang-switch"><\/div>/, 'Sprachumschalter-Container');
   assert.match(aboutHtml, /<nav class="view-nav graph-tabs"[^>]*data-i18n-aria="fh\.navAria"/, 'view-nav wie history-host');
@@ -138,7 +141,7 @@ test('Pflichtbegriffe EN: Rollen, Muster, Glossar und Grenzen', () => {
   const text = aboutText('en');
   for (const term of [
     'Drainer', 'Collector', 'Source', 'Relay',
-    'Peeling chains', 'Wash trading', 'Cross-ledger sweep', 'Hub connections', 'Known-bad contact',
+    'Peeling chains', 'Wash trading', 'Wash cycle (cross-account)', 'Cross-ledger sweep', 'Hub connections', 'Known-bad contact',
     'Cluster', 'Severity', 'malicious', 'suspect', 'benign', 'risk-associated', 'worth reviewing',
     'Destination tag', 'transit', 'Entity resolution',
     'Block window', 'History vs. archive',
@@ -152,7 +155,7 @@ test('Pflichtbegriffe DE: Rollen, Muster, Glossar und Grenzen', () => {
   const text = aboutText('de');
   for (const term of [
     'Drainer', 'Kollektor', 'Source', 'Relay',
-    'Peeling-Ketten', 'Wash Trading', 'Cross-Ledger-Sweep', 'Hub-Verbindungen', 'Known-Bad-Kontakt',
+    'Peeling-Ketten', 'Wash Trading', 'Wash-Zyklus', 'Cross-Ledger-Sweep', 'Hub-Verbindungen', 'Known-Bad-Kontakt',
     'Cluster', 'Schweregrad', 'maliziös', 'verdächtig', 'benigne', 'risikobehaftet', 'prüfungswürdig',
     'Destination-Tag', 'Transit', 'Entity-Auflösung',
     'Block-Fenster', 'Historie vs. Archiv',
