@@ -71,6 +71,7 @@ import {
   writeFlowStateGitHub,
   mergeFlowState,
   effectiveClusterCap,
+  capClusterFields,
   archiveFromFlowState,
   archiveDayOf,
   appendArchiveDoc,
@@ -720,17 +721,37 @@ export default async function handler(req, res) {
         multiUserAccounts: multiUserMap,
       },
     });
+    // (iii.3) Write-Pfad-Feldkappe (Akkumulations-Fix 2026-10-06,
+    // lib/flow-state.mjs capClusterFields): Mega-Cluster mit >300 Mitgliedern
+    // komprimieren memberAddresses/roles/severityByAddress auf die Top-N
+    // (Severity-Rang, dann mainDrainers/collectors, dann Adresse asc;
+    // distinctAccounts bleibt der wahre Stand). Ohne sie sprengt ein einziger
+    // Mega-Cluster FLOW_STATE_MAX_BYTES, der effectiveClusterCap halbiert auf
+    // 1, und pruneFlowState wirft in JEDEM Tick alle übrigen Cluster raus —
+    // die persistierten Cluster 'verschwinden' (live: Bestand 12 -> 1).
+    // Die Kappe ist der Migrationspfad des bestehenden Mega-Clusters: der
+    // nächste Tick persistiert ihn komprimiert, der Cap stabilisiert sich
+    // wieder nahe FLOW_STATE_MAX_CLUSTERS.
+    // REIHENFOLGE (Pflicht, lib/flow-state.mjs Abschnitt 'Write-Pfad-
+    // Feldkappe'): capClusterFields VOR effectiveClusterCap (der Cap muss die
+    // komprimierte Größe messen) und VOR mergeFlowState; archiveFromFlowState
+    // läuft auf dem UNGEKAPPTEN advanceResult.flowState — Archivzeilen
+    // behalten volle memberAddresses.
+    const capped = capClusterFields(advanceResult.flowState);
     // (iii.4) Effektiver Cluster-Cap EINMAL pro Tick (Byte-Cap
     // FLOW_STATE_MAX_BYTES, lib/flow-state.mjs): der Bestand darf die 1-MiB-
     // Contents-Grenze nicht wieder überschreiten (live: 1.125.252 B ->
-    // content_len 0 -> Wisch-Zyklus). DERSSELBE Cap füttert
-    // archiveFromFlowState UND mergeFlowState (Archiv-Kopplung: was der Cap
-    // aus dem Bestand wirft, wird im selben Tick archiviert — Betrugsevidenz
-    // bleibt im data/flow-Archiv erhalten, lib/flow-state.mjs
+    // content_len 0 -> Wisch-Zyklus). Gemessen wird der GEKAPPTA State
+    // (iii.3) — die survivor-Menge ist cap-unabhängig identisch, pruneFlowState
+    // sortiert nach Schwere/Volumen, nicht nach Mitgliederzahl. DERSSELBE Cap
+    // füttert archiveFromFlowState UND mergeFlowState (Archiv-Kopplung: was
+    // der Cap aus dem Bestand wirft, wird im selben Tick archiviert —
+    // Betrugsevidenz bleibt im data/flow-Archiv erhalten, lib/flow-state.mjs
     // archiveFromFlowState Kappungs-Zweig).
-    const clusterCap = effectiveClusterCap(advanceResult.flowState, now);
+    const clusterCap = effectiveClusterCap(capped.state, now);
     // (iii.5) Archiv VOR mergeFlowState (Grenze 2): mergeFlowState pruned
-    // intern — archiviert wird auf advanceResult.flowState, exakt nach dem
+    // intern — archiviert wird auf dem UNGEKAPPTEN advanceResult.flowState
+    // (volle Mitglieder in den Archivzeilen), exakt nach dem
     // pruneFlowState-Prädikat (dasselbe Prädikat, keine Differenzrechnung
     // gegen finalDoc).
     const archiveDocs = archiveFromFlowState(advanceResult.flowState, now, { maxClusters: clusterCap }).map((d) => ({
@@ -747,9 +768,11 @@ export default async function handler(req, res) {
     }
     // (iv) Persistenz des Flow-State-Ergebnisses (Merge ausschließlich im
     // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs) — mit
-    // demselben Cap wie das Archiv (iii.4).
+    // demselben Cap wie das Archiv (iii.4) und dem GEKAPPTEN State (iii.3):
+    // das persistierte Dokument bleibt unter FLOW_STATE_MAX_BYTES, ohne dass
+    // die Archivzeilen (iii.5, ungekappt) Mitglieder verlieren.
     const finalDoc = await writeFlowStateGitHub((fresh) =>
-      mergeFlowState(fresh, advanceResult, now, { maxClusters: clusterCap })
+      mergeFlowState(fresh, { ...advanceResult, flowState: capped.state }, now, { maxClusters: clusterCap })
     );
     // (iv.5) Live-Cluster in die öffentliche Maliziös-Historie (data/
     // history.json): bisher war Live-Evidenz dort nie suchbar (?q=) —

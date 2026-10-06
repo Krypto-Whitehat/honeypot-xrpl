@@ -58,10 +58,24 @@
   outline: none;
 }
 
+/* Defensive Fehlerfläche (Design-Audit): account-check.js setzt aria-invalid
+   auf dem Eingabefeld — die Fehler-Tinte bleibt auch ohne .check-error-Zeile
+   am Feld sichtbar. */
+.check-input[aria-invalid="true"] {
+  border-color: var(--a6-error);
+}
+
 /* Prüfen-Button: Stil erbt aus .download-btn (style.css), Zielhöhe auf die
-   Astra-6-Mindestgröße von 44 px angehoben — berührt die Basisklasse nicht. */
+   Astra-6-Mindestgröße von 44 px angehoben — berührt die Basisklasse nicht.
+   Graphitfarbene Primärfüllung (Design-Audit 2026-10-06, SKILL
+   .a6-button--primary): zuvor war die Hauptaktion optisch nicht von
+   Sekundäraktionen (.download-btn weiß) zu unterscheiden; der Disabled-Zustand
+   (opacity .55) kommt aus style.css. */
 #check-go {
   min-height: 44px;
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
+  color: #fff;
 }
 
 .check-error {
@@ -173,7 +187,7 @@
 
 .check-section-title {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 14px; /* 13 → 14 px (Design-Audit): Abschnittstitel über Body */
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--a6-ink);

@@ -17,11 +17,21 @@
 // Freeze raus, neues Öffnen rendert den Live-Stand, (7) Sprachwechsel malt
 // die Freeze-Labels neu, (8) Name-Chips nur hinter dem Host-Gate, (9) Destination-Tag-Chips nur bei
 // Registry-Treffer des Ziels (exchangeEntryOf-Host-Gate, fail-closed), Transit-Hinweis nur bei belegter
-// transit-Kante, Freeze-Export trägt toTag/transit additiv.
+// transit-Kante, Freeze-Export trägt toTag/transit additiv, (10) 3D-Layout
+// deterministisch und entstapelt (Startkoordinaten ohne Math.random,
+// Skalierung von Radius/Abstoßung/Link-Distanz/Warmup nach Knotenanzahl
+// N=5..300, Überlappungsfreiheit nach Collide-Warmup, build3D-Verdrahtung
+// mit Fake-ForceGraph3D: warmupTicks nur bei Cluster-Wechsel, Positionen
+// bei Live-Updates desselben Clusters übernommen).
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { initClusterDrilldown } from "./drilldown.js";
+import {
+  initClusterDrilldown,
+  cluster3dLayoutParams,
+  seedCluster3dPositions,
+  makeCluster3dCollideForce,
+} from "./drilldown.js";
 import { LANG_KEY, t } from "./i18n.mjs";
 
 /* ---------------- DOM-Stub ---------------- */
@@ -475,5 +485,248 @@ test("Freeze-Export: Kanten tragen toTag/transit additiv (ohne Tag-Felder bleibe
     appendedOverlay = prevOverlay2;
     if (prevBlob === undefined) delete globalThis.Blob; else globalThis.Blob = prevBlob;
     if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+  }
+});
+
+/* ---------------- 10) 3D-Layout: deterministisch und entstapelt ----------------
+   (Entstapelung 2026-10-06: Fibonacci-Kugel-Startpositionen statt Bibliotheks-
+   Phyllotaxis, Radius/Abstoßung/Link-Distanz skalieren mit cbrt(N), eigene
+   Collide-Kraft, synchroner Warmup-Deckel 120 — siehe cluster3dLayoutParams
+   in public/drilldown.js.) */
+
+function layoutOverlaps(nodes, radiusOf) {
+  let count = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const d = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y, nodes[i].z - nodes[j].z);
+      if (d < radiusOf(nodes[i]) + radiusOf(nodes[j])) count++;
+    }
+  }
+  return count;
+}
+
+test("3D-Layout: gleiche Knotenmenge -> identische Startkoordinaten (kein Math.random)", () => {
+  const mkNodes = () => Array.from({ length: 64 }, (_, i) => ({ id: "rTESTnode" + i, inDrops: 1e9, outDrops: 0 }));
+  const nodesA = mkNodes();
+  const nodesB = mkNodes();
+  const pA = cluster3dLayoutParams(nodesA);
+  const pB = cluster3dLayoutParams(nodesB);
+  // Random-Sperre: der Seed darf Math.random nicht anfassen (Determinismus).
+  const prevRandom = Math.random;
+  try {
+    Math.random = () => { throw new Error("seedCluster3dPositions darf nicht randomisieren"); };
+    seedCluster3dPositions(nodesA, pA.seedRadius);
+    seedCluster3dPositions(nodesB, pB.seedRadius);
+  } finally {
+    Math.random = prevRandom;
+  }
+  assert.deepEqual(
+    nodesA.map((n) => [n.x, n.y, n.z]),
+    nodesB.map((n) => [n.x, n.y, n.z]),
+    "zwei Läufe liefern identische Koordinaten",
+  );
+  // Alle Startpositionen liegen exakt auf der skalierten Fibonacci-Kugel.
+  for (const n of nodesA) {
+    assert.ok(Math.abs(Math.hypot(n.x, n.y, n.z) - pA.seedRadius) < 1e-9, "Knoten auf der Startkugel radius=seedRadius");
+  }
+});
+
+test("3D-Layout: Skalierung nach Knotenanzahl (N=5/64/300) — Radius, Abstoßung, Link-Distanz, Warmup-Deckel", () => {
+  const mk = (N) => Array.from({ length: N }, (_, i) => ({ id: "n" + i, inDrops: 1e9, outDrops: 0 }));
+  const p5 = cluster3dLayoutParams(mk(5));
+  const p64 = cluster3dLayoutParams(mk(64));
+  const p300 = cluster3dLayoutParams(mk(300));
+  // Exakte Formeln (k = cbrt(N)): charge = -60·k² mit Reichweite 6·maxR,
+  // relSize = max(1.2, 4/k), Link-Distanz = 1.4·(Radien-Summe).
+  const k5 = Math.cbrt(5);
+  const k300 = Math.cbrt(300);
+  assert.ok(Math.abs(p5.chargeStrength - (-60 * k5 * k5)) < 1e-9, "N=5: charge -60·cbrt(5)²");
+  assert.ok(Math.abs(p64.chargeStrength - (-960)) < 1e-9, "N=64: charge -960 (Bundle-Default -60 · 4²)");
+  assert.ok(Math.abs(p300.chargeStrength - (-60 * k300 * k300)) < 1e-9, "N=300: charge -60·cbrt(300)²");
+  assert.ok(Math.abs(p64.chargeDistanceMax - 6 * 12.003998667406913) < 1e-6, "N=64: Abstoßungs-Reichweite 6·maxR (bbox-Deckel gegen Ketten-Streckung)");
+  assert.ok(p5.nodeRelSize > 2.3 && p5.nodeRelSize < 2.4, "N=5: nodeRelSize 4/cbrt(5)≈2.34 (kleine Cluster bleiben groß)");
+  assert.equal(p64.nodeRelSize, 1.2, "N=64: nodeRelSize am Deckel 1.2");
+  assert.equal(p300.nodeRelSize, 1.2, "N=300: nodeRelSize am Deckel 1.2");
+  // Monotonie: Abstoßung wird mit N stärker (negativer).
+  assert.ok(p300.chargeStrength < p64.chargeStrength && p64.chargeStrength < p5.chargeStrength, "Abstoßung skaliert mit N");
+  // Link-Distanz radien-basiert: 1.4 · (r(source) + r(target)).
+  const probeLink = { source: { inDrops: 1e9, outDrops: 0 }, target: { inDrops: 1e11, outDrops: 0 } };
+  const expectDist = 1.4 * (p300.radiusOf(probeLink.source) + p300.radiusOf(probeLink.target));
+  assert.ok(Math.abs(p300.linkDistance(probeLink) - expectDist) < 1e-9, "Link-Distanz = 1.4·(Radien-Summe), Hub-Links weiter als Klein-Knoten-Links");
+  assert.ok(p300.linkDistance(probeLink) > p300.linkDistance({ source: probeLink.source, target: probeLink.source }), "Hub-Link weiter als Kleinknoten-Link");
+  // Warmup synchron im Bundle: Untergrenze 30, Deckel 120 Ticks (kein Jank).
+  assert.equal(p5.warmupTicks, 30, "N=5: warmup 30 (Untergrenze)");
+  assert.equal(p64.warmupTicks, 120, "N=64: warmup 120 (2N=128 -> Deckel 120)");
+  assert.equal(p300.warmupTicks, 120, "N=300: warmup 120 (Deckel)");
+  // valOf/radiusOf entsprechen dem nodeVal-Accessor und der Bundle-Radiusformel.
+  assert.equal(p64.valOf({ inDrops: 1e9, outDrops: 0 }), 1001, "val = 1 + drops/1e6");
+  assert.ok(Math.abs(p64.radiusOf({ inDrops: 1e9, outDrops: 0 }) - Math.cbrt(1001) * 1.2) < 1e-9, "Radius = nodeRelSize·cbrt(val) wie im Bundle");
+});
+
+test("3D-Layout: Startpositionen + Collide-Warmup lösen alle Überlappungen (N=5..300, reale Drops)", () => {
+  const cases = [
+    { name: "5 Knoten × 1 XRP", drops: Array(5).fill(1e6) },
+    { name: "64 Knoten × 1000 XRP (Median-Cluster)", drops: Array(64).fill(1e9) },
+    { name: "300 Knoten, Hub 100k XRP", drops: [1e11, ...Array(299).fill(1e9)] },
+    { name: "300 Knoten, Hub 860k XRP (max realer totalDrops 8.6e11)", drops: [8.6e11, ...Array(299).fill(1e9)] },
+  ];
+  for (const c of cases) {
+    const nodes = c.drops.map((d, i) => ({ id: "rTESTc" + i, inDrops: d, outDrops: 0 }));
+    const p = cluster3dLayoutParams(nodes);
+    seedCluster3dPositions(nodes, p.seedRadius);
+    const before = layoutOverlaps(nodes, p.radiusOf);
+    // Warmup wie im Bundle: Collide-Kraft + d3-Integration (velocityDecay 0.4
+    // -> v *= 0.6). vx/vy/vz initialisieren wie d3-force-3d (initializeNodes
+    // setzt 0) — ohne das wäre jede Kraft-Addition NaN.
+    for (const n of nodes) { n.vx = 0; n.vy = 0; n.vz = 0; }
+    const collide = makeCluster3dCollideForce(p.radiusOf);
+    collide.initialize(nodes);
+    for (let t = 0; t < p.warmupTicks; t++) {
+      collide();
+      for (const n of nodes) {
+        n.vx *= 0.6; n.vy *= 0.6; n.vz *= 0.6;
+        n.x += n.vx; n.y += n.vy; n.z += n.vz;
+      }
+    }
+    assert.ok(nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z)), c.name + ": Positionen nach Warmup endlich (kein NaN-Durchgriff)");
+    assert.equal(layoutOverlaps(nodes, p.radiusOf), 0, c.name + ": keine überlappenden Paare nach Warmup (Start: " + before + ")");
+  }
+});
+
+test("3D-Layout: Collide-Kraft — deterministisch, schwere Knoten bewegen sich weniger, deckungsgleiche Punkte trennen sich", () => {
+  const radiusOf = (n) => n.r;
+  const mkPair = () => [
+    { id: "heavy", x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 100 },
+    { id: "light", x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 10 },
+  ];
+  const nodesA = mkPair();
+  const nodesB = mkPair();
+  const fA = makeCluster3dCollideForce(radiusOf);
+  const fB = makeCluster3dCollideForce(radiusOf);
+  fA.initialize(nodesA);
+  fB.initialize(nodesB);
+  fA();
+  fB();
+  assert.deepEqual(nodesA.map((n) => [n.vx, n.vy, n.vz]), nodesB.map((n) => [n.vx, n.vy, n.vz]), "gleiche Eingabe -> gleiche Geschwindigkeiten");
+  const mag = (n) => Math.hypot(n.vx, n.vy, n.vz);
+  assert.ok(mag(nodesA[0]) > 0 && mag(nodesA[1]) > 0, "deckungsgleiche Knoten bekommen Bewegung (feste Richtung, deterministisch)");
+  assert.ok(mag(nodesA[0]) < mag(nodesA[1]), "schwerer Knoten (r=100) bewegt sich weniger als leichter (r=10)");
+  assert.ok(Math.sign(nodesA[0].vx) !== Math.sign(nodesA[1].vx), "Paar bewegt sich gegeneinander");
+  // Nicht überlappende Paare bleiben unberührt.
+  const far = [
+    { id: "a", x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 5 },
+    { id: "b", x: 50, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 5 },
+  ];
+  const fFar = makeCluster3dCollideForce(radiusOf);
+  fFar.initialize(far);
+  fFar();
+  assert.deepEqual(far.map((n) => [n.vx, n.vy, n.vz]), [[0, 0, 0], [0, 0, 0]], "Abstand > Radien-Summe -> keine Kraft");
+});
+
+/* Fake-ForceGraph3D: prüft die build3D-Verdrahtung (Physik-Zugriffe,
+   warmupTicks-Gate, Seed-Positionen im graphData, Freeze bleibt) ohne WebGL. */
+function makeFakeFg3d(record) {
+  let data = { nodes: [], links: [] };
+  const self = {
+    _destructor() { record.destructorCalls += 1; },
+    pauseAnimation() {},
+    resumeAnimation() { record.resumeCalls += 1; },
+    width(w) { record.width = w; return self; },
+    height(h) { record.height = h; return self; },
+    backgroundColor() { return self; },
+    nodeLabel() { return self; },
+    linkLabel() { return self; },
+    linkWidth() { return self; },
+    linkDirectionalArrowLength() { return self; },
+    linkDirectionalParticles() { return self; },
+    linkDirectionalParticleWidth() { return self; },
+    linkColor() { return self; },
+    nodeColor() { return self; },
+    nodeVal(v) { record.nodeVal = v; return self; },
+    nodeRelSize(v) { record.nodeRelSizeCalls.push(v); return self; },
+    onNodeClick() { return self; },
+    zoomToFit() { record.zoomToFitCalls += 1; return self; },
+    cooldownTicks(v) { record.cooldownTicksCalls.push(v); return self; },
+    warmupTicks(v) { record.warmupTicksCalls.push(v); return self; },
+    graphData(...args) {
+      if (args.length) { data = args[0]; record.graphDataSets.push(data); return self; }
+      return data;
+    },
+    d3Force(name, force) {
+      if (arguments.length > 1) { record.d3ForceSet[name] = force; return self; }
+      return {
+        strength(v) { record.chargeStrength = v; return this; },
+        distanceMax(v) { record.chargeDistanceMax = v; return this; },
+        distance(v) { record.linkDistance = v; return this; },
+      };
+    },
+  };
+  return self;
+}
+
+test("build3D-Verdrahtung: Physik-Konfiguration, Warmup nur bei Cluster-Wechsel, Positionen bei Live-Update übernommen, Freeze intakt", async () => {
+  lang = "de";
+  liveGraph = makeGraph("Layout-Cluster", 5);
+  const record = {
+    destructorCalls: 0, resumeCalls: 0, zoomToFitCalls: 0,
+    graphDataSets: [], warmupTicksCalls: [], cooldownTicksCalls: [],
+    nodeRelSizeCalls: [], d3ForceSet: {},
+  };
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  try {
+    // WebGL-Probe bejahen + ForceGraph3D als Fake bereitstellen (sonst noGraph-Pfad).
+    // Muster des echten Bundles: ForceGraph3D() gibt eine AUFRUFBARE Instanz
+    // zurück — build3D ruft window.ForceGraph3D()(graphEl).
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+
+    // Erstrender: N=3 (makeGraph) -> k=cbrt(3); Warmup mit Untergrenze 30.
+    const k3 = Math.cbrt(3);
+    assert.equal(typeof record.d3ForceSet.collide, "function", "eigene Collide-Kraft per d3Force('collide', …) gesetzt");
+    assert.ok(Math.abs(record.chargeStrength - (-60 * k3 * k3)) < 1e-9, "charge-Skalierung gesetzt: " + record.chargeStrength);
+    assert.equal(typeof record.linkDistance, "function", "Link-Distanz als radien-basierte Funktion gesetzt");
+    assert.deepEqual(record.warmupTicksCalls, [30], "warmupTicks(30) bei Cluster-Wechsel/Erstrender");
+    assert.deepEqual(record.nodeRelSizeCalls, [Math.max(1.2, 4 / k3)], "nodeRelSize nach Knotenanzahl gesetzt");
+    // Freeze-Physik (paintCluster cooldownTicks(0)) bleibt erhalten.
+    assert.ok(record.cooldownTicksCalls.includes(0), "Freeze cooldownTicks(0) weiterhin gesetzt");
+    assert.ok(record.resumeCalls >= 1, "resumeAnimation weiterhin aufgerufen");
+    // Alle Knoten des graphData tragen deterministische Startkoordinaten.
+    const firstData = record.graphDataSets[0];
+    assert.equal(firstData.nodes.length, 3, "drei Cluster-Knoten im graphData");
+    const pFirst = cluster3dLayoutParams(firstData.nodes);
+    assert.ok(Math.abs(record.chargeDistanceMax - pFirst.chargeDistanceMax) < 1e-9, "Abstoßungs-Reichweite 6·maxR gesetzt (bbox-Deckel)");
+    for (const n of firstData.nodes) {
+      assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z), "Startkoordinaten gesetzt");
+      assert.ok(Math.abs(Math.hypot(n.x, n.y, n.z) - cluster3dLayoutParams(firstData.nodes).seedRadius) < 1e-9, "Knoten auf der Startkugel");
+    }
+
+    // Sprachwechsel -> paintCluster mit demselben clusterId (sameCluster-Pfad):
+    // warmupTicks(0) und die eingesessenen Koordinaten werden übernommen.
+    lang = "en";
+    const langHandler = docListeners["hx:langchange"][docListeners["hx:langchange"].length - 1];
+    langHandler();
+    await settle();
+    assert.deepEqual(record.warmupTicksCalls, [30, 0], "Live-Update desselben Clusters: warmupTicks(0) (kein Jank je Poll)");
+    const secondData = record.graphDataSets[1];
+    assert.ok(secondData, "graphData erneut gesetzt (Alterungs-/Sprachpfad löst den Graphen)");
+    const prevById = new Map(firstData.nodes.map((n) => [n.id, n]));
+    for (const n of secondData.nodes) {
+      const p = prevById.get(n.id);
+      assert.ok(p, "Knoten weiterhin im Graphen");
+      assert.equal(n.x, p.x, "x-Koordinate übernommen");
+      assert.equal(n.y, p.y, "y-Koordinate übernommen");
+      assert.equal(n.z, p.z, "z-Koordinate übernommen");
+    }
+    // nodeRelSize bleibt pro build3D korrekt gesetzt (N unverändert -> gleicher Wert).
+    assert.deepEqual(record.nodeRelSizeCalls, [Math.max(1.2, 4 / k3), Math.max(1.2, 4 / k3)], "nodeRelSize pro build3D gesetzt");
+    lang = "de";
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
   }
 });

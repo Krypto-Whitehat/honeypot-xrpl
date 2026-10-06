@@ -27,11 +27,14 @@
  *
  * GRUNDSATZ: c.id ('cluster:<Adresse>') wird NIE im DOM gerendert — er ist
  * ausschließlich interner Lookup-Schlüssel. Adressen laufen ausschließlich
- * durch die vom Host (app.js) gelieferten Funktionen displayAddr /
+ * durch die vom Host (app.js) gelieferten Funktionen displayAddr (im Host
+ * gebunden an displayFindingAddr — die eigentliche Köder-Maske) /
  * isFullShownAddr: volle Anzeige nur bei geladener Bait-Hash-Allowlist und
  * Nicht-Treffer auf der Deny-Liste; sonst Kurzform ohne Kopier-Button und
  * ohne XRPScan-Link. Köder-Adressen und Seeds tauchen in keinem
- * Modal-Artefakt auf.
+ * Modal-Artefakt auf. Host-ctx ohne displayAddr-Funktion wird von
+ * initClusterDrilldown fail-closed verworfen (Guard unten) — ohne
+ * displayFindingAddr-Maske rendert das Modul keinerlei Adresse.
  */
 
 import { t, fmtNum, fmtClock, sevText, getLang } from './i18n.mjs';
@@ -44,8 +47,119 @@ import { t, fmtNum, fmtClock, sevText, getLang } from './i18n.mjs';
 const FORCE_GRAPH_URL = 'vendor/3d-force-graph.min.js';
 const FORCE_GRAPH_INTEGRITY = 'sha384-Y7bC2PBKu8ujxtvo5+Z61OeGdSVRzFsYWBK4i5dnL/U6aFDTodk61qOUkTfInaxS';
 
+/* ---------------- 3D-Layout-Helfer (Entstapelung 2026-10-06) ----------------
+ * Deterministisches Startlayout + Skalierung für build3D: Fibonacci-Kugel-
+ * Startpositionen (kein Math.random — identische Cluster geben identische
+ * Koordinaten), Radius-/Abstoßungs-/Link-Distanz-Skalierung nach Knotenanzahl
+ * N, plus eine eigene Collide-Kraft: das vendorte Bundle (3d-force-graph@
+ * 1.80.0) enthält keine forceCollide (grep 'collide' im Bundle: 0 Treffer),
+ * d3-force-3d akzeptiert aber beliebige Kräfte mit initialize(nodes) über
+ * fg3d.d3Force('collide', force) (Bundle: force:function(e,t){…u.set(e,g(t))},
+ * Tick: u.forEach(function(e){e(alpha)})).
+ * Die drei Helfer sind bewusst Modul-Level und exportiert: public/
+ * drilldown-freeze.test.mjs prüft Determinismus, Skalierung (N=5..300) und
+ * Überlappungsfreiheit der Startpositionen ohne Browser. */
+export function cluster3dLayoutParams(nodes) {
+  const N = Math.max(1, nodes.length);
+  const k = Math.cbrt(N);
+  // Radius-Formel des Bundles: r = nodeRelSize * cbrt(val); nodeRelSize
+  // schrumpft mit cbrt(N) (Deckel 1.2), damit 300 Knoten auf der 520-px-
+  // Bühne getrennt bleiben und 5 Knoten nicht unter ~3 px fallen.
+  const nodeRelSize = Math.max(1.2, 4 / k);
+  // val-Zugriff identisch zum nodeVal-Accessor in build3D.
+  const valOf = (n) => Math.max(0, 1 + ((n.inDrops ?? 0) + (n.outDrops ?? 0)) / 1e6) || 1;
+  const radiusOf = (n) => Math.cbrt(valOf(n)) * nodeRelSize;
+  let maxR = 0;
+  for (const n of nodes) maxR = Math.max(maxR, radiusOf(n));
+  // Startkugel so groß, dass die Sehnenlänge die größten Radien-Summen
+  // (nahezu) trägt; der Warmup (Collide) restlos macht es ohnehin.
+  const seedRadius = Math.max(12 * k * k, 0.6 * maxR * Math.sqrt(N));
+  // Synchroner Warmup im Bundle (for(B=0;B<warmupTicks;B++)layout.tick() vor
+  // Engine-Start) — Deckel 120 Ticks gegen Main-Thread-Jank.
+  const warmupTicks = Math.min(120, Math.max(30, 2 * N));
+  return {
+    N, k, nodeRelSize, valOf, radiusOf, seedRadius, warmupTicks,
+    chargeStrength: -60 * k * k,  // Bundle-Default -60 (numDimensions 3) * k²
+    chargeDistanceMax: 6 * maxR,  // manyBody-Reichweite: ohne Deckel bläht die
+                                  // Global-Abstoßung (unbegrenzte Reichweite)
+                                  // Ketten-Layouts auf (Probe 2026-10-06:
+                                  // bbox/maxR 132-347, Bubbles ~3 px); mit
+                                  // 6·maxR bleibt das Layout kompakt UND
+                                  // getrennt (bbox/maxR 10-70, 0 Überlappungen
+                                  // bei N=5..300)
+    // Link-Distanz radien-basiert statt 30·k: verbundene Knoten halten knapp
+    // über ihrer Radien-Summe — kompakt bei großen Hubs, weit genug bei
+    // kleinen Knoten (Collide-Kraft garantiert die Radien-Summen zusätzlich).
+    linkDistance: (l) => 1.4 * (radiusOf(l.source) + radiusOf(l.target)),
+  };
+}
+
+// Fibonacci-Kugel (Golden Angle, Muster der Bundle-eigenen Phyllotaxis-
+// Initialisierung, dort aber mit Radius 10*cbrt(0.5+n) — viel zu klein für
+// reale Knotenradien). Rein deterministisch: kein Math.random.
+export function seedCluster3dPositions(nodes, radius) {
+  const n = nodes.length;
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  nodes.forEach((node, i) => {
+    const z = n < 2 ? 0 : 1 - (i / (n - 1)) * 2;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    const theta = golden * i;
+    node.x = Math.cos(theta) * r * radius;
+    node.y = Math.sin(theta) * r * radius;
+    node.z = z * radius;
+  });
+  return nodes;
+}
+
+// Kollisionstreiter (d3-force-3d-kompatibel): schiebt überlappende Paare
+// geschwindigkeitsbasiert auseinander; schwere Knoten bewegen sich weniger
+// (Gewichtung rb²/(ra²+rb²), Muster der d3-Collide). Deckungsgleiche Punkte
+// bekommen eine feste Richtung — bleibt deterministisch.
+export function makeCluster3dCollideForce(radiusOf, strength = 0.8) {
+  let nodes = [];
+  const force = () => {
+    const n = nodes.length;
+    for (let i = 0; i < n; i++) {
+      const a = nodes[i];
+      const ra = radiusOf(a);
+      for (let j = i + 1; j < n; j++) {
+        const b = nodes[j];
+        const rb = radiusOf(b);
+        const need = ra + rb;
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        let dz = a.z - b.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= need * need) continue;
+        let d = Math.sqrt(d2);
+        if (d < 1e-6) { dx = 1; dy = 0; dz = 0; d = 1; }
+        const push = ((need - d) / d) * strength * 0.5;
+        const wa = (rb * rb) / (ra * ra + rb * rb);
+        const wb = 1 - wa;
+        a.vx += dx * push * wa; a.vy += dy * push * wa; a.vz += dz * push * wa;
+        b.vx -= dx * push * wb; b.vy -= dy * push * wb; b.vz -= dz * push * wb;
+      }
+    }
+  };
+  force.initialize = (n) => { nodes = n; };
+  return force;
+}
+
 export function initClusterDrilldown(ctx) {
   const esc = ctx.esc;
+  // Fail-closed-Anzeige-Maske (TRUNC-Invariante 2026-10-06): Der Host (app.js)
+  // injiziert mit ctx.displayAddr seine displayFindingAddr — volle Adresse nur
+  // bei geladener Allowlist und ohne Deny-Treffer, sonst Kurzform. Fehlt die
+  // Funktion, initialisiert das Drilldown bewusst nicht: der Import-catch in
+  // app.js lässt Karten-Klicks dann still wirkungslos, statt irgendeine
+  // Adresse unmaskiert zu rendern. Der Guard härtet zugleich den
+  // shortAddrFn-Fallback unten ab (Fallback displayAddr ist seither
+  // garantiert eine Funktion).
+  if (typeof ctx.displayAddr !== 'function') {
+    throw new Error(
+      'initClusterDrilldown: ctx.displayAddr fehlt — ohne die displayFindingAddr-Maske des Hosts (app.js) wird das Drilldown fail-closed nicht initialisiert'
+    );
+  }
   const displayAddr = ctx.displayAddr;
   const isFullShownAddr = ctx.isFullShownAddr;
   const isDeniedAddr = ctx.isDeniedAddr;
@@ -189,7 +303,11 @@ export function initClusterDrilldown(ctx) {
   let lastRenderDigest = null;  // Änderungs-Gate: unveränderte Inhalte → kein Vollrender
   let graphClusterId = null;    // Cluster-id des 3D-Graphen — zoomToFit nur bei
                                 // Cluster-Wechsel/Erstrender (Kamera bleibt
-                                // bei reinen Inhalts-Updates erhalten)
+                                // bei reinen Inhalts-Updates erhalten); dasselbe
+                                // Gate steuert den 3D-Warmup (Entstapelung
+                                // 2026-10-06): Live-Updates desselben Clusters
+                                // warmen nicht erneut (kein synchroner Main-
+                                // Thread-Jank je Poll)
   let originMembers = null;     // Fallback-ANKER (Befund 2026-09-30): Mitglieder
                                 // des originär geöffneten Clusters, eingefroren
                                 // bei der ersten erfolgreichen Renderung nach
@@ -265,8 +383,7 @@ export function initClusterDrilldown(ctx) {
           <div class="cluster-modal-metrics"></div>
           <button type="button" class="cluster-modal-close" aria-label="${esc(t('modal.closeAria'))}">&times;</button>
         </header>
-        <p class="graph-note cluster-modal-stale" role="status" hidden
-           style="margin:0;padding:10px 18px;border-bottom:1px solid var(--a6-line);background:var(--a6-surface-alt);"></p>
+        <p class="graph-note cluster-modal-stale" role="status" hidden></p>
         <div class="cluster-modal-body">
           <section class="cluster-modal-graph" aria-label="${esc(t('modal.graphAria'))}">
             <div class="cluster-3d"></div>
@@ -1250,6 +1367,29 @@ export function initClusterDrilldown(ctx) {
     // (und mit ihm der sichtbare Layout-Neustart) feuern ausschließlich bei
     // Cluster-Wechsel oder Erstrender.
     const sameCluster = Boolean(fg3d) && graphClusterId === clusterId;
+    // Entstapelung (2026-10-06): deterministisches Startlayout statt der
+    // Bibliotheks-Phyllotaxis (Startabstand ~4–10 Einheiten bei Knotenradien
+    // 40–180 aus realen Drops → der Freeze auf den Startpositionen stapelt
+    // Tausende Paare übereinander). Positionen: Fibonacci-Kugel, skaliert
+    // nach Knotenanzahl und größtem Radius. Bei Live-Updates desselben
+    // Clusters werden die eingesessenen Koordinaten übernommen (kein
+    // sichtbarer Layout-Neustart, kein Warmup-Jank).
+    const layout = cluster3dLayoutParams(data.nodes);
+    if (sameCluster) {
+      try {
+        const prevPos = new Map();
+        for (const pn of fg3d.graphData().nodes) {
+          if (Number.isFinite(pn.x) && Number.isFinite(pn.y) && Number.isFinite(pn.z)) {
+            prevPos.set(String(pn.id), { x: pn.x, y: pn.y, z: pn.z });
+          }
+        }
+        for (const n of data.nodes) {
+          const p = prevPos.get(n.id);
+          if (p) { n.x = p.x; n.y = p.y; n.z = p.z; }
+        }
+      } catch { /* fg3d.graphData() nicht lesbar -> alle neu geseedet */ }
+    }
+    seedCluster3dPositions(data.nodes.filter((n) => !Number.isFinite(n.x)), layout.seedRadius);
     if (!fg3d) {
       graphEl.innerHTML = '';
       fg3d = window.ForceGraph3D()(graphEl);
@@ -1296,12 +1436,33 @@ export function initClusterDrilldown(ctx) {
         .linkDirectionalArrowLength(3)
         .onNodeClick((node) => on3dNodeClick(node));
     }
+    // Physik-Konfiguration VOR graphData (Entstapelung 2026-10-06): das
+    // Bundle kennt keine Collide-Kraft (grep 0 Treffer) und lädt nur charge
+    // -60 mit Link-Distanz 30 — beides unter den Knotenradien realer Drops.
+    // Abstoßung skaliert mit cbrt(N)², ihre Reichweite ist auf 6·maxRadius
+    // gedeckelt (ohne Deckel streckt die Global-Abstoßung Ketten-Cluster auf
+    // ein Vielfaches der Knotengröße — Bubbles schrumpfen auf ~3 px, Probe/
+    // Browser-Check 2026-10-06); die Link-Distanz ist radien-basiert; die
+    // eigene Collide-Kraft hält die Radien-Summen ein. Der Warmup läuft im
+    // Bundle synchron im graphData-Setter (for(B=0;B<warmupTicks;B++)
+    // layout.tick() vor Engine-Start) — das cooldownTicks(0)-Freeze in
+    // paintCluster friert damit ein bereits auseinandergezogenes Layout ein,
+    // nie den Stapel. Warmup nur bei Cluster-Wechsel (Deckel 120 Ticks):
+    // Live-Updates desselben Clusters übernehmen die eingesessenen
+    // Positionen stattdessen.
+    try {
+      fg3d.d3Force('charge').strength(layout.chargeStrength).distanceMax(layout.chargeDistanceMax);
+      fg3d.d3Force('link').distance(layout.linkDistance);
+      fg3d.d3Force('collide', makeCluster3dCollideForce(layout.radiusOf));
+      fg3d.warmupTicks(sameCluster ? 0 : layout.warmupTicks);
+    } catch { /* Physik-Zugriff nicht verfügbar -> Graph bleibt mit Startlayout lesbar */ }
     // graphData bei JEDER inhaltlichen Änderung des angezeigten Clusters —
     // Mitglieder/Kanten/Metriken werden nie blockiert. Ein vorheriger
     // Alterungs-Pause (Cluster war kurzzeitig verschwunden) wird gelöst.
     fg3d
       .graphData(data)
       .nodeColor(nodeColorAccessor())
+      .nodeRelSize(layout.nodeRelSize) // Radius skaliert mit Knotenanzahl (5..300 lesbar)
       .nodeVal((n) => 1 + ((n.inDrops ?? 0) + (n.outDrops ?? 0)) / 1e6)
       .linkColor((l) => edgeColors[String(l.type)] || edgeDefault)
       .linkDirectionalParticles((l) => (String(l.type) === 'Payment' && !reducedMotion() ? 2 : 0))

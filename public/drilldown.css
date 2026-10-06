@@ -40,6 +40,21 @@ body.cluster-modal-open {
   border-radius: var(--a6-r-lg);
   box-shadow: var(--a6-e2);
   overflow: hidden;
+  /* Entry-Übergang (Design-Audit, Progressive Enhancement): das Modal wird per
+     hidden-Attribut getoggelt — @starting-style gibt dem Eintritt eine kurze
+     Fahrt, ohne dass JS Klassen setzen muss. Ohne Support (Chrome <117 o. ä.)
+     erscheint das Modal wie zuvor sofort; die globale reduced-motion-*-Regel
+     in style.css schneidet den Übergang ab. Nur opacity/transform, 240 ms. */
+  opacity: 1;
+  transform: none;
+  transition: opacity 240ms var(--a6-ease), transform 240ms var(--a6-ease);
+}
+
+@starting-style {
+  .cluster-modal-surface {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 /* ---------------- Kopf ---------------- */
@@ -70,6 +85,23 @@ body.cluster-modal-open {
   align-items: baseline;
   gap: 14px;
   margin-left: auto;
+}
+
+/* .cluster-times in der Metrik-Zeile (Design-Audit): die Basisregel
+   (style.css) zieht margin-top:10px — im Kopf würde der Zeitblock 10 px unter
+   der Metrik-Baseline hängen; hier in der Flex-Zeile gehört er auf die
+   gemeinsame Baseline. */
+.cluster-modal-metrics .cluster-times {
+  margin-top: 0;
+}
+
+/* Alterungshinweis (Freeze): Werte aus dem bisherigen Inline-Style im Markup
+   (drilldown.js) — Markup-Klasse unverändert, Stil jetzt hier. */
+.cluster-modal-stale {
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--a6-line);
+  background: var(--a6-surface-alt);
 }
 
 /* Close-Button: mindestens 44×44 px, Stil konsistent zu .download-btn */
@@ -112,13 +144,17 @@ body.cluster-modal-open {
   min-inline-size: 0;
 }
 
-/* 3D-Bühne: weiß wie --a6-graph-canvas, Höhe wie #graph (520 px) */
+/* 3D-Bühne: weiß wie --a6-graph-canvas; Höhe über die gemeinsame Leiter
+   --a6-stage-height (style.css-Token-Block: 720/640/560/480 px) — zuvor fix
+   520 px und damit ohne Anschluss an #graph/#globe. Rand in --a6-line-strong
+   als Bühnen-Anschluss; die Canvas-Füllfarbe selbst setzt drilldown.js
+   (bewusst nicht angetastet — JS-Farblogik ist Schutzzone). */
 .cluster-3d {
   position: relative;
   width: 100%;
-  height: 520px;
+  height: var(--a6-stage-height, 520px);
   background: var(--a6-graph-canvas);
-  border: 1px solid var(--a6-line);
+  border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
   overflow: hidden;
 }
@@ -158,7 +194,7 @@ body.cluster-modal-open {
 
 .cluster-modal-h {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 14px; /* 13 → 14 px (Design-Audit): Abschnittstitel über Body */
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--a6-ink);
@@ -253,6 +289,14 @@ body.cluster-modal-open {
   padding-inline: 2px; /* letzte Spalte klebt nicht am Scroll-Rand */
 }
 
+/* Fokuslücke (Design-Audit): der Wrapper ist scrollbare Region
+   (tabindex="0" role="region", drilldown.js) — derselbe Ring wie für
+   Steuerlemente (style.css :where-Regel erfasst ihn nicht). */
+.cluster-table-wrap:focus-visible {
+  outline: 3px solid var(--a6-focus);
+  outline-offset: 3px;
+}
+
 .cluster-table {
   width: max-content;
   min-width: 100%;
@@ -279,12 +323,24 @@ body.cluster-modal-open {
 
 .cluster-table tbody tr:last-child td { border-bottom: none; }
 
+/* Zeilenverfolgung in der 12-px-Mono-Tabelle (Design-Audit): dezente
+   Surface-alt-Fläche nur auf geeigneten Zeigegeräten, ohne Layoutverschiebung. */
+@media (hover: hover) and (pointer: fine) {
+  .cluster-table tbody tr:hover { background: var(--a6-surface-alt); }
+}
+
 .cluster-table th {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--a6-muted);
   background: var(--a6-surface-alt);
+  /* Sticky-Kopf (Design-Audit, defensiv): bleibt beim vertikalen Scrollen im
+     .cluster-table-wrap oben liegen — die opake surface-alt-Fläche deckt
+     Zeilen ab; solange der Wrapper nicht höhenbeschränkt scrollt, ist die
+     Regel folgenlos. */
+  position: sticky;
+  top: 0;
 }
 
 .cluster-td-addr {
@@ -339,7 +395,7 @@ body.cluster-modal-open {
    vorher 28 px hoch bzw. 28x28 px. */
 .addr-copy {
   min-height: 44px;
-  padding: 3px 14px;
+  padding: 4px 12px; /* 4-px-Raster (Design-Audit, war 3px 14px) */
   background: var(--a6-surface);
   border: 1px solid var(--a6-control-line);
   border-radius: var(--a6-r-pill);
@@ -396,20 +452,21 @@ body.cluster-modal-open {
 .cluster-td-tag .tag-chip { margin-left: 0; }
 .cluster-td-tag .tag-chip + .tag-chip { margin-left: 6px; }
 
-/* ---------------- Responsiv ---------------- */
+/* ---------------- Responsiv ----------------
+   Die 3D-Bühnenhöhe folgt der gemeinsamen Leiter --a6-stage-height
+   (style.css setzt den Token je Breakpoint neu: 640/560/480 px) — eigene
+   Höhenstufen hier entfallen (zuvor fix 400/320 px ohne Anschluss). */
 
 @media (max-width: 900px) {
   .cluster-modal-body {
     grid-template-columns: 1fr;
   }
-  .cluster-3d { height: 400px; }
 }
 
 @media (max-width: 560px) {
   .cluster-modal { padding: 8px; }
   .cluster-modal-head { padding: 12px 14px; }
   .cluster-modal-body { padding: 12px 14px 14px; }
-  .cluster-3d { height: 320px; }
   .cluster-modal-metrics { margin-left: 0; }
 }
 

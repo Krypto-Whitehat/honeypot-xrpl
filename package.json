@@ -11,7 +11,7 @@
     "monitor": "node monitor/monitor.mjs",
     "provision": "node monitor/provision-bait.mjs",
     "simulate": "node monitor/simulate-attack.mjs",
-    "test": "node --test lib/stride.test.mjs lib/i18n.test.mjs lib/detector.test.mjs lib/ledger-walk.test.mjs lib/flow-state.test.mjs lib/history.test.mjs lib/cluster.test.mjs lib/attribution.test.mjs lib/advance-batch.test.mjs lib/flow-state-validated.test.mjs lib/sanitize.test.mjs lib/rate-gate.test.mjs lib/block-window.test.mjs lib/block-window-endpoint.test.mjs lib/account-report.test.mjs lib/threats-service.test.mjs monitor/monitor.test.mjs lib/name-resolve.test.mjs public/name-index.test.mjs public/exchange-registry.test.mjs lib/tag-identity.test.mjs public/drilldown-freeze.test.mjs"
+    "test": "node --test lib/stride.test.mjs lib/i18n.test.mjs lib/detector.test.mjs lib/ledger-walk.test.mjs lib/flow-state.test.mjs lib/history.test.mjs lib/cluster.test.mjs lib/attribution.test.mjs lib/advance-batch.test.mjs lib/flow-state-validated.test.mjs lib/sanitize.test.mjs lib/rate-gate.test.mjs lib/block-window.test.mjs lib/block-window-endpoint.test.mjs lib/account-report.test.mjs lib/threats-service.test.mjs monitor/monitor.test.mjs lib/name-resolve.test.mjs public/name-index.test.mjs public/exchange-registry.test.mjs lib/tag-identity.test.mjs public/drilldown-freeze.test.mjs public/cluster-chips.test.mjs public/design-assets.test.mjs"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.100",

@@ -21,14 +21,17 @@
   --a6-globe-atmosphere: rgba(29, 78, 216, 0.08);
 }
 
-/* Bühne: Erscheinungsbild identisch zu #graph (style.css:498-506) — weißer
+/* Bühne: Erscheinungsbild identisch zu #graph — weißer
    Radial-Punkt-Hintergrund, 1px Linie, Radius. overflow hidden schneidet
    Canvas und Hinweis-Overlay auf die Bühne; position relative nimmt die
-   absolute positionierten Overlays auf. Höhe 520 px wie #graph. */
+   absolute positionierten Overlays auf. Höhe über die gemeinsame Leiter
+   --a6-stage-height (style.css-Token-Block, 720/640/560/480 px) — zuvor fix
+   520 px mit eigenen Stufen 400/320, sodass der Tab-Wechsel Live→Globe die
+   Bühne um 200 px springen ließ (Design-Audit 2026-10-06). */
 #globe {
   position: relative;
   width: 100%;
-  height: 520px;
+  height: var(--a6-stage-height, 520px);
   overflow: hidden;
   background:
     radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
@@ -176,19 +179,11 @@
   color: var(--a6-muted);
 }
 
-/* Responsiv: Höhenstufen exakt wie #graph — 400 px ab 900 px
-   (style.css:796/799), 320 px ab 560 px (style.css:823/827). */
-@media (max-width: 900px) {
-  #globe {
-    height: 400px;
-  }
-}
-
+/* Responsiv: Die Bühnenhöhe folgt der gemeinsamen Leiter --a6-stage-height —
+   style.css setzt den Token je Breakpoint neu (640/560/480 px), eigene
+   Höhenstufen sind hier entfallen (zuvor fix 400/320 px, was der Kommentar
+   fälschlich als '#graph-exakt' ausgab; Design-Audit 2026-10-06). */
 @media (max-width: 560px) {
-  #globe {
-    height: 320px;
-  }
-
   #globe .globe-note {
     inset-inline: 10px;
     bottom: 10px;

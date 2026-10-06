@@ -71,6 +71,16 @@
 import {
   t, fmtNum, fmtXrp, fmtDateTime, applyLang, applyStatic, initLangSwitcher,
 } from './i18n.mjs';
+/* Adress-Chip-Zeile (Börsen-Name + Destination-Tag), Coverage-Fix 2026-10-06:
+ * derselbe DOM-freie Shared-Helfer wie im Live-Host (public/cluster-chips.mjs,
+ * Muster public/drilldown.js renderTable). Namens-Bulk und Exchange-Registry
+ * werden lazy in load() angestoßen (Import-Vertrag beider Module ist DOM-frei,
+ * Muster exchange-registry.mjs:5-10; TTL-Guards in den Modulen — der 60-s-Poll
+ * löst keine Zusatz-Fetches aus). Fail-closed: ohne erfolgreichen Stand einer
+ * Quelle gibt es keine Chips. */
+import { ensureNameIndex, lookupNameCached } from './name-index.mjs';
+import { ensureExchangeRegistry, multiUserEntryOf } from './exchange-registry.mjs';
+import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
 
 // Rollen-Map bleibt als Fallback erhalten (Markup-Muster app.js); die
 // sichtbare Beschriftung läuft über die legend.*-Keys (EN/DE).
@@ -84,9 +94,55 @@ function esc(value) {
   })[c]);
 }
 
+/* Name-Chip (Börsen-Spalte analog Drilldown): NUR bei verifiziertem
+ * XRPScan-Namen (verified === true, Muster exchange-registry.mjs:128-147) —
+ * unverifizierte Namen zeigen nie einen Chip (fail-closed). Rein ergänzend;
+ * die Adresse bleibt der Anzeigewert, ein Name hängt nie an der Kurzform
+ * (shortAddr bleibt unverändert). */
+function nameChipHtml(addr) {
+  let entry = null;
+  try {
+    entry = lookupNameCached(String(addr ?? ''));
+  } catch {
+    entry = null; // fail-closed: Index-Fehler bleibt ohne Chip
+  }
+  if (!entry || entry.verified !== true) return '';
+  const label = String(entry.name ?? '').trim();
+  if (!label) return '';
+  const aria = t('name.chipAria');
+  const mark = '<span class="name-chip-verified" aria-hidden="true">✓</span>';
+  const domain = typeof entry.domain === 'string' && entry.domain.trim()
+    ? `<span class="name-chip-domain">${esc(entry.domain.trim())}</span>`
+    : '';
+  return `<span class="name-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">${mark}${esc(label)}${domain}</span>`;
+}
+
+/* Tag-Chip: ganzzahliger Tag aus belegtem edge.toTag (die Server-View liefert
+ * toTag nur bei Registry-/verified-Treffer des Ziels — lib/flow-state.mjs
+ * viewEdge; dasselbe Gate gilt clientseitig zusätzlich als Defense-in-Depth
+ * über multiUserEntryOf, Muster app.js tagChipHtml). Tag 0 ist ein echter
+ * Tag (lib/tag-identity.mjs) und zeigt '#0'. */
+function tagChipHtml(addr, tag) {
+  if (tag == null || typeof tag !== 'number' || !Number.isInteger(tag)) return '';
+  let entry = null;
+  try {
+    entry = multiUserEntryOf(String(addr ?? ''));
+  } catch {
+    entry = null; // fail-closed: Lookup-Fehler bleibt ohne Chip
+  }
+  if (!entry) return '';
+  const aria = t('tag.chipAria');
+  return `<span class="tag-chip" role="img" aria-label="${esc(aria)}" title="${esc(aria)}">#${esc(String(tag))}</span>`;
+}
+
 // Cluster-Karte: Markup-Muster app.js clusterCardHtml (ohne Schweregrad/
 // Flusskette — nicht aus dem akkumulierten State ableitbar). Die Rollen-
 // Zählung kommt bereits normalisiert aus der Projektion (Rolle -> Anzahl).
+// Adress-Chip-Zeile (Coverage-Fix 2026-10-06): Mitglieder MIT Name- ODER
+// Tag-Chip, Tags aus distinct toTag der Cluster-Kanten. rolesByAddress kann
+// zehntausende Einträge tragen — daher harter Cap von 5 Adressen und
+// deterministisches Auswahlkriterium (Tags desc, dann Adresse asc; sort
+// 'tags' in public/cluster-chips.mjs).
 function clusterCardHtml(c, index) {
   const counts = c.roles && typeof c.roles === 'object' ? c.roles : {};
   let dominant = 'unknown';
@@ -97,11 +153,25 @@ function clusterCardHtml(c, index) {
     .filter((r) => counts[r])
     .map((r) => `<span class="role-chip role-${r}"><span class="swatch swatch-${r}"></span>${Number(counts[r])} × ${esc(roleLabel(r))}</span>`)
     .join('');
+  const rolesByAddress = c.rolesByAddress && typeof c.rolesByAddress === 'object' ? c.rolesByAddress : {};
+  const members = Object.keys(rolesByAddress);
+  const memberSet = new Set(members);
+  const tagsByAddr = collectTagsByAddr(Array.isArray(c.edges) ? c.edges : [], memberSet);
+  const namesHtml = addrChipsRowHtml({
+    members,
+    tagsByAddr,
+    nameChipHtml,
+    tagChipHtml,
+    cap: 5,
+    tagCap: 3,
+    sort: 'tags',
+  });
   return `
     <li class="cluster-card role-${dominant}" data-cluster-index="${Number(index) || 0}">
       <div class="cluster-head">
         <span class="cluster-label">${esc(c.label ?? t('cluster.labelDefault'))}</span>
       </div>
+      ${namesHtml}
       <div class="cluster-roles">${chips}</div>
       <div class="cluster-metrics">
         <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
@@ -359,6 +429,12 @@ let lastData = null; // letzte geladene Projektion — für Re-Render bei Sprach
 
 async function load() {
   els.refresh.disabled = true;
+  // Lazy-Namensindex + Exchange-Registry für die Adress-Chip-Zeile (genau
+  // ein Fetch pro Quelle innerhalb des Modul-TTL — In-Flight-Guard/TTL in
+  // name-index.mjs und exchange-registry.mjs; der 60-s-Poll löst daher
+  // keine Zusatz-Fetches aus). Fail-closed: jeder Fehler bleibt ohne Chip.
+  ensureNameIndex().catch(() => { /* ohne Namen rendern */ });
+  ensureExchangeRegistry().catch(() => { /* ohne Tags rendern */ });
   try {
     const res = await fetch('/api/flow-state', { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));

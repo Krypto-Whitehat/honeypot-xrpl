@@ -93,6 +93,12 @@ import {
   fmtNum, fmtXrp, fmtClock, fmtDateTime,
   applyStatic, applyLang, initLangSwitcher,
 } from './i18n.mjs';
+/* Adress-Chip-Zeile der Cluster-Karten (Börsen-Name + Destination-Tag):
+ * DOM-freier Shared-Helfer mit public/history-host.html (Muster
+ * public/drilldown.js renderTable). Das Modul wählt/sortiert/kappt nur —
+ * die Chip-Funktionen (nameChipHtml/tagChipHtml) werden injiziert und
+ * tragen die Host-Gates (isFullShownAddr, multiUserEntryOf). */
+import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
 
 /* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
  * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
@@ -1250,10 +1256,22 @@ function clusterCardHtml(c, index) {
       dropsByAddr.set(String(n.id), (Number(n.inDrops) || 0) + (Number(n.outDrops) || 0));
     }
   }
+  // Schweregrad-Berechnung (Fix 2026-10-06): Knoten-Cache (WSS-Pfad) ODER
+  // die eigene severityByAddress des Clusters. Persistierte Cluster aus dem
+  // Flow-State-Merge (mergeClusterViews) haben Mitglieder, die NICHT im
+  // Live-Knoten-Cache stehen — ohne diesen Zweig erschiene ein malicious
+  // persistierter Cluster badge-los.
+  const ownSev = c.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : null;
   let sev = 'info';
-  for (const a of c.memberAddresses ?? []) {
-    const s = sevByAddr.get(String(a)) ?? 'info';
+  const considerSev = (s) => {
     if ((SEV_RANK[s] ?? 0) > (SEV_RANK[sev] ?? 0)) sev = s;
+  };
+  for (const a of c.memberAddresses ?? []) {
+    considerSev(sevByAddr.get(String(a)) ?? 'info');
+    if (ownSev) considerSev(ownSev[String(a)] ?? 'info');
+  }
+  if (ownSev) {
+    for (const s of Object.values(ownSev)) considerSev(s);
   }
 
   const roleCounts = new Map();
@@ -1275,6 +1293,20 @@ function clusterCardHtml(c, index) {
     ? `<span class="risk-badge risk-${esc(sev)}">${esc(sevText(sev))}</span>`
     : '';
 
+  // Tags je Adresse (Coverage-Fix 2026-10-06, Adress-Chip-Zeile): distinct
+  // toTags der Cluster-Kanten — die Server-View trägt c.edges (ihr toTag ist
+  // serverseitig bereits Registry-/verified-gegatet, lib/flow-state.mjs
+  // viewEdge), der WSS-Pfad führt Kanten nur global im Graphen und wird gegen
+  // die Mitglieder gefiltert (dieselbe Filterung wie die Flusskette unten).
+  // Tags sind ausschließlich aufgezeichnete Kanten-Attribute
+  // (lib/cluster.mjs:344-345) — nie erfunden, nie an maskierten Adressen
+  // (die Chip-Funktionen gatet der Host).
+  const memberSet = new Set((c.memberAddresses ?? []).map(String));
+  const clusterEdges = Array.isArray(c.edges) && c.edges.length
+    ? c.edges
+    : (lastClusterGraph && Array.isArray(lastClusterGraph.edges) ? lastClusterGraph.edges : []);
+  const tagsByAddr = collectTagsByAddr(clusterEdges, memberSet);
+
   // Flusskette: echte Start-bis-Ende-Pfade aus den Cluster-Kanten (flowPaths,
   // lib/cluster.mjs) — '→' verbindet nur Adressen entlang belegter
   // Transaktionen, nie rollenweise aneinandergereihte Chips ohne Kantenbezug
@@ -1282,7 +1314,6 @@ function clusterCardHtml(c, index) {
   let chainInner = '';
   let clusterTransit = false;
   if (flowPathsFn && lastClusterGraph) {
-    const memberSet = new Set((c.memberAddresses ?? []).map(String));
     const memberNodes = (Array.isArray(lastClusterGraph.nodes) ? lastClusterGraph.nodes : [])
       .filter((n) => memberSet.has(String(n.id)))
       .map((n) => ({ id: String(n.id), role: n.role }));
@@ -1315,20 +1346,26 @@ function clusterCardHtml(c, index) {
     ? `<div class="cluster-chain" aria-label="${esc(t('cluster.chainAria'))}">${chainInner}</div>`
     : '';
 
-  // Benannte Mitglieder (XRPScan-Aliase, public/name-index.mjs): bis zu 3
-  // Namens-Chips nach Drops-Summe sortiert (Tiebreak: Adresse) — reine
-  // Ergänzungslinie nach dem Kopf. accountNameOf ist host-seitig gegatet:
-  // maskierte oder Deny-Treffer-Adressen liefern null, zeigen also nie
-  // einen Namen. Ohne Namensindex-Treffer bleibt die Karte unverändert.
-  const named = [];
-  for (const a of c.memberAddresses ?? []) {
-    const chipHtml = nameChipHtml(a);
-    if (chipHtml) named.push({ a: String(a), chipHtml, drops: dropsByAddr.get(String(a)) ?? 0 });
-  }
-  named.sort((x, y) => (y.drops - x.drops) || x.a.localeCompare(y.a));
-  const namesHtml = named.length
-    ? `<div class="cluster-names">${named.slice(0, 3).map((x) => x.chipHtml).join('')}</div>`
-    : '';
+  // Adress-Chip-Zeile (Coverage-Fix 2026-10-06): Mitglieder MIT Name- ODER
+  // Tag-Chip — Exchange-Konten mit belegtem Destination-Tag ohne XRPScan-
+  // Namen waren bisher unsichtbar (die Zeile zeigte nur Name-Treffer), obwohl
+  // genau das das Ziel der Börse/Tag-Anzeige ist. Muster Drilldown-Tabelle:
+  // pro Adresse nameChipHtml + tagChipHtml (aufsteigend, Cap 3 + '+'),
+  // Drops-Sortierung wie bisher (Tiebreak: Tags, dann Adresse), Cap 5 Adressen.
+  // Fail-closed unverändert: nameChipHtml→accountNameOf und
+  // tagChipHtml→multiUserEntryOf sind host-seitig gegatet (isFullShownAddr);
+  // maskierte oder Deny-Treffer-Adressen liefern nie einen Chip, Tags kommen
+  // nur aus belegtem edge.toTag. Ohne Treffer bleibt die Karte unverändert.
+  const namesHtml = addrChipsRowHtml({
+    members: c.memberAddresses ?? [],
+    tagsByAddr,
+    nameChipHtml,
+    tagChipHtml,
+    dropsByAddr,
+    cap: 5,
+    tagCap: 3,
+    sort: 'drops',
+  });
 
   // Transit-Hinweis-Zeile (tagIdentityDesign, nur bei belegter transit-Kante):
   // reiner Text unter der Namenslinie — keine Score-/Topologie-Änderung.
@@ -1643,6 +1680,107 @@ const liveFindings = { malicious: 0, suspect: 0, info: 0 };
 const txWindow = [];
 const findingsWindow = [];
 
+/* Cluster-Akkumulation (Fix 2026-10-06): die Live-Liste zeigt den
+ * AKKUMULIERTEN Stand, nicht nur das letzte Block-Fenster. Die persistierten
+ * View-Cluster aus /api/flow-state (60-s-Poll, auch im Live-Modus) bilden
+ * die Akkumulationsschicht: persistierte Cluster verschwinden nicht, wenn
+ * sie in den letzten Blöcken still waren (firstSeen/lastSeen aus dem
+ * persistierten View), neue Fenster-Cluster kommen hinzu.
+ * serverFlowClusters: letzte normalisierte Server-Cluster (leer bis zum
+ * ersten erfolgreichen Poll). */
+let serverFlowClusters = [];
+
+/* Cluster der Server-View in die Karten-/Graph-Form bringen (aus
+ * applyFlowStateView extrahiert, identisches Mapping): die Server-View trägt
+ * rolesByAddress statt memberAddresses; memberAddresses wird für die
+ * bestehenden Konsumenten (renderClusterList, drilldown, globe)
+ * deterministisch aus rolesByAddress abgeleitet. */
+function serverClustersFromView(view) {
+  return (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {
+    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
+    // lib/flow-state.mjs) und rolesByAddress als Adresse->Rolle.
+    // clusterCardHtml (lib/cluster-Markup des Hosts) erwartet die
+    // Adresse->Rolle-Form — sie wird aus rolesByAddress abgeleitet, die
+    // Rollen-Zählung ergibt sich dort wieder automatisch.
+    const rolesByAddress = c?.rolesByAddress && typeof c?.rolesByAddress === 'object' ? c.rolesByAddress : {};
+    return {
+      id: String(c?.id ?? ''),
+      label: c?.label ?? null,
+      roles: rolesByAddress,
+      rolesByAddress,
+      severityByAddress: c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {},
+      memberAddresses: Object.keys(rolesByAddress),
+      edges: Array.isArray(c?.edges) ? c.edges : [],
+      totalDrops: Number(c?.totalDrops) || 0,
+      txCount: Number(c?.txCount) || 0,
+      distinctAccounts: Number(c?.distinctAccounts) || 0,
+      firstSeen: c?.firstSeen ?? null,
+      lastSeen: c?.lastSeen ?? null,
+      // Persistierte Peeling-Ketten der Server-View (projectFlowStateView,
+      // lib/flow-state.mjs): durchgereicht an Karten-Flusskette und
+      // Drilldown-Graph-Kontext.
+      peelingChains: Array.isArray(c?.peelingChains) ? c.peelingChains : [],
+    };
+  });
+}
+
+/* Merge der Fenster-Cluster (WSS, frisch) mit den persistierten View-
+ * Clustern (Server). Dedup: gleiche id ODER Member-Überschneidung — der
+ * Fenster-Cluster gewinnt (er trägt die frischsten Knotenaggregate), der
+ * persistierte Zwilling entfällt. Persistierte Cluster ohne Fenster-
+ * Gegenstück bleiben mit ihren persistierten firstSeen/lastSeen stehen.
+ * Sortierung nach AKTIVITÄT + SCHWERE (Auftragsvertrag): Schweregrad desc
+ * (malicious > suspect > info, max über severityByAddress), dann lastSeen
+ * desc (Aktivität — stille Cluster ranken nach ihrer letzten Aktivität),
+ * dann totalDrops desc, dann id asc (deterministische Totalordnung).
+ * Das Ergebnis MUSS vor renderClusterList in lastClusterGraph.clusters
+ * stehen (drilldown.js findCardForClusterId :419-425 indexiert die
+ * Drilldown-Karte über den Array-Index dieses Caches — Liste und Cache
+ * müssen exakt übereinstimmen, sonst zeigt der Klick den falschen Cluster). */
+function mergeClusterViews(windowClusters, persistedClusters) {
+  const win = (Array.isArray(windowClusters) ? windowClusters : []).filter((c) => c && typeof c === 'object');
+  const persisted = Array.isArray(persistedClusters) ? persistedClusters : [];
+  const merged = win.slice();
+  const winSets = win.map((c) => new Set((Array.isArray(c.memberAddresses) ? c.memberAddresses : []).map(String)));
+  for (const p of persisted) {
+    if (!p || typeof p !== 'object') continue;
+    const pMembers = (Array.isArray(p.memberAddresses) ? p.memberAddresses : []).map(String);
+    const pSet = new Set(pMembers);
+    let absorbed = false;
+    for (let i = 0; i < merged.length; i++) {
+      if (p.id && merged[i].id === p.id) { absorbed = true; break; }
+      for (const m of winSets[i]) {
+        if (pSet.has(m)) { absorbed = true; break; }
+      }
+      if (absorbed) break;
+    }
+    if (absorbed) continue;
+    merged.push(p);
+  }
+  const sevRankOf = (c) => {
+    let s = 0;
+    const own = c?.severityByAddress;
+    if (own && typeof own === 'object') {
+      for (const v of Object.values(own)) {
+        const r = SEV_RANK[v] ?? 0;
+        if (r > s) s = r;
+      }
+    }
+    return s;
+  };
+  const lastSeenMs = (c) => {
+    const ms = Date.parse(String(c?.lastSeen ?? ''));
+    return Number.isFinite(ms) ? ms : 0;
+  };
+  merged.sort((a, b) =>
+    sevRankOf(b) - sevRankOf(a) ||
+    lastSeenMs(b) - lastSeenMs(a) ||
+    (Number(b?.totalDrops) || 0) - (Number(a?.totalDrops) || 0) ||
+    (String(a?.id ?? '') < String(b?.id ?? '') ? -1 : String(a?.id ?? '') > String(b?.id ?? '') ? 1 : 0)
+  );
+  return merged;
+}
+
 // Cluster-Neubau aus den rollenden Fenstern — mit clientseitigem Köder-Filter
 // (Hash-Deny) als Pendant zur serverseitigen baitLabels-Filterung der
 // Snapshot-Pfade: Ein Tx-Record/Finding mit Köder-Endpunkt erreicht NIE
@@ -1680,6 +1818,14 @@ async function rebuildClusterGraph() {
     maxEdges: CLUSTER_MAX_EDGES,
     ...(multiUserAccounts ? { multiUserAccounts } : {}),
   });
+  // Cluster-Akkumulation (Fix 2026-10-06): die persistierten View-Cluster
+  // (serverFlowClusters, 60-s-Poll) werden VOR dem Rendern in
+  // lastClusterGraph.clusters mergen — drilldown.js indexiert die
+  // Drilldown-Karten über den Array-Index genau dieses Caches
+  // (findCardForClusterId), Liste und Cache müssen exakt übereinstimmen.
+  // Stille persistierte Cluster bleiben stehen, neue Fenster-Cluster kommen
+  // hinzu; die Live-Liste zeigt den akkumulierten Stand.
+  cg.clusters = mergeClusterViews(cg.clusters, serverFlowClusters);
   lastClusterGraph = cg;
   // Lazy-Namensindex (ANDOCKSTELLE des Bulk-Fetches im Live-Takt): der erste
   // Cluster-Daten-Takt stößt GENAU EINEN Bulk-Fetch pro Session an (Guard/TTL
@@ -2203,31 +2349,9 @@ function renderWindowFeed() {
  * bestehenden Konsumenten (renderClusterList, drilldown, globe) deterministisch
  * aus rolesByAddress abgeleitet. */
 async function applyFlowStateView(view) {
-  const clusters = (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
-    // lib/flow-state.mjs:228) und rolesByAddress als Adresse->Rolle.
-    // clusterCardHtml (lib/cluster-Markup des Hosts) erwartet die
-    // Adresse->Rolle-Form — sie wird aus rolesByAddress abgeleitet, die
-    // Rollen-Zählung ergibt sich dort wieder automatisch.
-    const rolesByAddress = c?.rolesByAddress && typeof c?.rolesByAddress === 'object' ? c.rolesByAddress : {};
-    return {
-      id: String(c?.id ?? ''),
-      label: c?.label ?? null,
-      roles: rolesByAddress,
-      rolesByAddress,
-      severityByAddress: c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {},
-      memberAddresses: Object.keys(rolesByAddress),
-      edges: Array.isArray(c?.edges) ? c.edges : [],
-      totalDrops: Number(c?.totalDrops) || 0,
-      txCount: Number(c?.txCount) || 0,
-      distinctAccounts: Number(c?.distinctAccounts) || 0,
-      firstSeen: c?.firstSeen ?? null,
-      lastSeen: c?.lastSeen ?? null,
-      // Persistierte Peeling-Ketten der Server-View (projectFlowStateView,
-      // lib/flow-state.mjs): durchgereicht an Karten-Flusskette und
-      // Drilldown-Graph-Kontext.
-      peelingChains: Array.isArray(c?.peelingChains) ? c.peelingChains : [],
-    };
-  });
+  // Mapping in serverClustersFromView extrahiert (Fix 2026-10-06): derselbe
+  // Mapping-Pfad versorgt jetzt auch die Live-Akkumulationsschicht.
+  const clusters = serverClustersFromView(view);
   const nodes = [];
   for (const c of clusters) {
     const sevByAddr = c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {};
@@ -2290,23 +2414,39 @@ async function pollFlowState() {
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const body = await res.json();
   flowData = body;
-  if (feedMode === 'history') await applyFlowStateView(body);
+  if (feedMode === 'history') {
+    await applyFlowStateView(body);
+  } else {
+    // Live-Modus (Fix 2026-10-06): die Server-View ersetzt NICHT den
+    // Live-Graphen — ihre Cluster gehen in die Akkumulationsschicht
+    // (serverFlowClusters) und werden beim nächsten rebuildClusterGraph-Takt
+    // mit den Fenster-Clustern gemergt. Ein Live-Tab ohne eigenen
+    // WSS-Nachrichten-Takt holt den Merge mit void rebuildClusterGraph().
+    serverFlowClusters = serverClustersFromView(body);
+    if (txWindow.length === 0) void rebuildClusterGraph();
+  }
 }
 
 async function serverPollTick() {
-  // Live-Standard: das Server-Fenster wird nur im Archiv-Modus gebraucht —
-  // der 60-s-Poll spart sonst ~3,2 MB dekodierte Antworten pro Minute
-  // (block-window + flow-state). setFeedMode('history') holt das Fenster
-  // sofort nach (void serverPollTick() im history-Zweig).
-  if (feedMode !== 'history') return;
+  // Live-Standard: das Block-FENSTER wird nur im Archiv-Modus gebraucht —
+  // der 60-s-Poll spart sonst ~3,2 MB dekodierte Antworten pro Minute.
+  // setFeedMode('history') holt das Fenster sofort nach (void
+  // serverPollTick() im history-Zweig).
+  // Fix 2026-10-06 (Cluster-Akkumulation): im Live-Modus läuft der
+  // FLOW-STATE-Poll trotzdem — die persistierten Cluster sind die
+  // Akkumulationsschicht der Live-Liste (mergeClusterViews), ohne sie zeigt
+  // die Live-Liste nur das letzte Block-Fenster. BEWUSST AKZEPTIERTE KOSTEN
+  // (Plan-Review-Korrektur 4): die flow-state-Antwort misst live 2.626.205 B
+  // pro Poll (~2,6 MB/Minute pro sichtbarem Tab) — der Preis für eine Liste,
+  // die stille persistierte Cluster nicht mehr fallen lässt.
   if (typeof document !== 'undefined' && document && document.visibilityState !== 'visible') return;
   if (Date.now() < serverPollBackoffUntil) return;
   let failed = false;
-  try {
-    await pollBlockWindow();
-  } catch (err) {
-    failed = true;
-    if (feedMode === 'history') {
+  if (feedMode === 'history') {
+    try {
+      await pollBlockWindow();
+    } catch (err) {
+      failed = true;
       const msg = err && err.message ? String(err.message) : t('conn.unknownError');
       setConn(false, t('feed.windowError', { msg }));
     }
@@ -2376,6 +2516,14 @@ async function setFeedMode(mode) {
     liveEmptyEl.hidden = false;
     setConn(false, t('conn.liveInit'));
     connectLive();
+    // Fix 2026-10-06 (Cluster-Akkumulation): beim Wechsel nach Live geht der
+    // persistierte Bestand aus flowData sofort in die Akkumulationsschicht —
+    // die Liste startet nicht leer, sondern zeigt den akkumulierten Stand,
+    // auch bevor die erste WSS-Transaktion den rebuildClusterGraph-Takt
+    // auslöst (void rebuildClusterGraph mit leerem Fenster mergt nur die
+    // persistierten Cluster).
+    if (flowData) serverFlowClusters = serverClustersFromView(flowData);
+    void rebuildClusterGraph();
   }
 }
 

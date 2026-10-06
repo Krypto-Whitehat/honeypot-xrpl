@@ -55,13 +55,21 @@
   min-inline-size: 0;
 }
 
+/* Zeilentrennung (Design-Audit 2026-10-06): bare Zeilen ohne jede Trennlinie
+   — Haarlinie zwischen den Mitgliedern, letzte Zeile offen; Padding 6px 0
+   hält die Zeilen greifbar. Markup (li in ul.history-members) unverändert. */
 .history-member {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 2px 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--a6-line);
+}
+
+.history-member:last-child {
+  border-bottom: none;
 }
 
 .history-member .addr-full {

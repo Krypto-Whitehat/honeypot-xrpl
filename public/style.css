@@ -3,6 +3,61 @@
    Referenzmodus inspired. Helle Bühne, graphitfarbene Primäraktion,
    feine Linien, klare Radien, Mono für Daten. */
 
+/* Selbst-gehostete Schriften (Design-Audit 2026-10-06): Inter und JetBrains
+   Mono waren nur als Token-Stacks deklariert und fielen auf System-Fallbacks
+   (system-ui/Consolas) zurück. Latin-Subset-woff2 aus der offiziellen
+   Google-Fonts-Distribution (Inter: SIL OFL 1.1; JetBrains Mono: SIL OFL 1.1 —
+   Quellen, Versionen, Lizenzen: public/fonts/LICENSES.md). font-display:swap
+   hält den Erstanstrich auf dem Fallback, bis die Datei geladen ist; die
+   Token-Stacks --a6-font/--a6-mono bleiben unverändert. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/inter-latin-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/inter-latin-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/inter-latin-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/fonts/inter-latin-800.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/jetbrains-mono-latin-700.woff2") format("woff2");
+}
+
 [data-a6] {
   --a6-bg: #f6f6f7;
   --a6-surface: #ffffff;
@@ -63,6 +118,12 @@
   --a6-graph-line: #17171b;
   --a6-graph-line-soft: rgba(20, 20, 22, 0.12);
 
+  /* Gemeinsame Bühnenhöhen-Leiter (Design-Audit 2026-10-06): #graph, #globe
+     und .cluster-3d (drilldown.css) teilen sich diese Höhe — vorher sprang die
+     Bühne beim Tab-Wechsel Live→Globe um 200 px. Basis 720 px; die Stufen
+     640/560/480 px werden im Responsiv-Abschnitt je Breakpoint neu gesetzt. */
+  --a6-stage-height: 720px;
+
   /* Cluster-Bubbles: weiß, 1px Tintenrand, Radius */
   --a6-cluster-fill: #ffffff;
   --a6-cluster-border: #17171b;
@@ -98,6 +159,20 @@
   --a6-sev-info: #1d4ed8;
   --a6-sev-neutral: #62626b;
 
+  /* Konsolidierte Tokens (Design-Audit 2026-10-06): Werte, die bisher als
+     hartcodierte Hex mehrfach im Stylesheet standen — dieselben Farben, nur
+     noch referenziert. --a6-ink-fill ist die graphitfarbene Primäraktion
+     (SKILL buttons .a6-button--primary), --a6-card-line der Brand-Rand der
+     Cluster-Karten (vorher D2-Regel mit Inline-rgba). */
+  --a6-ink-fill: #141416;
+  --a6-card-line: rgba(22, 48, 92, 0.30);
+  --a6-swatch-payment: #d03b33;
+  --a6-swatch-other: #3f3f46;
+  --a6-swatch-unknown: #f0f0f2;
+  --a6-swatch-unknown-line: #62626b;
+  --a6-swatch-cluster-line: #17171b;
+  --a6-unknown-fill: #f0f0f2;
+
   color: var(--a6-ink);
   background: var(--a6-bg);
   font-family: var(--a6-font);
@@ -123,6 +198,15 @@ html, body {
   outline-offset: 3px;
 }
 
+/* Fokuslücke (Design-Audit 2026-10-06): Cluster-Karten sind interaktiv
+   (li.cluster-card role="button" tabindex="0", app.js), werden vom :where-
+   Selektor oben aber nicht erfasst — derselbe Ring wie bei Steuerlementen.
+   Das Pendant für den Tabellen-Wrapper steht in drilldown.css. */
+.cluster-card:focus-visible {
+  outline: 3px solid var(--a6-focus);
+  outline-offset: 3px;
+}
+
 /* ---------------- App-Kopfzeile (Console-Shell) ----------------
    Links Marke, rechts Status-Cluster in einer Zeile: Verbindungs-LED
    (#conn, app.js setConn), Netzwerk-Chip (#stat-network), Uhr (#stat-last) —
@@ -143,7 +227,9 @@ html, body {
 
 .brand h1 {
   margin: 0;
-  font-size: 21px;
+  /* 24 px (Design-Audit): H1 bleibt dominant — .hx-title wurde auf
+     clamp max 1.25rem (20 px) gedeckelt, vorher drehte die Hierarchie um. */
+  font-size: 24px;
   font-weight: 800;
   letter-spacing: -0.02em;
 }
@@ -164,9 +250,12 @@ html, body {
 .stat {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  min-width: 118px;
-  padding: 9px 14px;
+  /* Linksbündig (Design-Audit): Wert und Label einer KPI auf gemeinsamer
+     Achse — Scannbarkeit der Statuszeile statt Mittelachsen-Mix. */
+  align-items: flex-start;
+  text-align: left;
+  min-width: 104px;
+  padding: 8px 12px;
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
   /* 3px-Band links = Severity-LED der Kopf-KPIs (Status nie nur durch Farbe —
@@ -220,7 +309,7 @@ html, body {
   gap: 8px;
   font-size: 13px;
   color: var(--a6-body);
-  padding: 7px 13px;
+  padding: 8px 12px; /* 4-px-Raster (Design-Audit) */
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
   background: var(--a6-surface);
@@ -308,6 +397,11 @@ main {
   align-items: center;
   gap: 12px;
   margin-bottom: 14px;
+  /* Einheitliche Kopf-Trennlinie (Design-Audit): history.css/account-check.css
+     hatten sie bereits scoped — jetzt tragen alle Panel-Köpfe dieselbe
+     1-px-Ink-Linie (identische Deklaration, die Scoped-Regeln bleiben). */
+  border-bottom: 1px solid var(--a6-line-strong);
+  padding-bottom: 12px;
 }
 
 .panel-head h2 {
@@ -335,7 +429,7 @@ main {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
-  padding: 5px 11px;
+  padding: 4px 12px; /* 4-px-Raster (Design-Audit) */
   background: var(--a6-surface-alt);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
@@ -510,6 +604,9 @@ main {
   align-items: center;
   gap: 12px;
   margin: 0 0 14px;
+  /* Kopf-Trennlinie wie .panel-head (Design-Audit, einheitliche Console) */
+  border-bottom: 1px solid var(--a6-line-strong);
+  padding-bottom: 12px;
 }
 
 .log-head h2 {
@@ -568,10 +665,24 @@ main {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .download-btn:hover { transform: translateY(-2px); }
+  /* Farbfeedback zusätzlich zum Hub (Design-Audit: reines translateY ließ den
+     Button optisch kalt) */
+  .download-btn:hover { background: var(--a6-surface-alt); transform: translateY(-2px); }
 }
 
 .download-btn:active { transform: translateY(0); }
+
+/* Disabled-Zustand (Design-Audit): #check-go (account-check.js),
+   #fh-refresh (history-host.html) und #feed-range (app.js) wurden disabled
+   ohne jede visuelle Veränderung. Gilt für alle .download-btn/.filter-select;
+   nach der Hover-Regel notiert, damit :disabled bei gleicher Spezifität gewinnt. */
+.download-btn:disabled,
+.filter-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
 
 .log-list {
   display: grid;
@@ -657,14 +768,33 @@ main {
 
 #graph {
   width: 100%;
-  height: 720px; /* full-width-Bühne: Höhe von 1040 px auf 720 px gesenkt;
-                    Höhenleiter 720 → 640 (≤1024) → 560 (≤900) → 480 (≤560) */
+  /* Höhe über die gemeinsame Bühnen-Leiter --a6-stage-height (Token-Block
+     oben): 720 px Basis → 640 (≤1024) → 560 (≤900) → 480 (≤560); #globe
+     (globe.css) und .cluster-3d (drilldown.css) folgen derselben Leiter —
+     Tab-Wechsel springen nicht mehr. */
+  height: var(--a6-stage-height, 720px);
   background:
     radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--a6-graph-canvas);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-md);
 }
+
+/* Flow-Host-Bühne (history-host.html #fh-graph): vorher ohne jede CSS-Regel —
+   das SVG schwebte ohne Bühnenrahmen im Panel. Rahmen wie #graph
+   (Punktraster, 1-px-Linie, Radius); das SVG skaliert selbst per viewBox
+   (style-Attribut im Markup: width:100%;height:auto). */
+#fh-graph {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background:
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--a6-graph-canvas);
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-md);
+}
+
+#fh-graph svg { display: block; width: 100%; height: auto; }
 
 /* vis-network-Tooltip (Knoten-, Kanten- und Cluster-Bubble-Titel): Das Bundle
    injiziert sein Stylesheet zur Laufzeit als div.vis-tooltip mit
@@ -723,8 +853,8 @@ main {
 }
 
 .graph-tab[aria-selected="true"] {
-  background: #141416;
-  border-color: #141416;
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
   color: #fff;
 }
 
@@ -741,7 +871,9 @@ main {
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  /* 8-px-Gap (Design-Audit): 13 Einträge im panel-head — engerer Raster hält
+     die Legende kompakt im Umbruch, ohne Markup zu ändern. */
+  gap: 8px;
   margin-left: auto;
   font-size: 12px;
   color: var(--a6-muted);
@@ -763,23 +895,23 @@ main {
 .swatch-drainer { background: var(--a6-role-drainer); border-radius: 50%; }
 .swatch-collector { background: var(--a6-role-collector); border-radius: 50%; }
 .swatch-relay { background: var(--a6-role-relay); border-radius: 50%; }
-.swatch-unknown { background: #f0f0f2; border-color: #62626b; border-radius: 50%; }
-.swatch-cluster { background: #ffffff; border: 1px solid #17171b; }
+.swatch-unknown { background: var(--a6-swatch-unknown); border-color: var(--a6-swatch-unknown-line); border-radius: 50%; }
+.swatch-cluster { background: #ffffff; border: 1px solid var(--a6-swatch-cluster-line); }
 
 /* Kantentyp-Swatches — Farben müssen von den Rollen-Swatches unterscheidbar
    sein (Befund: payment==drainer #b3261e und other==relay #62626b waren
    identisch; payment nutzt nun den Drainer-Highlight-Ton, other den
    Relay-Randton, check entspricht EDGE_COLORS für CheckCreate/
    PaymentChannelCreate in public/app.js). */
-.swatch-payment { background: #d03b33; }
+.swatch-payment { background: var(--a6-swatch-payment); }
 .swatch-escrow { background: #6d28d9; }
 .swatch-check { background: #0f766e; }
-.swatch-other { background: #3f3f46; }
+.swatch-other { background: var(--a6-swatch-other); }
 
-/* Schweregrad-Swatches */
-.swatch-sev-malicious { background: #b3261e; }
-.swatch-sev-suspect { background: #9a5b00; }
-.swatch-sev-info { background: #1d4ed8; }
+/* Schweregrad-Swatches — Severity-Tokens, kein zweites Farbsystem */
+.swatch-sev-malicious { background: var(--a6-sev-malicious); }
+.swatch-sev-suspect { background: var(--a6-sev-suspect); }
+.swatch-sev-info { background: var(--a6-sev-info); }
 
 /* ---------------- Cluster-Zusammenfassung ---------------- */
 
@@ -805,7 +937,10 @@ main {
 
 .cluster-card {
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
+  /* Eine Regel statt der früheren Doppel-Deklaration (Design-Audit): 1px Rand
+     in Brand-Tinte (--a6-card-line, ehemals D2-Folgeblock) + linkes 3px-Band
+     in der dominanten Rollenfarbe (Regeln unten). */
+  border: 1px solid var(--a6-card-line);
   border-left: 3px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
   padding: clamp(1rem, 1.5vw, 1.5rem);
@@ -820,11 +955,6 @@ main {
 }
 
 .cluster-card:active { transform: translateY(0); }
-
-/* D2 (nur ergänzt): 1px Rand in Brand-Tinte — die Hover-Regel
-   (translateY(-2px) + Schatten, analog .download-btn) und der 10px-Radius
-   (var(--a6-r-md)) bestehen bereits und bleiben; keine Selektoren entfernt. */
-.cluster-card { border-color: rgba(22, 48, 92, 0.30); }
 
 /* Linkes Band = dominante Rolle des Clusters — Kritik-Nachbesserung: die
    Rollen-Hex stehen nicht mehr hardcoded da, sie folgen denselben Werten wie
@@ -845,7 +975,7 @@ main {
 
 .cluster-label {
   font-family: var(--a6-mono);
-  font-size: 14px;
+  font-size: 15px; /* 14 → 15 px (Design-Audit): Karten-Titel über dem Body */
   font-weight: 700;
   letter-spacing: -0.01em;
   /* Server-sanitiste Labels sind bis 200 Zeichen lang und angreiferkontrolliert;
@@ -873,7 +1003,7 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 9px;
+  padding: 2px 12px; /* 4-px-Raster (Design-Audit, war 2px 9px) */
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-pill);
   background: var(--a6-surface-alt);
@@ -927,11 +1057,26 @@ main {
   background: var(--a6-surface);
   color: var(--a6-brand-amber);
   font-family: var(--a6-mono);
-  font-size: 11px;
+  font-size: 12px; /* 11 → 12 px (Design-Audit): 12-px-Untergrenze des Projekts */
   font-variant-numeric: tabular-nums;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
 }
+
+/* Adress-Chip-Zeile der Cluster-Karten (Coverage-Fix 2026-10-06, Live- und
+   Flow-Host, public/cluster-chips.mjs): pro Mitglied ein Gruppen-Wrap mit
+   Name-Chip plus zugehöriger Tag-Chips; '+'-Hinweis bei mehr als Cap 3
+   Tags (Analogon .cluster-table-dash der Drilldown-Tabelle, die hier nicht
+   geladen sein kann — history-host.html kennt nur style.css). */
+.cluster-addr-row { gap: 6px 10px; }
+.cluster-addr-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-inline-size: 100%;
+}
+.cluster-addr-more { color: var(--a6-muted); font-size: 12px; }
 
 .cluster-metrics {
   display: flex;
@@ -943,7 +1088,7 @@ main {
 
 .cluster-xrp {
   font-family: var(--a6-mono);
-  font-size: 18px;
+  font-size: 20px; /* 18 → 20 px (Design-Audit): Primärmetrik der Karte */
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--a6-ink);
@@ -1013,12 +1158,12 @@ main {
   color: var(--a6-role-relay);
 }
 
-/* Unbekannte Rolle in der Flusskette: wie der Rollen-Swatch #f0f0f2 mit
-   abgedunkeltem Rand — abgrenzbar von relay (grau) und surface-alt. */
+/* Unbekannte Rolle in der Flusskette: wie der Rollen-Swatch (--a6-swatch-
+   unknown mit Randton) — abgrenzbar von relay (grau) und surface-alt. */
 .chain-node.chain-unknown {
-  border-color: #62626b;
+  border-color: var(--a6-swatch-unknown-line);
   color: var(--a6-body);
-  background: #f0f0f2;
+  background: var(--a6-unknown-fill);
 }
 
 .chain-arrow { color: var(--a6-muted); }
@@ -1038,12 +1183,29 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+/* Transit-Hinweis (Markup app.js clusterCardHtml + drilldown.js, Klasse hatte
+   zuvor keine Regel): Meta-Ton in 12 px statt vererbtrem 15-px-Ink-Body. Die
+   drilldown-Variante trägt zusätzlich .graph-note (gleiche Typografie). */
+.cluster-transit-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--a6-muted);
+}
+
 #cluster-empty { margin-top: 14px; }
 
+/* Leerzustände (Design-Audit): bisher reiner Fließtext — jetzt gestaltete
+   Fläche (gestrichelte Kontroll-Linie, Surface-alt, zentriert). Betrifft
+   #feed-empty/#log-empty/#cluster-empty (index.html) und #fh-status-msg/
+   #fh-graph-empty/#fh-empty (history-host.html) ohne Markup-Änderung. */
 .empty {
   color: var(--a6-muted);
   font-size: 14px;
-  padding: 14px 4px 4px;
+  background: var(--a6-surface-alt);
+  border: 1px dashed var(--a6-control-line);
+  border-radius: var(--a6-r-sm);
+  padding: 16px;
+  text-align: center;
 }
 
 .risk-badge {
@@ -1111,7 +1273,9 @@ main {
 
 .hx-title {
   max-inline-size: 42ch;
-  font-size: clamp(1.125rem, 0.95rem + 0.9vw, 1.5rem);
+  /* clamp max 1.25 rem (Design-Audit): Stage-Titel bleibt unter der Marke
+     (.brand h1 = 24 px) — vorher drehte sich die Hierarchie um. */
+  font-size: clamp(1.125rem, 0.95rem + 0.9vw, 1.25rem);
   line-height: 1.2;
   letter-spacing: -0.02em;
   font-weight: 800;
@@ -1144,16 +1308,11 @@ main {
   gap: 8px;
   padding: 6px 12px;
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
+  /* Eine Regel statt Doppel-Deklaration (Design-Audit, ehemals D1-Folgeblock):
+     1px Rand in Brand-Blau-Tinte + dezenter Karten-Schatten — IDs
+     (#hx-kpi-malicious/-suspect/-txs) bleiben. */
+  border: 1px solid rgba(22, 48, 92, 0.35);
   border-radius: var(--a6-r-pill);
-  box-shadow: var(--a6-e1);
-}
-
-/* D1 (nur ergänzt): 1px Rand in Brand-Blau-Tinte und dezenter Karten-Schatten
-   — die KPI-Pills folgen damit der neuen Referenz-Palette; bestehende
-   Selektoren und IDs (#hx-kpi-malicious/-suspect/-txs) bleiben. */
-.hx-kpi {
-  border-color: rgba(22, 48, 92, 0.35);
   box-shadow: var(--a6-e1), 0 1px 2px rgba(22, 48, 92, 0.06);
 }
 
@@ -1201,8 +1360,8 @@ main {
 }
 
 .lang-btn[aria-pressed="true"] {
-  background: #141416;
-  border-color: #141416;
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
   color: #fff;
 }
 
@@ -1219,7 +1378,9 @@ main {
   flex-wrap: wrap;
   gap: 14px;
   justify-content: space-between;
-  padding: 13px 26px;
+  /* Gutter-Token statt fixer 26 px (Design-Audit): Fußzeile fluchtet mit
+     topbar/main; vertikal aufs 4-px-Raster. */
+  padding: 12px var(--a6-gutter);
   border-top: 1px solid var(--a6-line-strong);
   background: var(--a6-surface);
   color: var(--a6-muted);
@@ -1230,10 +1391,12 @@ main {
 
 /* ---------------- Responsiv ---------------- */
 
-/* Konsistente Graph-Höhenleiter: 720 px (Basis) → 640 px (≤1024) →
-   560 px (≤900) → 480 px (≤560). */
+/* Konsistente Bühnen-Höhenleiter (Design-Audit 2026-10-06): gemeinsamer Token
+   --a6-stage-height für #graph, #globe (globe.css) und .cluster-3d
+   (drilldown.css) — 720 px (Basis) → 640 px (≤1024) → 560 px (≤900) →
+   480 px (≤560); die Bühnen folgen alle derselben Leiter. */
 @media (max-width: 1024px) {
-  #graph { height: 640px; }
+  [data-a6] { --a6-stage-height: 640px; }
 }
 
 @media (max-width: 900px) {
@@ -1242,7 +1405,7 @@ main {
   /* Status-Chips bleiben kompakt und wachsen nicht auf KPI-Kartenbreite. */
   .stat-network,
   .stat-last { flex: 0 1 auto; }
-  #graph { height: 560px; } /* Höhenleiter: 720 → 640 → 560 */
+  [data-a6] { --a6-stage-height: 560px; } /* Leiter: 720 → 640 → 560 */
   .legend { margin-left: 0; }
   .live-stats { margin-left: 0; width: 100%; }
   .live-controls { margin-left: 0; width: 100%; }
@@ -1271,7 +1434,7 @@ main {
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
   .hx-stage { margin-top: 14px; }
-  #graph { height: 480px; } /* Höhenleiter-Endstufe: 720 → 640 → 560 → 480 */
+  [data-a6] { --a6-stage-height: 480px; } /* Leiter-Endstufe: 720 → 640 → 560 → 480 */
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
   .log-list { max-height: 340px; }
@@ -1311,6 +1474,8 @@ main {
   .hx-stage,
   .hx-kpi,
   .feed-chart,
+  .empty,
+  #fh-graph,
   #graph {
     border: 1px solid CanvasText;
     box-shadow: none;
