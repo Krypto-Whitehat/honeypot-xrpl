@@ -80,6 +80,8 @@ import {
   readArchiveGitHub,
   writeArchiveGitHub,
   deleteArchiveGitHub,
+  checkpointFromFlowState,
+  hasCheckpointDoc,
   ARCHIVE_RETENTION_MALICIOUS_MS,
   ARCHIVE_RETENTION_REGISTRY_MS,
   ARCHIVE_MAX_BYTES,
@@ -264,6 +266,12 @@ const GUARD_MARGIN_MS = 5000; // Restlaufzeit für Persistenz-Write + Antwort
 // GET — live ~5-8 s). Mit Marge 6000 endet der Walk bei ~19 s:
 // 19 s + ~2 s Rest-Runde + ~8 s Persistenz <= 30 s (maxDuration).
 const PERSIST_MARGIN_MS = 6000;
+
+// Checkpoint-Restlaufzeit (iii.6): der Tages-Checkpoint ist EIN GET + EIN PUT
+// gegen die GitHub-Contents-API (~1-2 s live). Bei weniger Restlaufzeit bis
+// tickDeadline wird er geskippt (Nachhol im nächsten Tick, Guard idempotent) —
+// maxDuration 30 bleibt gewahrt, kein sechster Persistenz-Block nachträglich.
+const CHECKPOINT_DEADLINE_SLACK_MS = 2000;
 
 // Pure: genanntes Retry-Fenster (ms) aus einem RPC-Fehler-Result parsen.
 // Präzedenz wie lib/live-gate.mjs: retry_after-Feld (Sekunden) vor
@@ -766,6 +774,58 @@ export default async function handler(req, res) {
         );
       }
     }
+    // (iii.6) TAGES-CHECKPOINT (Persistenz-Fix 2026-10-06): einmal je UTC-Tag
+    // werden ALLE Betrugsevidenz-Cluster des UNGEKAPPTEN advanceResult.flowState
+    // als reason:'checkpoint'-Zeilen in den heutigen Tages-Chunk geschrieben —
+    // das Archiv füllt sich kontinuierlich statt nur im Verlust-Fenster (seit
+    // dem Akkumulations-Fix griff kein Archivierungs-Zweig mehr, live: null
+    // Archiv-Writes seit 10-05). Kopplung wie (iii.5): der Write läuft im
+    // Haupt-try VOR dem Flow-State-Write — sein Scheitern 502ert den Tick ohne
+    // Flow-State-Persistenz, der nächste Tick holt nach (Guard idempotent).
+    // Guard (Korrektur a): Marker reason:'checkpoint' im FRISCH GELESENEN
+    // Tages-Dokument — nicht 'Datei existiert', denn der Kappungs-/Zeit-Zweig
+    // (iii.5) legt die Tagesdatei auch ohne Checkpoint an. Der Außen-Read ist
+    // nur die schnelle Vorprüfung; autoritativ prüft der Apply-Callback auf
+    // dem frischen Stand (konkurrierende Ticks überleben den 409-Retry).
+    // Köder-Filter (Korrektur c, Defense-in-Depth — der State ist upstream
+    // bereits köderfrei, fetchBlock B2): Mitglieder explizit filtern, ein
+    // köder-reiner Checkpoint wird verworfen. Tick-Deckel (Korrektur d): bei
+    // < CHECKPOINT_DEADLINE_SLACK_MS Restlaufzeit wird geskippt (Nachhol im
+    // nächsten Tick, maxDuration 30 bleibt gewahrt).
+    const checkpointDay = archiveDayOf(now) ?? dayOf(now);
+    let checkpointRows = 0;
+    if (checkpointDay && clockImpl() < tickDeadline - CHECKPOINT_DEADLINE_SLACK_MS) {
+      let alreadyCheckpointed = false;
+      try {
+        alreadyCheckpointed = hasCheckpointDoc((await readArchiveGitHub(checkpointDay)).doc);
+      } catch {
+        alreadyCheckpointed = false; // Read-Fehler: Entscheidung fällt der Apply-Guard
+      }
+      if (!alreadyCheckpointed) {
+        const checkpointDocs = checkpointFromFlowState(advanceResult.flowState)
+          .map((d) => ({ ...d, archivedAt: now }))
+          .map((d) => ({
+            ...d,
+            memberAddresses: d.memberAddresses.filter((m) => XRPL_ADDR_RE.test(m) && !baitLabels.has(m)),
+          }))
+          .filter((d) => d.memberAddresses.length > 0);
+        if (checkpointDocs.length) {
+          await writeArchiveGitHub(checkpointDay, (fresh) => {
+            if (hasCheckpointDoc(fresh)) return fresh; // Guard (a) im Apply
+            // Bereits vorhandene Zeilen (Verlust-Archiv aus iii.5) nicht
+            // durch Checkpoint-Sichten ersetzen — deren reason darf nie auf
+            // 'checkpoint' kippen (Eviction-Priorität von capArchiveDoc).
+            const existing = new Set(
+              (Array.isArray(fresh?.docs) ? fresh.docs : []).map((d) => d?.clusterId)
+            );
+            const add = checkpointDocs.filter((d) => !existing.has(d.clusterId));
+            if (!add.length) return fresh;
+            checkpointRows = add.length;
+            return capArchiveDoc(appendArchiveDoc({ ...fresh, updatedAt: now }, add), ARCHIVE_MAX_BYTES);
+          });
+        }
+      }
+    }
     // (iv) Persistenz des Flow-State-Ergebnisses (Merge ausschließlich im
     // apply; Pruning läuft in mergeFlowState — lib/flow-state.mjs) — mit
     // demselben Cap wie das Archiv (iii.4) und dem GEKAPPTEN State (iii.3):
@@ -1037,7 +1097,7 @@ export default async function handler(req, res) {
       .reduce((s, r) => s + (Array.isArray(r.f) ? r.f.length : 0), 0);
     return res.status(200).json({
       cursor: finalDoc.cursor,
-      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}, Archiv-Zeilen: ${archiveDocs.length}, Entity-Snapshots: ${entityRequests}, Replay-Jobs: ${replayProcessed}${walkError ? `, Fehler: ${walkError}` : ""}`,
+      summary: `${advanceResult.summary}, geflaggte Txs: ${flaggedTxTotal}, Archiv-Zeilen: ${archiveDocs.length}, Checkpoint-Zeilen: ${checkpointRows}, Entity-Snapshots: ${entityRequests}, Replay-Jobs: ${replayProcessed}${walkError ? `, Fehler: ${walkError}` : ""}`,
     });
   } catch (err) {
     // Read-/Write-Fehler (409-Retry scheitert, 403/429, Netzwerk) -> kein

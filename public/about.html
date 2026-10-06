@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>Honeypot XRPL – About</title>
+  <meta name="description" content="What Honeypot XRPL detects on the XRP Ledger: drainer, collector, source and relay roles, peeling chains, wash trading, cross-ledger sweeps, hub connections and known-bad contacts — plus glossary and honest limits.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+<body data-a6>
+  <!-- Info-Seite für die XRPL-Community (2026-10-06): eigenständige Seite im
+       App-Shell-Look — bewusst KEIN SPA-View, sondern das etablierte Muster
+       der Flow-Host-Seite (index.html-Kommentar „eigenständige Seite (kein
+       SPA-View) — Link statt Tab-Button"). Statisch und fetch-frei: kein
+       WSS, kein API-Poll, kein Vendor-Asset — die Live-Engine des
+       Dashboards läuft hier nicht. Alle sichtbaren Texte laufen über
+       public/i18n.mjs (data-i18n, Sprach-Toggle im Header); Titel/Meta setzt
+       applyLang() über den pageKind 'about'. Marke identisch zu index.html /
+       history-host.html gepflegt (Gravur-Logo .brand-mark, Design P1). -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M17,3.5 L28.5,10.5 L28.5,23.5 L17,30.5 L5.5,23.5 L5.5,10.5 Z"/><path d="M10.5,13 L17,9.5 L23.5,13" stroke-width="1" stroke-opacity="0.55"/><path d="M5.5,10.5 H28.5 M5.5,23.5 H28.5" stroke-width="1" stroke-opacity="0.55"/><circle cx="5.5" cy="10.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="28.5" cy="10.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5.5" cy="23.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="28.5" cy="23.5" r="1.6" fill="currentColor" stroke="none"/><path class="hp-drop" d="M17,11.5 C19.2,14.3 21,16.2 21,18.5 A4,4 0 1,1 13,18.5 C13,16.2 14.8,14.3 17,11.5 Z" stroke="none"/></svg></span>
+      <div class="brand-text">
+        <h1>Honeypot&nbsp;<span class="brand-xrpl">XRPL</span></h1>
+        <p class="sub" data-i18n="about.sub">Purpose, detection methods, glossary and limits of the dashboard</p>
+      </div>
+    </div>
+    <div class="lang-switch" id="lang-switch"></div>
+  </header>
+
+  <nav class="view-nav graph-tabs" aria-label="Navigation" data-i18n-aria="fh.navAria">
+    <a class="view-tab graph-tab" href="index.html" data-i18n="tab.dashboard">Dashboard</a>
+    <a class="view-tab graph-tab" href="history-host.html" data-i18n="tab.flowhost">Flow-Host</a>
+    <a class="view-tab graph-tab" href="about.html" aria-current="page" data-i18n="tab.about">About</a>
+  </nav>
+
+  <main>
+    <section class="panel" aria-labelledby="about-mission-title">
+      <div class="panel-head">
+        <h2 id="about-mission-title"><span data-i18n="about.missionTitle">What this dashboard is for</span></h2>
+        <span class="hint" data-i18n="about.missionHint">Bait-independent real-time analysis of the public ledger</span>
+      </div>
+      <p class="about-lead" data-i18n="about.lead1">Honeypot XRPL is an open real-time threat dashboard for the XRPL community. Every validated block of the XRP Ledger mainnet is checked in real time for fraud, phishing and draining patterns; detected actors are connected into clusters by their money flow and assigned roles (source, drainer, collector, relay).</p>
+      <p class="about-lead" data-i18n="about.lead2">The analysis is bait-independent: no own honeypot or decoy accounts are operated for detection anymore. The data comes exclusively from the public ledger — in live mode through a direct WSS connection to honeycluster.io (one ledger command per block, no sampling), in archive mode through the persisted server window (24 hours to 7 days). Account names and exchange attributions come from xrpscan.com (CC BY-NC-SA 4.0).</p>
+      <p class="about-lead" data-i18n="about.lead3">The same analysis module (lib/detector.mjs) runs in the browser and on the server — the live analysis in the browser produces the same findings as the server walk that fills the window in the background.</p>
+      <p class="graph-note" data-i18n="about.addressNote">Every address shown is an actor address publicly visible in the ledger and is displayed in full. The protective layers around the historical bait accounts (hash deny-list, server-side sanitization) remain active regardless.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="about-detect-title">
+      <div class="panel-head">
+        <h2 id="about-detect-title"><span data-i18n="about.detectTitle">What is detected</span></h2>
+        <span class="hint" data-i18n="about.detectHint">Roles and patterns of the detector engine — heuristics, not proof of guilt</span>
+      </div>
+      <div class="about-subsection">
+        <h3 data-i18n="about.rolesTitle">Roles in the cluster graph</h3>
+        <dl class="about-defs">
+          <dt data-i18n="about.roleDrainerT">Drainer</dt>
+          <dd data-i18n="about.roleDrainerD">An account funded by at least two different senders that forwards at least 90 % of its inflow to a single target in one payment — the typical pattern of a victim account being swept.</dd>
+          <dt data-i18n="about.roleCollectorT">Collector</dt>
+          <dd data-i18n="about.roleCollectorD">A collection account with at least three inflows from different senders (at least one of them flagged), at most two outflows and clear accumulation — where the money gets bundled.</dd>
+          <dt data-i18n="about.roleSourceT">Source</dt>
+          <dd data-i18n="about.roleSourceD">An account with at least three small outgoing payments (at most 0.1 XRP each) to flagged targets — a typical sender of dust and lure payments.</dd>
+          <dt data-i18n="about.roleRelayT">Relay</dt>
+          <dd data-i18n="about.roleRelayD">A pass-through account with balanced inflow and outflow (difference at most 50 % of the larger value) — a waypoint for the money, not an offender by itself.</dd>
+        </dl>
+      </div>
+      <div class="about-subsection">
+        <h3 data-i18n="about.patternsTitle">Patterns and connections</h3>
+        <dl class="about-defs">
+          <dt data-i18n="about.patDrainerT">Draining (drainer sweep)</dt>
+          <dd data-i18n="about.patDrainerD">A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation is the finding classified as malicious; without it, it stays suspect.</dd>
+          <dt data-i18n="about.patCrossLedgerT">Cross-ledger sweep</dt>
+          <dd data-i18n="about.patCrossLedgerD">Funding and sweeping across block boundaries: when an account is funded in ledger N and only swept in ledger N+1, the cross-ledger memory of the engine keeps the sweep visible. Stretched dusting campaigns are caught the same way, via the union of their tiny destinations over the window.</dd>
+          <dt data-i18n="about.patPeelingT">Peeling chains</dt>
+          <dd data-i18n="about.patPeelingD">Staged forwarding of 60 to 95 % of the inflow across unflagged 1:1 relays, from three hops onwards. Detection runs on the transaction view and follows inconspicuous intermediate accounts without assigning them a role.</dd>
+          <dt data-i18n="about.patWashT">Wash trading (self-transfers)</dt>
+          <dd data-i18n="about.patWashD">At least three self-payments of the same account within one ledger (sender and destination are identical) — volume generation without a real counterparty, a typical washing pattern.</dd>
+          <dt data-i18n="about.patHubT">Hub connections</dt>
+          <dd data-i18n="about.patHubD">Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.</dd>
+          <dt data-i18n="about.patKnownBadT">Known-bad contact</dt>
+          <dd data-i18n="about.patKnownBadD">When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.</dd>
+        </dl>
+      </div>
+      <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds eleven rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="about-glossary-title">
+      <div class="panel-head">
+        <h2 id="about-glossary-title"><span data-i18n="about.glossaryTitle">Glossary</span></h2>
+        <span class="hint" data-i18n="about.glossaryHint">The terms of the interface — short and precise</span>
+      </div>
+      <dl class="about-defs">
+        <dt data-i18n="about.gClusterT">Cluster</dt>
+        <dd data-i18n="about.gClusterD">A group of addresses connected through money-flow edges (transactions with at least one flagged endpoint). Clusters form via union-find, carry labels such as “Cluster A” and track members, roles, volume and first/last sighting.</dd>
+        <dt data-i18n="about.gSeverityT">Severity</dt>
+        <dd data-i18n="about.gSeverityD">The engine assigns the levels malicious, suspect and info. The account check reports its verdict as known malicious, risk-associated (contact to listed addresses), clean or unknown, plus an off-ramp assessment (likely unproblematic, worth reviewing, not assessable). Addresses on whitelists (known gateways, exchanges) count as benign — exemption from the broad rules as false-positive protection, not a value judgment.</dd>
+        <dt data-i18n="about.gTagT">Destination tag and transit</dt>
+        <dd data-i18n="about.gTagD">Exchange accounts are hosted accounts: many users share one r-address and are told apart by the 32-bit destination tag. If inflows at the same exchange account show at least two different tag identities, the connection counts as transit — it runs through a shared exchange account and is not a direct adjacency.</dd>
+        <dt data-i18n="about.gEntityT">Entity resolution</dt>
+        <dd data-i18n="about.gEntityD">Control clusters from cryptographic signals instead of money flow: regular key, signer-list fingerprint, email hash and a shared sponsor address (funding source) unite accounts into one entity. Domains only count after two-way verification via xrp-ledger.toml; join keys carried by more than 20 addresses (hubs) are excluded.</dd>
+        <dt data-i18n="about.gWindowT">Block window vs. persistent cluster stock</dt>
+        <dd data-i18n="about.gWindowD">The block window is the rolling persisted stock behind the archive view (24 hours / 3 days / 7 days): hourly rollups plus details of flagged transactions only, seven days of retention. The persistent cluster stock (flow state) is independent of it: it accumulates clusters across the run of a server walk with a cursor, keeps them at most seven days after their last sighting (then the top 200 by volume) and feeds the flow host.</dd>
+        <dt data-i18n="about.gHistArchT">History vs. archive</dt>
+        <dd data-i18n="about.gHistArchD">The history permanently collects every cluster classified as malicious — independent of the live feed, among others through visitor reports. The dashboard archive only shows the persisted block window (24 hours to 7 days). For the backwards search per address there is a separate archive of daily chunks: registry-linked clusters stay retrievable for 180 days, malicious ones for 30 days.</dd>
+      </dl>
+    </section>
+
+    <section class="panel" aria-labelledby="about-limits-title">
+      <div class="panel-head">
+        <h2 id="about-limits-title"><span data-i18n="about.limitsTitle">Honest limits</span></h2>
+        <span class="hint" data-i18n="about.limitsHint">What this dashboard can do — and what it cannot</span>
+      </div>
+      <ul class="about-limits">
+        <li data-i18n="about.limit1">All roles and patterns are heuristics from in/out degree and money flow. They name anomalies, not offenders — no proof of guilt, no legal statement or liability.</li>
+        <li data-i18n="about.limit2">There is no 100 % promise: not every scheme matches a rule, and rules can misfire without context. Cross-checking the transactions on the public ledger is explicitly encouraged.</li>
+        <li data-i18n="about.limit3">The account check assesses at most the last 300 transactions of the queried address — older contacts and patterns are not covered. The queried address is not stored.</li>
+        <li data-i18n="about.limit4">The analysis runs against public endpoints with rate limits (honeycluster.io). The server walk fills the window every five minutes; live mode and endpoints throttle and cache (60 s) — under load, views may briefly lag or drop out (fail-closed instead of pretending success).</li>
+        <li data-i18n="about.limit5">The archive backwards search reads day blocks on a limited read budget (62 days by default): the 180-day retention of registry-linked clusters exceeds what is queryable — old windows may be cut short (marked as truncated).</li>
+        <li data-i18n="about.limit6">The off-ramp assessment of the account check is a heuristic — the decision about payouts rests with the respective provider.</li>
+      </ul>
+      <div class="about-subsection">
+        <h3 data-i18n="about.sourcesTitle">Data sources</h3>
+        <p class="graph-note" data-i18n="about.sourcesNote">Ledger data: XRP Ledger mainnet via honeycluster.io (WSS/JSON-RPC). Account names and exchange attribution: xrpscan.com (CC BY-NC-SA 4.0). Country borders on the globe: Natural Earth (TopoJSON). Every finding address can be verified directly on the public ledger.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footbar">
+    <a class="foot-link" href="index.html" data-i18n="tab.dashboard">Dashboard</a>
+    <a class="foot-link" href="history-host.html" data-i18n="tab.flowhost">Flow-Host</a>
+    <span class="foot-note" data-i18n="foot.note">Bait anonymity: seeds and bait addresses are never served by the server and never rendered by the client.</span>
+  </footer>
+
+  <script type="module">
+'use strict';
+/* Info-Seite: Sprach-Basisteil (Muster history-host.html) — Titel/Meta/lang,
+   statische data-i18n-Texte, Sprachumschalter. Dazu die vier Panel-Signete
+   aus public/icons.mjs (Unikat-Rollen). Der i18n-Text jedes Panel-Titels
+   liegt in einem Kindelement MIT data-i18n — applyStatic überschreibt nur
+   dieses Kind, das eingehängte .panel-marker-Span bleibt vom Sprachwechsel
+   unberührt (idempotenter Mount, Muster app.js mountPanelMarker). Kein
+   Fetch, kein Polling, kein Vendor — die Seite bleibt statisch schnell. */
+
+import { applyLang, applyStatic, initLangSwitcher } from './i18n.mjs';
+import {
+  panelMarkerRadar, panelMarkerSieve, panelMarkerLexicon, panelMarkerFrame,
+} from './icons.mjs';
+
+function mountMarker(id, svg) {
+  const h = document.getElementById(id);
+  if (!h) return;
+  try {
+    if (h.querySelector('.panel-marker')) return;
+    h.insertAdjacentHTML('afterbegin', '<span class="panel-marker" aria-hidden="true">' + svg + '</span>');
+  } catch { /* DOM nicht schreibbar: Signet entfällt, wirft aber nicht */ }
+}
+
+applyLang();
+applyStatic(document);
+initLangSwitcher(document.getElementById('lang-switch'));
+mountMarker('about-mission-title', panelMarkerRadar());
+mountMarker('about-detect-title', panelMarkerSieve());
+mountMarker('about-glossary-title', panelMarkerLexicon());
+mountMarker('about-limits-title', panelMarkerFrame());
+document.addEventListener('hx:langchange', () => applyStatic(document));
+  </script>
+</body>
+</html>

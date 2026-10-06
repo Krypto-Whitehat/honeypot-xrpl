@@ -285,18 +285,20 @@ Fenster, Resett nach 30 s Inaktivität. `api/advance.js`: `REQUESTS_PER_SEC
 = 10`, `TICK_REQUEST_BUDGET = 250` (25 s nutzbare Tick-Zeit × 10/s,
 konservativ unter der simulierten Obergrenze 270 — Simulation in
 `lib/rate-gate.test.mjs`: 70 req/5 s, 270 req/25 s, 320 req/30 s),
-`DEFAULT_BUDGET = 100` Blöcke/Tick. `FETCH_PARALLEL = 4` (expand:true-
-Latenz gemessen Ø ~0,7 s → ~5,7 req/s < 10/s steady); der Token-Bucket
-`lib/rate-gate.mjs` kappt **pro Request**, nicht pro Tick. 429/5xx werden
-behandelt wie slowDown/tooBusy (retry-after-Header, Deadline-Guard).
-Throttle-Semantik bei echtem Überschreiten ist UNVERIFIED (bewusst nicht
-bis zur Grenze belastet).
+`DEFAULT_BUDGET = 140` Blöcke/Tick (Aufhol-Beschaltung 05.10.2026; Bilanz
+140 + Replay 40 + Entity 20 + Seed 1 = 201 ≤ 250). `FETCH_PARALLEL = 4`
+(expand:true-Latenz gemessen Ø ~0,7 s → ~5,7 req/s < 10/s steady); der
+Token-Bucket `lib/rate-gate.mjs` kappt **pro Request**, nicht pro Tick.
+429/5xx werden behandelt wie slowDown/tooBusy (retry-after-Header,
+Deadline-Guard). Throttle-Semantik bei echtem Überschreiten ist UNVERIFIED
+(bewusst nicht bis zur Grenze belastet).
 
 **Vollabdeckung und Catch-up:** 1 Request/Block → 12,6–15,3 req/min
 (0,21–0,25 req/s, ~2,5 % des steady-Limits). 5-min-Bedarf 63–77 Blöcke;
-ein Tick Budget 100 → Headroom 1,3–1,6×. Catch-up 1 h Rückstand
-(758–915 Blöcke): ~8–10 Ticks; mit drei versetzten Crons (Tick alle
-~100 s, 300 Blöcke/5 min) ≈ 13–15 min. Blockrate gemessen 15,25/min
+ein Tick Budget 140 → Headroom ~1,8–2,2×. Catch-up 1 h Rückstand
+(758–915 Blöcke): ~6–7 Ticks Budget-seitig (Wall-Deckel ~19-s-Walk-Fenster
+macht live ~8–14); mit drei versetzten Crons (Tick alle ~100 s, bis zu
+420 Blöcke/5 min) ≈ 13–15 min. Blockrate gemessen 15,25/min
 (60-s-Probe), dokumentiert 12,63/min — NICHT 181k Blöcke/Tag (das wäre
 0,5-s-Takt); real 18.187–21.960 Blöcke/Tag.
 
@@ -345,7 +347,7 @@ neue Secrets im Repo.
 | `GITHUB_HISTORY_TOKEN` | **Pflicht** für Advance/Flow-State/Block-Fenster (fail-closed 503 sonst) | GitHub-Token fürs Datenrepo (`lib/history.mjs`) |
 | `GITHUB_HISTORY_REPO` | optional (Default `Krypto-Whitehat/honeypot-xrpl-history`) | Datenrepo (`lib/history.mjs`) |
 | `GITHUB_HISTORY_BRANCH` | optional (Default `main`) | Branch (`lib/history.mjs`) |
-| `ADVANCE_BUDGET` | optional (Default 100, `api/advance.js` `DEFAULT_BUDGET`) | Blöcke pro Tick |
+| `ADVANCE_BUDGET` | optional (Default 140, `api/advance.js` `DEFAULT_BUDGET`) | Blöcke pro Tick |
 | `ADVANCE_LOOKBACK` | optional (Default 0 = Live-Edge) | initialer Catch-up (`api/advance.js`) |
 | `RPC_URL` | optional (Default aus `config.json` → honeycluster.io) | HTTP-JSON-RPC-Endpunkt aller Server-Pfade |
 | `BAIT_ADDRESSES`, `WSS_URL`, `NETWORK` | optional | wie oben |
@@ -366,11 +368,11 @@ nach Nutzer-Angabe); Kalibrierung nachholen, bevor `TICK_REQUEST_BUDGET`/
 
 | Verbraucher | Requests |
 |---|---|
-| Actions-Tick `/api/advance` (3 versetzte Workflows ≈ Tick alle 100 s, Budget 100 Blöcke = 100 Requests, Parallelität 4 → ~5,7 req/s, pro Request gated) | ≤ **100 req/100 s = 60/min-Spitze**, mittig unter 10/s |
+| Actions-Tick `/api/advance` (3 versetzte Workflows ≈ Tick alle 100 s, Budget 140 Blöcke = 140 Requests worst case, Parallelität 4 → ~5,7 req/s, pro Request gated; Wall-Deckel maxDuration 30 s kappt live auf ~55–108 Blöcke/Tick) | ≤ **140 req/100 s = 84/min-Spitze**, mittig unter 10/s |
 | `/api/ledger`-Snapshot (expand:true, 1 Request, 60-s-Cache) | ≤ **1/min** pro Instanz |
 | `/api/flow-state` validatedIndex (1 RPC, 60-s-Prozess-Cache) | ≤ **1/min** pro Instanz |
 | `/api/block-window` (0 RPC — liest nur GitHub-Contents, 60-s-Cache) | **0** |
-| **Summe Server-Egress gegen honeycluster** | **deutlich unter 10 req/s** (Walk dominiert: 100 req in ≤ 30 s Function-Zeit, durch Gate ≤ 10/s) |
+| **Summe Server-Egress gegen honeycluster** | **deutlich unter 10 req/s** (Walk dominiert: ≤ 140 req in ≤ 30 s Function-Zeit, durch Gate ≤ 10/s) |
 | Browser-Opt-in-LIVE (pro Besucher-IP, WSS + 1 ledger-Kommando/Block, clientseitiger rate-gate) | ≤ **0,25 req/s pro Tab** |
 
 Der Server-Walk teilt die honeycluster-Rate nur mit sich selbst (concurrency-
@@ -381,8 +383,8 @@ Entwickler-IP) addieren sich Monitor-account_tx und Browser-LIVE — der
 clientseitige rate-gate und der serverseitige 429-Backoff federn das ab.
 
 **Tradeoff Live-Frische vs. Request-Budget (ehrlich):** Der Server-Walk
-(3 versetzte Crons, Budget 100 Blöcke/Tick) hält die Blockrate
-(12,6–15,3 Blöcke/min) mit Headroom 1,3–1,6× und holt 1 h Rückstand in
+(3 versetzte Crons, Budget 140 Blöcke/Tick) hält die Blockrate
+(12,6–15,3 Blöcke/min) mit Headroom ~1,8–2,2× und holt 1 h Rückstand in
 ~13–15 min auf — der Flow-State ist Akkumulator mit Vollabdeckung, kein
 Live-Graph; die Rückstands-Anzeige im Flow-Host (`validatedIndex − cursor`)
 macht den Stand sichtbar. Ungeflaggte Txs sind im 24h/3d/7d-Fenster nur

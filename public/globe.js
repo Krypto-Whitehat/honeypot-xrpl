@@ -71,6 +71,10 @@
  */
 
 import { t, sevText } from './i18n.mjs';
+/* Globe-Fallback-Illustration (Design P0, public/icons.mjs): textlose
+ * Gravur-Kugel, aria-hidden — der Hinweistext (i18n key globe.fallback)
+ * bleibt die tragende Auskunft. */
+import { svgGlobeFallback } from './icons.mjs';
 
 // Lokales Vendoren (Performance-Umbau 2026-10-05): die Bundles liegen unter
 // public/vendor/ und werden same-origin ausgeliefert (vercel.json Rewrites
@@ -604,6 +608,12 @@ export function initGlobe(ctx) {
       const box = document.createElement('div');
       box.className = 'globe-fallback';
       box.setAttribute('role', 'status');
+      // Illustration ÜBER dem Hinweistext (globe.css: flex-direction column).
+      const illu = document.createElement('span');
+      illu.className = 'empty-illu';
+      illu.setAttribute('aria-hidden', 'true');
+      illu.innerHTML = svgGlobeFallback();
+      box.appendChild(illu);
       const p = document.createElement('p');
       p.className = 'graph-note';
       p.textContent = t(GLOBE_FALLBACK_NOTE);

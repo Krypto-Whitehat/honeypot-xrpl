@@ -61,6 +61,14 @@ export function addrChipsRowHtml(opts) {
   const {
     members, tagsByAddr, nameChipHtml, tagChipHtml,
     dropsByAddr = null, cap = 5, tagCap = 3, sort = 'drops',
+    // moreChip (Design P2, optional): Callback moreChip(hidden, shown) —
+    // wird bei nicht-leerer Chip-Zeile aufgerufen (hidden = verdeckte
+    // Einträge, auch 0 möglich; shown = gezeigte). Rückgabewert wird 1:1 als
+    // Markup AN die Chip-Reihe angehängt; der Host verantwortet Markup, i18n
+    // und ob er bei hidden = 0 etwas zeigt ('' hängt nichts an). Ohne
+    // moreChip bleibt das bisherige Verhalten (stilles Kappen) exakt
+    // erhalten — der Flow-Host (history-host.html) ruft ohne dieses Argument.
+    moreChip = null,
   } = opts ?? {};
   const entries = [];
   for (const a of Array.isArray(members) ? members : []) {
@@ -82,8 +90,19 @@ export function addrChipsRowHtml(opts) {
   } else {
     entries.sort((x, y) => (y.drops - x.drops) || (y.tags - x.tags) || x.a.localeCompare(y.a));
   }
-  const chips = entries.slice(0, Math.max(1, Math.floor(Number(cap) || 5)))
+  const shown = entries.slice(0, Math.max(1, Math.floor(Number(cap) || 5)));
+  const chips = shown
     .map((x) => `<span class="cluster-addr-chips">${x.html}</span>`)
     .join('');
-  return `<div class="cluster-names cluster-addr-row">${chips}</div>`;
+  // Kapazitäts-Callback (Design P2): bei nicht-leerer Zeile ruft das Modul
+  // moreChip(hidden, shown) auf — auch ohne Kappung (hidden = 0), damit der
+  // Host die gezeigte Anzahl auch dann kennt (Mega-Meta-Zeile zählt sonst
+  // gezeigte Chips als 'weitere' mit). Markup/Sprache sind Host-Sache;
+  // Mega-Karten sammeln die Zahl und liefern '' zurück, statt zwei
+  // konkurrierende Hinweise zu zeigen.
+  let more = '';
+  if (typeof moreChip === 'function' && entries.length > 0) {
+    more = String(moreChip(entries.length - shown.length, shown.length) ?? '');
+  }
+  return `<div class="cluster-names cluster-addr-row">${chips}${more}</div>`;
 }

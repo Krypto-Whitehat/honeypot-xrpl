@@ -80,6 +80,13 @@
   --a6-r-md: 1rem;
   --a6-r-lg: 1.375rem;
   --a6-r-pill: 999px;
+  --a6-r-xs: 3px; /* kleinster Radius (Swatches, Scrollbar-Thumbs) — Design P4 */
+
+  /* Bedeutungsband-Breite (Design P2/P4): das linke 3-px-Band ist
+     Bedeutungsträger (Severity/Rolle), nie Deko — und bleibt EINHEITLICH
+     3 px für alle Stufen inkl. sev-malicious (Plan-Kritik 7a: keine
+     Verstärkung auf 4 px, kein linksseitiger Akzentstreifen-Wuchs). */
+  --a6-band-width: 3px;
   --a6-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   --a6-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   --a6-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -105,6 +112,12 @@
   --a6-brand-blue: #16305c;
   --a6-brand-teal: #0f766e;
   --a6-brand-amber: #b45309;
+
+  /* Akzent der Leerzustands-Illustrationen (Design P0, public/icons.mjs):
+     genau EIN Akzent-Element (.icon-accent) je Illustration — tiefe
+     Brand-Tinte als eigener Kanal, kein Severity-Ton und kein neuer
+     Farbwert; .empty-illu nutzt den Token mit Brand-Blau-Fallback. */
+  --a6-icon-accent: var(--a6-brand-blue);
 
   /* Raster (Astra-6): Gutter skaliert mit der Viewportbreite; main,
      view-nav und Hero-Bühne teilen sich dieselbe Breitenformel —
@@ -225,6 +238,45 @@ html, body {
   border-bottom: 1px solid var(--a6-line-strong);
 }
 
+/* Marke (Design P1): Gravur-Logo .brand-mark (34×34 inline-SVG, Wabe ×
+   Ledger-Knoten × Köder-Tropfen) neben der Textspalte. Markup identisch in
+   index.html und history-host.html gepflegt; das Favicon ist die eigenständige
+   Vereinfachung in public/favicon.svg. Der H1-Text trägt den Namen (genau
+   eine H1 bleibt erhalten, das SVG ist aria-hidden). */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-text { min-width: 0; }
+
+.brand-mark {
+  display: block;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  color: var(--a6-ink);
+}
+
+.brand-mark svg {
+  display: block;
+  width: 34px;
+  height: 34px;
+}
+
+/* Köder-Tropfen — der EINE Akzent der Marke: Füllung ausschließlich über den
+   Akzent-Token (kein Zweitfarbwert im Markup), Hover-Füllung nur bei echtem
+   Zeiger, 180 ms fill (reduced-motion: Transition aus, unten). */
+.brand-mark .hp-drop {
+  fill: var(--a6-accent);
+  transition: fill var(--a6-fast) var(--a6-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .brand:hover .brand-mark .hp-drop { fill: var(--a6-accent-hi); }
+}
+
 .brand h1 {
   margin: 0;
   /* 24 px (Design-Audit): H1 bleibt dominant — .hx-title wurde auf
@@ -234,10 +286,32 @@ html, body {
   letter-spacing: -0.02em;
 }
 
+/* Wortmarke (Design P1) OHNE dritte Schriftfamilie: ab 900 px Versalen mit
+   0.18-em-Tracking aus Inter 800; „XRPL“ als JetBrains-Mono-700-Anhang
+   („gestempelte Daten“ als Kontrast zur Gravur). Darunter bleibt der
+   Ist-Zustand (24 px/800, −0.02 em) unverändert. */
+@media (min-width: 900px) {
+  .brand h1 {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+  }
+
+  .brand h1 .brand-xrpl {
+    font-family: var(--a6-mono);
+    font-weight: 700;
+    font-size: 0.9em;
+    letter-spacing: 0.14em;
+  }
+}
+
 .brand .sub {
   margin: 3px 0 0;
   color: var(--a6-muted);
   font-size: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-mark .hp-drop { transition: none; }
 }
 
 .stats {
@@ -260,7 +334,7 @@ html, body {
   border: 1px solid var(--a6-line);
   /* 3px-Band links = Severity-LED der Kopf-KPIs (Status nie nur durch Farbe —
      der Badge-/Labeltext trägt denselben Schweregrad). */
-  border-left: 3px solid var(--a6-line-strong);
+  border-left: var(--a6-band-width) solid var(--a6-line-strong);
   border-radius: var(--a6-r-sm);
   box-shadow: var(--a6-e1);
 }
@@ -339,6 +413,26 @@ html, body {
   max-width: min(var(--a6-container), 100% - 2 * var(--a6-gutter));
   margin-inline: auto;
   width: 100%;
+}
+
+/* Text-Zentrierung in ALLEN View-Tabs (Layout-Fix 2026-10-06): Die <a>-Tabs
+   (index.html „Flow-Host“, history-host.html „Dashboard“) laufen als
+   blockifizierte Flex-Kinder des Nav-Containers und legen ihre vererbte
+   Zeilenbox (line-height 1.55 → 20.15 px) an den oberen Rand — gemessen
+   gapTop 11 / gapBottom 17 px (−6 px Abweichung) samt UA-Unterstreichung,
+   während die <button>-Tabs über ihre UA-Grundeinstellung auf 14.5/14.5 px
+   zentrieren (Referenzmesser „Konto-Check“). inline-flex + align-items:center
+   stellt beide Tab-Arten auf dieselbe Zeilenmitte (verifiziert 13.9/14.1 px),
+   text-decoration:none entfernt die UA-Unterstreichung des Anker-Tabs. Die
+   Button-Tags ändern ihren Stand dadurch nicht — gemessen unverändert
+   14.5/14.5 px. Ursachen-Fix auf Klassenebene statt Symptom-Patches je
+   Element; legend-items/live-stats/chips sind Ink-Artefakte der Glyphen
+   (line-box zentriert, kein Layout-Fehler) und bleiben unangetastet. */
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 /* Anker-Ziele der Views nicht unter der Kopfzeile verschwinden lassen. */
@@ -461,7 +555,7 @@ main {
   padding: 12px 14px;
   background: var(--a6-surface);
   border: 1px solid var(--a6-line);
-  border-left: 3px solid var(--a6-line-strong);
+  border-left: var(--a6-band-width) solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
 }
 
@@ -703,7 +797,7 @@ main {
   padding: 8px 12px;
   background: var(--a6-surface-alt);
   border: 1px solid var(--a6-line);
-  border-left: 3px solid var(--a6-muted);
+  border-left: var(--a6-band-width) solid var(--a6-muted);
   border-radius: var(--a6-r-sm);
   font-size: 13px;
 }
@@ -858,8 +952,43 @@ main {
   color: #fff;
 }
 
+/* Aktuelle Seite in Anker-Navigationen (about.html trägt aria-current="page"
+   auf dem eigenen Tab — Muster .graph-tab[aria-selected], aber für Seiten-
+   statt View-Wechsel; dieselbe Ink-Fläche, kein zweites Farbsystem). */
+.view-tab[aria-current="page"] {
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
+  color: #fff;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .graph-tab:not([aria-selected="true"]):hover { background: var(--a6-surface-alt); }
+}
+
+/* Verdichtungs-Umschalter der Cluster-Karten (Design P2, index.html
+   #cluster-density): Toggle-Button-Gruppe im .graph-tab-Gewand — die
+   Auswahlfläche läuft über aria-pressed (Muster .lang-btn), NICHT über
+   aria-selected (keine role="tab"-Semantik; die Graph-Tabs bleiben die
+   einzige Tablist). Basisklasse .graph-tab liefert 44-px-Ziel, Fokus-Ring,
+   reduced-motion und forced-colors (Selektorliste unten) mit. */
+.cluster-density {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.density-btn {
+  padding: 8px 14px; /* kompakter als Graph-Tabs (18 px) — drei Stufen, ein Gruppenzweck */
+}
+
+.density-btn[aria-pressed="true"] {
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .density-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
 }
 
 .graph-disclaimer {
@@ -884,7 +1013,7 @@ main {
 .swatch {
   width: 11px;
   height: 11px;
-  border-radius: 3px;
+  border-radius: var(--a6-r-xs); /* kleinster Radius als Token (Design P4) */
   display: inline-block;
   border: 1px solid rgba(20, 20, 22, 0.25);
 }
@@ -941,7 +1070,7 @@ main {
      in Brand-Tinte (--a6-card-line, ehemals D2-Folgeblock) + linkes 3px-Band
      in der dominanten Rollenfarbe (Regeln unten). */
   border: 1px solid var(--a6-card-line);
-  border-left: 3px solid var(--a6-line-strong);
+  border-left: var(--a6-band-width) solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
   padding: clamp(1rem, 1.5vw, 1.5rem);
   box-shadow: var(--a6-e1);
@@ -971,6 +1100,20 @@ main {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
+}
+
+/* Kopf-Tönung NUR für den Maliz-Träger (Design P2): SOLIDE error-soft-Fläche
+   als Platte im Karten-Polster — bewusst kein Gradient und keine Band-
+   Verstärkung (Plan-Kritik 7a: das Muster „runde Karte mit linksseitigem
+   Akzentstreifen“ wird nicht zusätzlich verstärkt; das Band bleibt für alle
+   Schweregrade einheitlich var(--a6-band-width)). Die Tönung ist Flächen-
+   Hinterlegung hinter Text (Textfarbe bleibt Ink, ≥ 4,5:1 auf error-soft)
+   — das Schweregrad-Signal selbst trägt das .risk-badge-Textlabel, die
+   Fläche verstärkt nur die Hierarchie. */
+.cluster-card.sev-malicious .cluster-head {
+  background: var(--a6-error-soft);
+  padding: 6px 10px;
+  border-radius: var(--a6-r-sm);
 }
 
 .cluster-label {
@@ -1009,6 +1152,17 @@ main {
   background: var(--a6-surface-alt);
   color: var(--a6-body);
   font-size: 12px;
+}
+
+/* Drainer-Hervorhebung in der Rollen-Zeile (Design P2): der Drainer ist der
+   Maliz-Träger der Rollen-Tafel —error-soft-Fläche + Rollen-Ton in Rand/Text
+   (Rollen-Tokens D7, Text ≥ 4,5:1 auf error-soft). Dieselbe Behandlung wie
+   .chain-node.chain-drainer — ein Signal, zwei Ebenen. */
+.role-chip.role-drainer {
+  border-color: var(--a6-role-drainer-border);
+  background: var(--a6-error-soft);
+  color: var(--a6-role-drainer);
+  font-weight: 650;
 }
 
 /* XRPScan-Namens-Chips (nur ergänzt, Muster .role-chip/.risk-badge): Name
@@ -1076,7 +1230,16 @@ main {
   gap: 4px;
   max-inline-size: 100%;
 }
-.cluster-addr-more { color: var(--a6-muted); font-size: 12px; }
+/* '+N weitere Konten'-Hinweis (Design P2, Markup app.js moreChip): sitzt am
+   Ende der Chip-Zeile, vertikal auf Chip-Höhe; title trägt die volle
+   Mitgliederzahl. Der '+'-Hinweis aus tagChipsHtml (je Adresse, aria-hidden)
+   teilt sich bewusst dieselbe Klasse — eine Hinweis-Sprache. */
+.cluster-addr-more {
+  align-self: center;
+  color: var(--a6-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 
 .cluster-metrics {
   display: flex;
@@ -1103,6 +1266,32 @@ main {
   font-size: 12px;
   color: var(--a6-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Mega-Cluster (Design P2, data-size="mega" — Mitglieder > 100 ODER
+   distinctAccounts ≥ 100): zweiteiliger Metrik-Block statt langer Zeile —
+   XRP prominent in Zeile 1, Tx/Konten als kombinierte 12-px-Mono-Zeile in
+   Zeile 2. Keine Schrift unter 12 px. */
+.cluster-metrics-mega {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.cluster-metrics-sub {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Mega-Meta-Zeile (app.js cluster.megaNote): der EINE Aggregations-Hinweis
+   der Karte — ersetzt den '+N weitere'-Hinweis der Chip-Zeile, damit nie
+   zwei konkurrierende Hinweise stehen (Plan-Kritik 10). */
+.cluster-mega-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-body);
 }
 
 /* Drainer→Kollektor-Kette: Start-bis-Ende-Nachverfolgung des Geldflusses */
@@ -1183,6 +1372,35 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------------- Verdichtungsstufen der Cluster-Karten (Design P2) ----------------
+   data-density am Listen-Container (#cluster-list; app.js setClusterDensity/
+   renderClusterList, Segment-Control im panel-head, Persistierung
+   localStorage 'hx-density'). Nur Abstände/Größen — keine Schrift unter
+   12 px, keine Touch-Ziel-Verkleinerung (Karten bleiben klickbare Flächen
+   weit über 44 px, Buttons laufen über .graph-tab mit 44-px-Mindesthöhe).
+   Die Kappung von Chips (5→3 Adressen) und Kette (2→1 Pfade) passiert im
+   Template (app.js clusterCardHtml), nicht im CSS. */
+.cluster-list[data-density="compact"] .cluster-card {
+  padding: 12px 14px;
+}
+
+.cluster-list[data-density="compact"] .cluster-metrics,
+.cluster-list[data-density="compact"] .cluster-times {
+  gap: 10px;
+}
+
+.cluster-list[data-density="compact"] .cluster-times {
+  flex-wrap: nowrap; /* Zeiten einzeilig (Plan P2); kurze Uhrenwerte, umbarchbar in den Spans */
+}
+
+.cluster-list[data-density="dense"] .cluster-card {
+  padding: 10px 12px;
+}
+
+.cluster-list[data-density="dense"] .cluster-xrp {
+  font-size: 17px; /* 20 → 17 px (Plan P2): bleibt Primärmetrik über dem 12-px-Umfeld */
+}
+
 /* Transit-Hinweis (Markup app.js clusterCardHtml + drilldown.js, Klasse hatte
    zuvor keine Regel): Meta-Ton in 12 px statt vererbtrem 15-px-Ink-Body. Die
    drilldown-Variante trägt zusätzlich .graph-note (gleiche Typografie). */
@@ -1197,7 +1415,9 @@ main {
 /* Leerzustände (Design-Audit): bisher reiner Fließtext — jetzt gestaltete
    Fläche (gestrichelte Kontroll-Linie, Surface-alt, zentriert). Betrifft
    #feed-empty/#log-empty/#cluster-empty (index.html) und #fh-status-msg/
-   #fh-graph-empty/#fh-empty (history-host.html) ohne Markup-Änderung. */
+   #fh-graph-empty/#fh-empty (history-host.html); der <p>-Textinhalt samt
+   data-i18n-Keys bleibt unverändert — die Illustration wird per JS
+   (public/icons.mjs mountEmptyIllu) als erstes Kind ergänzt. */
 .empty {
   color: var(--a6-muted);
   font-size: 14px;
@@ -1206,6 +1426,52 @@ main {
   border-radius: var(--a6-r-sm);
   padding: 16px;
   text-align: center;
+}
+
+/* Leerzustands-Illustration (Design P0, Unikat-SVGs aus public/icons.mjs):
+   textlose Gravur über dem Text, 160×120, Grundtöne über currentColor in der
+   Kontroll-Linie; der EINE Akzent (.icon-accent) läuft über den eigenen
+   Token. Statisch — reduced-motion-neutral; forced-colors siehe unten. */
+.empty-illu {
+  display: block;
+  margin: 0 auto 10px;
+  width: 160px;
+  height: 120px;
+  color: var(--a6-control-line);
+}
+
+.empty-illu svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.empty-illu .icon-accent {
+  color: var(--a6-icon-accent, var(--a6-brand-blue));
+}
+
+/* Panel-Signet Activity Graph (Design P0, app.js hängt es in die
+   <h2 id="graph-title">): 20-px-Mini-Topologie in Ink, auf die H2-Baseline
+   gestellt — reine Gravur ohne Akzent, bewusst kein Hexagon (das
+   Waben-Motiv gehört exklusiv zur Marke .brand-mark). */
+.panel-marker {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  vertical-align: -3px;
+  color: var(--a6-ink);
+}
+
+.panel-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (forced-colors: active) {
+  .empty-illu { color: CanvasText; }
+  .empty-illu .icon-accent { color: Highlight; }
 }
 
 .risk-badge {
@@ -1389,6 +1655,104 @@ main {
 
 #last-update { font-family: var(--a6-mono); }
 
+/* Footer-Verweise (Info-Seite prominently, Muster .footbar): schlichte
+   Text-Links in Body-Tinte, Hover auf Ink — keine zweite Button-Sprache in
+   der Fußzeile. */
+.foot-link {
+  color: var(--a6-body);
+  text-decoration: underline;
+  text-decoration-color: var(--a6-line-strong);
+  text-underline-offset: 3px;
+}
+
+.foot-link:hover {
+  color: var(--a6-ink);
+}
+
+.foot-link:focus-visible {
+  outline: 3px solid var(--a6-focus);
+  outline-offset: 3px;
+}
+
+/* ---------------- Info-Seite (about.html, 2026-10-06) ----------------
+   Eigenständige Seite im App-Shell-Look (Muster history-host.html: nur
+   style.css, keine zweite CSS-Datei). Panels, panel-head, panel-marker und
+   .graph-note kommen aus dem Bestand; hier stehen nur die Eigenanteile:
+   Lead-Absätze, Begriffs-Definitionen (dl) und die Grenzen-Liste. */
+
+.about-lead {
+  max-inline-size: 72ch;
+  margin: 0 0 10px;
+  color: var(--a6-body);
+}
+
+/* Begriffs-Raster: Term-Spalte fix getaktet (min 11 rem, max 16 rem),
+   Beschreibung folgt in der Restspalte — Präzisions-Look der Konten-Tabelle
+   ohne deren Mono-Dichte; ein Aufzählungsraum unter 760 px. */
+.about-defs {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  gap: 10px 22px;
+  margin: 0 0 4px;
+}
+
+.about-defs dt {
+  font-weight: 650;
+  color: var(--a6-ink);
+  overflow-wrap: anywhere;
+}
+
+.about-defs dd {
+  margin: 0;
+  color: var(--a6-body);
+}
+
+/* Abschnitt innerhalb eines Panels (Muster .check-section, account-check.css):
+   Haarlinien-Trennung, 14-px-Titel über Body. */
+.about-subsection {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--a6-line);
+}
+
+.about-subsection h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--a6-ink);
+}
+
+/* Grenzen-Liste: geordnete Aufzählung mit Ink-Markern (kein Emoji-Ersatz),
+   Zeilenabstand im Lesetakt. */
+.about-limits {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 8px;
+  max-inline-size: 90ch;
+  color: var(--a6-body);
+}
+
+.about-limits li::marker {
+  color: var(--a6-ink);
+}
+
+@media (max-width: 760px) {
+  .about-defs {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px 0 10px;
+  }
+
+  .about-defs dt {
+    margin-top: 8px;
+  }
+
+  .about-defs dt:first-child {
+    margin-top: 0;
+  }
+}
+
 /* ---------------- Responsiv ---------------- */
 
 /* Konsistente Bühnen-Höhenleiter (Design-Audit 2026-10-06): gemeinsamer Token
@@ -1490,7 +1854,7 @@ main {
   .block-card,
   .log-row,
   .cluster-card {
-    border-left-width: 3px;
+    border-left-width: var(--a6-band-width);
     border-left-color: CanvasText;
   }
 }

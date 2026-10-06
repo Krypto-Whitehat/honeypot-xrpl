@@ -7,19 +7,26 @@
   <title>Honeypot XRPL – Flow-Host</title>
   <meta name="description" content="Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.">
   <link rel="stylesheet" href="style.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23f5a623' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23f5a623'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
 <body data-a6>
   <header class="topbar">
+    <!-- Marke identisch zu index.html (Design P1, Design P1-Pflegehinweis im
+         Kopf-Kommentar dort): Gravur-Logo .brand-mark inline, aria-hidden,
+         H1 trägt den Namen; „XRPL“ als Mono-Anhang .brand-xrpl (ab 900 px). -->
     <div class="brand">
-      <h1>Honeypot&nbsp;XRPL</h1>
-      <p class="sub" data-i18n="fh.title">Flow-Host: accumulated cross-block flow state</p>
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M17,3.5 L28.5,10.5 L28.5,23.5 L17,30.5 L5.5,23.5 L5.5,10.5 Z"/><path d="M10.5,13 L17,9.5 L23.5,13" stroke-width="1" stroke-opacity="0.55"/><path d="M5.5,10.5 H28.5 M5.5,23.5 H28.5" stroke-width="1" stroke-opacity="0.55"/><circle cx="5.5" cy="10.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="28.5" cy="10.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="5.5" cy="23.5" r="1.6" fill="currentColor" stroke="none"/><circle cx="28.5" cy="23.5" r="1.6" fill="currentColor" stroke="none"/><path class="hp-drop" d="M17,11.5 C19.2,14.3 21,16.2 21,18.5 A4,4 0 1,1 13,18.5 C13,16.2 14.8,14.3 17,11.5 Z" stroke="none"/></svg></span>
+      <div class="brand-text">
+        <h1>Honeypot&nbsp;<span class="brand-xrpl">XRPL</span></h1>
+        <p class="sub" data-i18n="fh.title">Flow-Host: accumulated cross-block flow state</p>
+      </div>
     </div>
     <div class="lang-switch" id="lang-switch"></div>
   </header>
 
   <nav class="view-nav graph-tabs" aria-label="Navigation" data-i18n-aria="fh.navAria">
     <a class="view-tab graph-tab" href="index.html" data-i18n="tab.dashboard">Dashboard</a>
+    <a class="view-tab graph-tab" href="about.html" data-i18n="tab.about">About</a>
   </nav>
 
   <main>
@@ -81,6 +88,11 @@ import {
 import { ensureNameIndex, lookupNameCached } from './name-index.mjs';
 import { ensureExchangeRegistry, multiUserEntryOf } from './exchange-registry.mjs';
 import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
+/* Leerzustands-Illustrationen (Design P0): Unikat-SVGs aus public/icons.mjs —
+ * DOM-frei importierbar, textlos (aria-hidden), i18n unberührt. #fh-empty
+ * trägt textContent-Überschreibungen (renderView/load) — dort wird nach jedem
+ * Text-Setzen erneut (idempotent) gemountet. */
+import { mountEmptyIllu, svgEmptyGraph2D, svgEmptyFlowState } from './icons.mjs';
 
 // Rollen-Map bleibt als Fallback erhalten (Markup-Muster app.js); die
 // sichtbare Beschriftung läuft über die legend.*-Keys (EN/DE).
@@ -366,6 +378,11 @@ const els = {
   refresh: document.getElementById('fh-refresh'),
 };
 
+/* Leerzustands-Illustrationen einmalig einhängen (#fh-status-msg bleibt
+ * bewohnter Status-Text ohne Illustration — kein Leerzustand). */
+mountEmptyIllu(els.graphEmpty, svgEmptyGraph2D());
+mountEmptyIllu(els.empty, svgEmptyFlowState());
+
 function renderView(data) {
   const clusters = Array.isArray(data.clusters) ? data.clusters : [];
   const configured = !data.reason;
@@ -406,6 +423,7 @@ function renderView(data) {
     els.list.hidden = true;
     els.empty.hidden = false;
     els.empty.textContent = configured ? t('fh.empty') : t('fh.emptyNoPersist');
+    mountEmptyIllu(els.empty, svgEmptyFlowState()); // textContent räumt die Illustration ab — idempotent neu mounten
     return;
   }
   // Cluster existieren: Flow-Graph aus den retained edges + Rollen rendern.
@@ -452,6 +470,7 @@ async function load() {
     els.list.hidden = true;
     els.empty.hidden = false;
     els.empty.textContent = t('fh.emptyNoPersist');
+    mountEmptyIllu(els.empty, svgEmptyFlowState()); // wie renderView: nach textContent neu mounten
   } finally {
     els.refresh.disabled = false;
   }

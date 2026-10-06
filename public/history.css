@@ -19,6 +19,49 @@
   padding-bottom: 12px;
 }
 
+/* ---------- Info-Box „Was zeigt die Historie?“ (details/summary, 2026-10-06)
+   Markup von history.js renderShell (details.history-info). summary trägt den
+   Kurzhinweis (tab.historyHint) als Block — display:block statt inline-flex,
+   damit der mehrzeilig umbrechende Langtext-Trigger nicht aus der Pill läuft;
+   44-px-Touch-Ziel wie .history-members-more summary. Look: Surface-alt-Fläche
+   mit Haarlinie (kein Farbverlauf, kein Icon, keine Emoji — lab_graphite). */
+.history-info {
+  display: block;
+  margin: 12px 0 0;
+}
+
+.history-info summary {
+  display: block;
+  min-height: 44px; /* Touch-Ziel (Astra-6-Contract) */
+  padding: 8px 12px; /* 4-px-Raster */
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  background: var(--a6-surface-alt);
+  color: var(--a6-body);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .history-info summary:hover {
+    border-color: var(--a6-control-line);
+    background: var(--a6-surface);
+  }
+}
+
+.history-info[open] summary {
+  margin-bottom: 6px;
+  border-color: var(--a6-control-line);
+  background: var(--a6-surface);
+}
+
+.history-info-long {
+  margin: 0;
+  max-inline-size: 72ch;
+  color: var(--a6-muted);
+  font-size: 12px;
+}
+
 /* ---------- Suchfeld ---------- */
 
 .history-search {
@@ -130,7 +173,8 @@
    Keine Animationen im Modul — es gibt nichts für prefers-reduced-motion
    zu deaktivieren; transitions werden bewusst nicht eingesetzt. */
 @media (forced-colors: active) {
-  .history-members-more summary {
+  .history-members-more summary,
+  .history-info summary {
     border: 1px solid CanvasText;
   }
 

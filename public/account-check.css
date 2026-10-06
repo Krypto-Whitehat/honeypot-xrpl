@@ -291,6 +291,15 @@
   font-size: 13px;
 }
 
+/* Leerzustands-Illustration im Account-Check (Design P0): dieselbe Rolle
+   „Abschnitt ohne Treffer“ (svgEmptyCheck aus public/icons.mjs) in allen drei
+   Abschnitten — hier kontextuell verkleinert (96×72 statt 160×120), damit der
+   Report nicht aufbläht; reine viewBox-Skalierung, kein zweites SVG. */
+.check-empty .empty-illu {
+  width: 96px;
+  height: 72px;
+}
+
 /* Off-Ramp-Einschätzung */
 .check-eligibility {
   margin: 0;

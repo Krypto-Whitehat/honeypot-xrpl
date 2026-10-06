@@ -105,6 +105,11 @@ import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
  * als Karte verschwinden — Live-Befund 2026-10-06); SEV_RANK single source
  * aus dem Modul (Sortierung + Severity-Union). */
 import { SEV_RANK, serverClustersFromView, mergeClusterViews } from './cluster-views.mjs';
+/* Unikat-SVG-Sprache (Design P0, public/icons.mjs): Leerzustands-
+ * illustrationen für Feed/Log/Cluster, Panel-Signet Activity Graph und der
+ * Diagramm-Marker geflaggter Stunden — DOM-frei, textlos (aria-hidden),
+ * i18n-unberührt. */
+import { mountEmptyIllu, svgEmptyFeed, svgEmptyLog, svgEmptyCluster, panelMarkerGraph, chartMarkerFlagged } from './icons.mjs';
 
 /* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
  * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
@@ -1209,6 +1214,55 @@ const ROLE_ORDER = ['drainer', 'collector', 'relay', 'source', 'unknown']; // Do
 const ROLE_LABEL = { source: 'Source', drainer: 'Drainer', collector: 'Kollektor', relay: 'Relay', unknown: 'Unknown' };
 const roleLabelText = (role) => t('legend.' + role);
 
+/* Verdichtungsstufen der Cluster-Karten (Design P2, nur Anzeige — keine
+   Datenlogik): 'comfortable' (Default), 'compact' (engeres Karten-Polster,
+   Metrik-/Zeit-Gaps 14→10 px, Zeiten einzeilig), 'dense' (zusätzlich
+   Adress-Chips 5→3 und Flusskette maxPaths 2→1, Primärmetrik 20→17 px).
+   Persistierung über localStorage 'hx-density' (guardiert — ohne Storage
+   bleibt die Wahl flüchtig). Mega-Cluster (Mitglieder > 100 ODER
+   distinctAccounts ≥ 100, Vorbild 3D-Aggregatknoten drilldown.js) erzwingen
+   dense-Chips und EINEN Kettenpfad UNABHÄNGIG von der globalen Stufe —
+   endlose Member-Listen werden zur Aggregat-Karte (Meta-Zeile
+   cluster.megaNote, Plan-Kritik 10: genau EIN '+N weitere'-Hinweis pro
+   Karte, geteilte i18n-Keys mit der Adress-Chip-Zeile). */
+const DENSITY_KEY = 'hx-density';
+const DENSITY_LEVELS = ['comfortable', 'compact', 'dense'];
+const MEGA_MEMBER_THRESHOLD = 100;
+let clusterDensity = 'comfortable';
+
+function loadClusterDensity() {
+  try {
+    const v = String(localStorage.getItem(DENSITY_KEY) ?? '');
+    if (DENSITY_LEVELS.includes(v)) clusterDensity = v;
+  } catch { /* Storage nicht verfügbar: Default bleibt */
+  }
+}
+
+// Attribut-Sync (Liste + Segment-Control): wird bei Starten und jedem
+// Stufenwechsel aufgerufen; renderClusterList setzt data-density bei jedem
+// Rendern zusätzlich selbstheilend neu.
+function syncClusterDensityUi() {
+  const listEl = document.getElementById('cluster-list');
+  if (listEl) listEl.setAttribute('data-density', clusterDensity);
+  for (const lvl of DENSITY_LEVELS) {
+    const btn = document.getElementById('density-' + lvl);
+    if (btn) btn.setAttribute('aria-pressed', String(lvl === clusterDensity));
+  }
+}
+
+function setClusterDensity(level) {
+  const target = DENSITY_LEVELS.includes(level) ? level : 'comfortable';
+  if (target === clusterDensity) return;
+  clusterDensity = target;
+  try { localStorage.setItem(DENSITY_KEY, target); } catch { /* Storage optional */ }
+  syncClusterDensityUi();
+  // Einmaliger Neu-Aufbau der Liste (innerHTML) — dasselbe Muster wie pro
+  // Daten-Tick; ohne Cluster-Bestand greift der nächste Rendertick.
+  if (lastClusterGraph && Array.isArray(lastClusterGraph.clusters)) {
+    renderClusterList(lastClusterGraph.clusters);
+  }
+}
+
 // Flusskette als Markup: Pfade aus flowPaths (lib/cluster.mjs) werden entlang
 // EBENER KANTEN mit '→' verbunden; mehrere Pfade trennt ein '·'. Volle
 // Adresse + Kopier-Button + XRPScan-Link nur bei erlaubter Vollanzeige
@@ -1281,6 +1335,15 @@ function clusterCardHtml(c, index) {
     for (const s of Object.values(ownSev)) considerSev(s);
   }
 
+  // Mega-/Verdichtungs-Entscheidung (Design P2, reine Anzeige): Mega-Schwellen
+  // nach Plan (Mitglieder > 100 ODER distinctAccounts ≥ 100); dense-Chips und
+  // EIN Kettenpfad gelten für Mega-Karten immer, für 'dense' global.
+  const memberCount = (c.memberAddresses ?? []).length;
+  const isMega = memberCount > MEGA_MEMBER_THRESHOLD || (Number(c.distinctAccounts) || 0) >= MEGA_MEMBER_THRESHOLD;
+  const denseLevel = isMega || clusterDensity === 'dense';
+  const addrCap = denseLevel ? 3 : 5;
+  const maxPaths = denseLevel ? 1 : 2;
+
   const roleCounts = new Map();
   for (const role of Object.values(c.roles ?? {})) {
     roleCounts.set(role, (roleCounts.get(role) ?? 0) + 1);
@@ -1331,7 +1394,7 @@ function clusterCardHtml(c, index) {
     // (e.transit, lib/tag-identity.mjs), zeigt die Karte einen Text-Hinweis —
     // keine Score-/Topologie-Änderung, reine Anzeigeverfeinerung.
     if (memberEdges.some((e) => e.transit === true)) clusterTransit = true;
-    chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges.map((e) => ({ from: String(e.from), to: String(e.to) })), { maxPaths: 2, maxPathLen: 5 }), { maxChips: 8 });
+    chainInner = flowChainHtml(flowPathsFn(memberNodes, memberEdges.map((e) => ({ from: String(e.from), to: String(e.to) })), { maxPaths, maxPathLen: 5 }), { maxChips: 8 });
   }
   // Persistierte Peeling-Ketten der Server-View (Kritik 4): die Flusskette
   // zeigt sie zusätzlich, wenn vorhanden — Kettenreihenfolge Seed→…→Ende,
@@ -1363,16 +1426,33 @@ function clusterCardHtml(c, index) {
   // tagChipHtml→multiUserEntryOf sind host-seitig gegatet (isFullShownAddr);
   // maskierte oder Deny-Treffer-Adressen liefern nie einen Chip, Tags kommen
   // nur aus belegtem edge.toTag. Ohne Treffer bleibt die Karte unverändert.
+  // moreChip (Design P2): '+N weitere Konten'-Hinweis nur bei tatsächlich
+  // gekappter Zeile, title mit der vollen Mitgliederzahl. Mega-Karten zeigen
+  // bewusst KEINEN Zweit-Hinweis hier (Plan-Kritik 10) — der Callback sammelt
+  // stattdessen die Zahl der gezeigten Chip-Gruppen für die Meta-Zeile ein.
+  let shownChipEntries = 0;
   const namesHtml = addrChipsRowHtml({
     members: c.memberAddresses ?? [],
     tagsByAddr,
     nameChipHtml,
     tagChipHtml,
     dropsByAddr,
-    cap: 5,
+    cap: addrCap,
     tagCap: 3,
     sort: 'drops',
+    moreChip: isMega
+      ? (hidden, shown) => { shownChipEntries = shown; return ''; }
+      : (hidden) => hidden > 0
+        ? `<span class="cluster-addr-more" title="${esc(t('cluster.moreAccountsTitle', { n: fmtNum(memberCount) }))}">${esc(t('cluster.moreAccounts', { n: fmtNum(hidden) }))}</span>`
+        : '',
   });
+
+  // Mega-Meta-Zeile (Vorbild 3D-Aggregatknoten): 'weitere Konten' = alles,
+  // was die Karte nicht einzeln als Chip zeigt — ehrlich gegen die eigene
+  // Oberfläche, keine erfundenen Zähler.
+  const megaNoteHtml = isMega
+    ? `<div class="cluster-mega-note">${esc(t('cluster.megaNote', { n: fmtNum(Math.max(memberCount - shownChipEntries, 0)) }))}</div>`
+    : '';
 
   // Transit-Hinweis-Zeile (tagIdentityDesign, nur bei belegter transit-Kante):
   // reiner Text unter der Namenslinie — keine Score-/Topologie-Änderung.
@@ -1390,22 +1470,29 @@ function clusterCardHtml(c, index) {
     accounts: fmtNum(c.distinctAccounts ?? 0),
   });
 
+  // Metrik-Block: Standard einzeilig flexibel; Mega-Karten zweizeilig (XRP
+  // prominent, Tx/Konten als kombinierte 12-px-Mono-Zeile — Design P2).
+  const xrpHtml = `<span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>`;
+  const txsHtml = `<span class="cluster-txs">${fmtNum(c.txCount ?? 0)} ${esc(t('cluster.txUnit'))}</span>`;
+  const accountsHtml = `<span class="cluster-accounts">${fmtNum(c.distinctAccounts ?? 0)} ${esc(t('cluster.accountUnit'))}</span>`;
+  const metricsHtml = isMega
+    ? `<div class="cluster-metrics cluster-metrics-mega">${xrpHtml}<span class="cluster-metrics-sub">${txsHtml}${accountsHtml}</span></div>`
+    : `<div class="cluster-metrics">${xrpHtml}${txsHtml}${accountsHtml}</div>`;
+
   // data-cluster trägt NUR den Listen-Index — c.id ('cluster:<Adresse>')
   // wird nie im DOM gerendert (c.id ist ausschließlich interner Lookup-Schlüssel).
+  const megaAttr = isMega ? ' data-size="mega"' : '';
   return `
-    <li class="cluster-card role-${dominant} sev-${sev}" data-cluster-index="${Number(index) || 0}" tabindex="0" role="button" aria-label="${esc(ariaLabel)}">
+    <li class="cluster-card role-${dominant} sev-${sev}"${megaAttr} data-cluster-index="${Number(index) || 0}" tabindex="0" role="button" aria-label="${esc(ariaLabel)}">
       <div class="cluster-head">
         <span class="cluster-label">${esc(c.label ?? 'Cluster')}</span>
         ${badge}
       </div>
+      ${megaNoteHtml}
       ${namesHtml}
       ${transitHtml}
       <div class="cluster-roles">${chips}</div>
-      <div class="cluster-metrics">
-        <span class="cluster-xrp">${esc(fmtXrp(c.totalDrops))} XRP</span>
-        <span class="cluster-txs">${fmtNum(c.txCount ?? 0)} ${esc(t('cluster.txUnit'))}</span>
-        <span class="cluster-accounts">${fmtNum(c.distinctAccounts ?? 0)} ${esc(t('cluster.accountUnit'))}</span>
-      </div>
+      ${metricsHtml}
       ${chainHtml}
       <div class="cluster-times">
         <span>${esc(t('cluster.firstSeen'))}${esc(fmtClock(c.firstSeen))}</span>
@@ -1434,6 +1521,9 @@ function renderClusterList(clusters) {
     return;
   }
   emptyEl.hidden = true;
+  // Verdichtungs-Stufe am Listen-Container (Design P2): bei jedem Rendertick
+  // gesetzt — selbstheilend, auch wenn ein früherer Zustand fehlt.
+  listEl.setAttribute('data-density', clusterDensity);
   listEl.innerHTML = arr.map((c, i) => clusterCardHtml(c, i)).join('');
   listEl.hidden = !inClusterTab;
 }
@@ -1597,6 +1687,14 @@ function bindGraph() {
   // die Tablist-Struktur #tab-live/#tab-cluster/#tab-globe bleibt unverändert).
   document.getElementById('cluster-list-download').addEventListener('click', () => { void exportClusterList(); });
   document.getElementById('graph-png').addEventListener('click', exportGraphPng);
+  // Verdichtungs-Umschalter (Design P2): Segment-Control im panel-head,
+  // aria-pressed-Muster wie der Sprachumschalter; die Buttons tragen die
+  // .graph-tab-Basisklasse (44-px-Ziel, Fokus-Ring, reduced-motion,
+  // forced-colors) — die Auswahlfläche läuft über [aria-pressed].
+  for (const lvl of DENSITY_LEVELS) {
+    const btn = document.getElementById('density-' + lvl);
+    if (btn) btn.addEventListener('click', () => setClusterDensity(lvl));
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -2267,6 +2365,16 @@ function renderWindowChart() {
     const title = esc(fmtDateTime(tMs)) + ' · ' + fmtNum(blocks) + ' blocks · ' + fmtNum(txns) + ' txs'
       + (flagged > 0 ? ' · ' + fmtNum(flagged) + ' flagged' : '');
     parts.push('<rect x="' + Math.round(x * 100) / 100 + '" y="' + (H - PAD - h) + '" width="' + barW + '" height="' + h + '" rx="2" fill="' + fill + '" opacity="0.75"><title>' + title + '</title></rect>');
+    // Diagramm-Marker geflaggte Stunde (Design P0, icons.mjs): Wimpel-Rauten-
+    // Pin über dem Balken — Formsignal zusätzlich zur Fehler-Tinte, relevant
+    // für Minimumhöhen (h>=2), in denen die Rotführung kaum lesbar ist. Farbe
+    // ist nie alleiniges Signal: <title> je Balken + Meta-Zeile
+    // (chart.flagged) bleiben die tragende Auskunft.
+    if (flagged > 0) {
+      const mx = Math.round((x + barW / 2 - 6) * 100) / 100;
+      const my = Math.max(2, Math.round((H - PAD - h - 13) * 100) / 100);
+      parts.push(chartMarkerFlagged('x="' + mx + '" y="' + my + '" width="12" height="12" style="color:var(--a6-sev-malicious)"'));
+    }
   }
   parts.push('</svg>');
   const flaggedHours = buckets.filter((b) => (Number(b?.flaggedBlocks) || 0) > 0).length;
@@ -2293,6 +2401,8 @@ function renderWindowFeed() {
     ? 'feed.persistOff' : 'feed.serverEmpty';
   emptyEl.setAttribute('data-i18n', emptyKey);
   emptyEl.textContent = t(emptyKey);
+  // textContent räumt die Leerzustands-Illustration ab — idempotent neu mounten.
+  mountEmptyIllu(emptyEl, svgEmptyFeed());
   for (const blk of flagged) {
     const li = document.createElement('li');
     // Badge/className aus blk.maxSeverity (lib/block-window.mjs berechnet das
@@ -2486,6 +2596,8 @@ async function setFeedMode(mode) {
     const liveEmptyEl = document.getElementById('feed-empty');
     liveEmptyEl.setAttribute('data-i18n', 'feed.empty');
     liveEmptyEl.textContent = t('feed.empty');
+    // textContent räumt die Leerzustands-Illustration ab — idempotent neu mounten.
+    mountEmptyIllu(liveEmptyEl, svgEmptyFeed());
     liveEmptyEl.hidden = false;
     setConn(false, t('conn.liveInit'));
     connectLive();
@@ -2945,6 +3057,11 @@ function bindLive() {
 // Daten). bindGraph bleibt hier: seine Handler (Tab-Klicks, Karten, Export)
 // brauchen vis nicht.
 bindGraph();
+// Verdichtungs-Wahl vor dem ersten listen-Rendertick anwenden (persistierte
+// Stufe oder Default 'comfortable'); syncClusterDensityUi setzt data-density
+// an #cluster-list und aria-pressed an der Segment-Control.
+loadClusterDensity();
+syncClusterDensityUi();
 bindViews();
 setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
 bindLive();
@@ -2997,6 +3114,22 @@ document.addEventListener('hx:langchange', () => {
   if (historyMod && typeof historyMod.refresh === 'function') historyMod.refresh();
   if (checkMod && typeof checkMod.reRender === 'function') checkMod.reRender();
 });
+
+/* ---------- Statische Illustrationen (Design P0, public/icons.mjs) ---------
+ * Leerzustände der drei Dashboard-Panels + Panel-Signet Activity Graph —
+ * einmalig nach DOM-Aufbau. renderWindowFeed/startLiveMode mounten die
+ * Feed-Illustration nach jedem textContent-Setzen erneut (idempotent, s.o.). */
+mountEmptyIllu(document.getElementById('feed-empty'), svgEmptyFeed());
+mountEmptyIllu(document.getElementById('log-empty'), svgEmptyLog());
+mountEmptyIllu(document.getElementById('cluster-empty'), svgEmptyCluster());
+(function mountPanelMarker() {
+  const h = document.getElementById('graph-title');
+  if (!h) return;
+  try {
+    if (h.querySelector('.panel-marker')) return;
+    h.insertAdjacentHTML('afterbegin', '<span class="panel-marker" aria-hidden="true">' + panelMarkerGraph() + '</span>');
+  } catch { /* DOM nicht schreibbar: Signet entfällt, wirft aber nicht */ }
+})();
 
 /* ---------- Idle-Preload schwerer Vendoren erst nach Erstanstrich ----------
  * globe.gl (1,9 MB), 3d-force-graph (1,3 MB), topojson-client (7 kB) —

@@ -206,3 +206,72 @@ test("Gate-Simulation: Chip-Funktion ohne Lookup (Host-Modul nicht geladen) -> l
   });
   assert.equal(html, "", "fail-closed: ohne Host-Lookup keine Chips");
 });
+
+/* ---------------- 5) moreChip (Design P2: '+N weitere Konten') ---------------- */
+
+// Sieben Chip-tragende Mitglieder (je 1 Tag — kein Tag-Level-'+', damit die
+// Assertion auf Zeilenebene eindeutig bleibt).
+const moreAddrs = [];
+const moreTags = new Map();
+for (let i = 0; i < 7; i++) {
+  const a = `rTESTmore${i}Accountbbbbbbbbbbbbbb`;
+  moreAddrs.push(a);
+  moreTags.set(a, new Set([i + 1]));
+}
+
+test("moreChip: Aufruf mit (hidden, shown) bei Kappung, Markup hängt am Zeilenende", () => {
+  const calls = [];
+  const html = addrChipsRowHtml({
+    members: moreAddrs, tagsByAddr: moreTags, nameChipHtml: () => "", tagChipHtml: tagStub,
+    cap: 5,
+    moreChip: (hidden, shown) => { calls.push([hidden, shown]); return `<span class="cluster-addr-more">+${hidden}</span>`; },
+  });
+  assert.deepEqual(calls, [[2, 5]], "genau ein Aufruf: hidden=2, shown=5");
+  assert.equal((html.match(/cluster-addr-chips/g) ?? []).length, 5, "weiterhin genau 5 Gruppen");
+  assert.ok(
+    html.endsWith('<span class="cluster-addr-more">+2</span></div>'),
+    "Hinweis nach dem letzten Chip, direkt vor Zeilenende",
+  );
+});
+
+test("moreChip: ohne Kappung Aufruf mit hidden=0 — Markup bleibt beim alten Vertrag (Host-Filter)", () => {
+  // Abwärtskompatibilität Flow-Host (history-host.html ruft ohne moreChip):
+  // unterhalb des Caps ruft das Modul mit hidden=0; der Host-Filter
+  // (hidden > 0, Muster app.js) hält das exakte alte Markup stabil — der
+  // Callback entscheidet, nicht das Modul.
+  const calls = [];
+  const opts = {
+    members: [A1], tagsByAddr: new Map([[A1, new Set([42])]]),
+    nameChipHtml: () => "", tagChipHtml: tagStub,
+    moreChip: (hidden, shown) => { calls.push([hidden, shown]); return hidden > 0 ? "SOLLTE-NICHT-ERSCHEINEN" : ""; },
+  };
+  const withCb = addrChipsRowHtml(opts);
+  const without = addrChipsRowHtml({ ...opts, moreChip: null });
+  assert.deepEqual(calls, [[0, 1]], "Aufruf mit hidden=0, shown=1");
+  assert.equal(withCb, without, "Markup unverändert gegenüber dem Vertrag ohne moreChip");
+  assert.ok(!withCb.includes("SOLLTE-NICHT-ERSCHEINEN"), "kein Hinweis-Markup unter dem Cap");
+});
+
+test("moreChip: leere Chip-Zeile ruft nicht (fail-closed, keine Erfundung)", () => {
+  let called = false;
+  addrChipsRowHtml({
+    members: [A3], tagsByAddr: new Map(), nameChipHtml: () => "", tagChipHtml: tagStub,
+    moreChip: () => { called = true; return "X"; },
+  });
+  assert.equal(called, false, "ohne Chip-Eintrag kein Aufruf");
+});
+
+test("moreChip: ''-Rückwert (Mega-Muster) hängt nichts an, liefert aber shown", () => {
+  // Muster app.js Mega-Karten (Plan-Kritik 10): die Chip-Zeile zeigt KEINEN
+  // Zweit-Hinweis neben der Mega-Meta-Zeile — moreChip sammelt nur die Zahl
+  // der gezeigten Gruppen und liefert '' zurück.
+  let seen = -1;
+  const html = addrChipsRowHtml({
+    members: moreAddrs, tagsByAddr: moreTags, nameChipHtml: () => "", tagChipHtml: tagStub,
+    cap: 3,
+    moreChip: (hidden, shown) => { seen = shown; return ""; },
+  });
+  assert.equal(seen, 3, "shown=3 (Mega-/dense-Cap)");
+  assert.equal((html.match(/cluster-addr-chips/g) ?? []).length, 3, "drei Gruppen");
+  assert.ok(!html.includes("cluster-addr-more"), "kein Zeilen-Hinweis in der Mega-Karte");
+});

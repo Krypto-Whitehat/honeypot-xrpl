@@ -263,11 +263,24 @@ export function initHistory(ctx) {
   function renderShell() {
     const root = rootEl();
     if (shellReady || !root) return;
+    // Info-Box „Was zeigt die Historie?“ (2026-10-06): Bewusst HIER in
+    // renderShell und nicht statisch in index.html — diese Funktion
+    // überschreibt root.innerHTML beim ersten setView vollständig, ein
+    // statischer Block INNERHALB von #history-root würde also sofort
+    // entfernt; als Geschwister DAVOR stünde er hierarchisch über der H2-
+    // Kopfzeile. Im Shell-Template steht sie korrekt zwischen panel-head
+    // und Suchfeld, wird bei hx:langchange (reRender) mitsamt neu gebaut
+    // und verschwindet nie mit dem innerHTML-Neuaufbau. Keys:
+    // tab.historyHint (summary) / tab.historyHintLong (Box-Körper).
     root.innerHTML = `
       <div class="panel-head">
         <h2 id="history-title">${esc(t('history.title'))}</h2>
         <span class="hint">${esc(t('history.hint'))}</span>
       </div>
+      <details class="history-info">
+        <summary>${esc(t('tab.historyHint'))}</summary>
+        <p class="history-info-long">${esc(t('tab.historyHintLong'))}</p>
+      </details>
       <div class="history-search">
         <label class="filter-label" for="history-search">${esc(t('history.searchLabel'))}</label>
         <input id="history-search" type="search" class="filter-select" placeholder="${esc(t('history.searchPlaceholder'))}">

@@ -26,6 +26,12 @@ import {
   t, ruleName as i18nRuleName, fmtNum, fmtXrp, fmtClock, fmtDateTime,
   serverPhrase, summaryText, sevText,
 } from './i18n.mjs';
+/* Leerzustands-Illustration (Design P0, public/icons.mjs): dieselbe Rolle
+ * „Abschnitt ohne Treffer“ in allen drei Abschnitten — textlos (aria-hidden),
+ * kontextuell auf 96×72 verkleinert (account-check.css). */
+import { svgEmptyCheck } from './icons.mjs';
+
+const CHECK_EMPTY_ILLU = '<span class="empty-illu" aria-hidden="true">' + svgEmptyCheck() + '</span>';
 
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const ENDPOINT = '/api/account-report';
@@ -271,7 +277,7 @@ export function initAccountCheck(ctx = {}) {
 
   function roleHtml(report) {
     if (!report.role || !report.roleMetrics) {
-      return `<p class="check-empty">${esc(t('check.roleEmpty'))}</p>`;
+      return `<p class="check-empty">${CHECK_EMPTY_ILLU}${esc(t('check.roleEmpty'))}</p>`;
     }
     const m = report.roleMetrics;
     const swatch = `<span class="swatch swatch-${esc(String(report.role))}" aria-hidden="true"></span>`;
@@ -288,7 +294,7 @@ export function initAccountCheck(ctx = {}) {
   function patternsHtml(report) {
     const list = Array.isArray(report.patterns) ? report.patterns : [];
     if (!list.length) {
-      return `<p class="check-empty">${esc(t('check.patternsEmpty'))}</p>`;
+      return `<p class="check-empty">${CHECK_EMPTY_ILLU}${esc(t('check.patternsEmpty'))}</p>`;
     }
     const chips = list.map((id) => `<span class="check-chip">${esc(ruleName(id))}</span>`).join('');
     return `<div class="check-chips">${chips}</div>`;
@@ -297,7 +303,7 @@ export function initAccountCheck(ctx = {}) {
   function contactsHtml(report) {
     const list = Array.isArray(report.contacts) ? report.contacts : [];
     if (!list.length) {
-      return `<p class="check-empty">${esc(t('check.contactsEmpty'))}</p>`;
+      return `<p class="check-empty">${CHECK_EMPTY_ILLU}${esc(t('check.contactsEmpty'))}</p>`;
     }
     return (
       `<div class="cluster-table-wrap" tabindex="0" role="region" aria-label="${esc(t('check.contactsAria'))}">` +

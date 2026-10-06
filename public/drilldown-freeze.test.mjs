@@ -22,7 +22,12 @@
 // Skalierung von Radius/Abstoßung/Link-Distanz/Warmup nach Knotenanzahl
 // N=5..300, Überlappungsfreiheit nach Collide-Warmup, build3D-Verdrahtung
 // mit Fake-ForceGraph3D: warmupTicks nur bei Cluster-Wechsel, Positionen
-// bei Live-Updates desselben Clusters übernommen).
+// bei Live-Updates desselben Clusters übernommen), (11) 3D-Stil (Design
+// P3 2026-10-06): Kanten-Staffelung nach Typ, Drainer-Ring-Auswahl
+// (deterministisch, Deckel 12), Stil-Flags (transparenter Clear, 0.85
+// Deckkraft, additiver nodeThreeObjectExtend, onNodeHover), Hover-Fokus
+// mit reduced-motion-Degradation und Ring-Konstruktion aus rekonstruierten
+// Bundle-Klassen — Layout-Parameter unangetastet (keine Overlap-Regression).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,6 +36,11 @@ import {
   cluster3dLayoutParams,
   seedCluster3dPositions,
   makeCluster3dCollideForce,
+  cluster3dLinkWidth,
+  selectDrainerRingNodes,
+  GRAPH3D_LINK_FADED,
+  GRAPH3D_LINK_OPACITY,
+  GRAPH3D_RING_CAP,
   DENY_RECHECK_MAX,
 } from "./drilldown.js";
 import { LANG_KEY, t } from "./i18n.mjs";
@@ -49,6 +59,13 @@ function makeEl(tag) {
     offsetParent: {},
     disabled: false,
     listeners: {},
+    // Hover-Cursor-Klasse (Design P3.4): classList am Element-Stub.
+    classList: {
+      add() {},
+      remove() {},
+      toggle() {},
+      contains() { return false; },
+    },
     _q: new Map(),
     addEventListener(type, fn) { (el.listeners[type] = el.listeners[type] || []).push(fn); },
     removeEventListener() {},
@@ -625,27 +642,52 @@ test("3D-Layout: Collide-Kraft — deterministisch, schwere Knoten bewegen sich 
 });
 
 /* Fake-ForceGraph3D: prüft die build3D-Verdrahtung (Physik-Zugriffe,
-   warmupTicks-Gate, Seed-Positionen im graphData, Freeze bleibt) ohne WebGL. */
+   warmupTicks-Gate, Seed-Positionen im graphData, Freeze bleibt) ohne WebGL.
+   Design P3 (2026-10-06): zusätzlich Recorder für die Stil-Flags
+   (backgroundColor/linkOpacity/linkWidth/linkColor/nodeColor/
+   nodeThreeObject/nodeThreeObjectExtend/onNodeHover) und ein steuerbares
+   scene()-Stub (record.sceneNodes) für die Ring-Klassen-Recovery. */
+// Record-Factory: gemeinsame Initialisierung für alle Fake-Fg3d-Tests
+// (Design P3 erweitert die Liste um die Stil-Recorder).
+function makeRecord() {
+  return {
+    destructorCalls: 0, resumeCalls: 0, zoomToFitCalls: 0, sceneCalls: 0,
+    graphDataSets: [], warmupTicksCalls: [], cooldownTicksCalls: [],
+    nodeRelSizeCalls: [], d3ForceSet: {},
+    linkWidthFns: [], linkColorFns: [], nodeColorFns: [], nodeThreeObjectFns: [],
+    nodeThreeObjectExtend: null, onNodeHover: null, linkOpacity: null, backgroundColor: null,
+    sceneNodes: [],
+  };
+}
+
 function makeFakeFg3d(record) {
   let data = { nodes: [], links: [] };
+  const fakeScene = {
+    traverse(cb) { for (const o of record.sceneNodes || []) cb(o); },
+  };
   const self = {
     _destructor() { record.destructorCalls += 1; },
     pauseAnimation() {},
     resumeAnimation() { record.resumeCalls += 1; },
     width(w) { record.width = w; return self; },
     height(h) { record.height = h; return self; },
-    backgroundColor() { return self; },
+    backgroundColor(v) { record.backgroundColor = v; return self; },
     nodeLabel() { return self; },
     linkLabel() { return self; },
-    linkWidth() { return self; },
+    linkWidth(fn) { record.linkWidthFns.push(fn); return self; },
     linkDirectionalArrowLength() { return self; },
     linkDirectionalParticles() { return self; },
     linkDirectionalParticleWidth() { return self; },
-    linkColor() { return self; },
-    nodeColor() { return self; },
+    linkColor(fn) { record.linkColorFns.push(fn); return self; },
+    nodeColor(fn) { record.nodeColorFns.push(fn); return self; },
     nodeVal(v) { record.nodeVal = v; return self; },
     nodeRelSize(v) { record.nodeRelSizeCalls.push(v); return self; },
+    nodeThreeObject(fn) { record.nodeThreeObjectFns.push(fn); return self; },
+    nodeThreeObjectExtend(v) { record.nodeThreeObjectExtend = v; return self; },
+    onNodeHover(fn) { record.onNodeHover = fn; return self; },
     onNodeClick() { return self; },
+    linkOpacity(v) { record.linkOpacity = v; return self; },
+    scene() { record.sceneCalls += 1; return fakeScene; },
     zoomToFit() { record.zoomToFitCalls += 1; return self; },
     cooldownTicks(v) { record.cooldownTicksCalls.push(v); return self; },
     warmupTicks(v) { record.warmupTicksCalls.push(v); return self; },
@@ -668,11 +710,7 @@ function makeFakeFg3d(record) {
 test("build3D-Verdrahtung: Physik-Konfiguration, Warmup nur bei Cluster-Wechsel, Positionen bei Live-Update übernommen, Freeze intakt", async () => {
   lang = "de";
   liveGraph = makeGraph("Layout-Cluster", 5);
-  const record = {
-    destructorCalls: 0, resumeCalls: 0, zoomToFitCalls: 0,
-    graphDataSets: [], warmupTicksCalls: [], cooldownTicksCalls: [],
-    nodeRelSizeCalls: [], d3ForceSet: {},
-  };
+  const record = makeRecord();
   const prevCreateElement = documentStub.createElement;
   const prevForceGraph3D = windowStub.ForceGraph3D;
   try {
@@ -758,11 +796,7 @@ test("Riesen-Cluster: Deny-Nachprüfung auf DENY_RECHECK_MAX gedeckelt (determin
     edges: bigNodes.slice(1).map((n, i) => ({ from: bigNodes[i].id, to: n.id, type: "payment", txHash: `BH${i}`, closeTime: i })),
   };
   const denyCalls = [];
-  const record = {
-    destructorCalls: 0, resumeCalls: 0, zoomToFitCalls: 0,
-    graphDataSets: [], warmupTicksCalls: [], cooldownTicksCalls: [],
-    nodeRelSizeCalls: [], d3ForceSet: {},
-  };
+  const record = makeRecord();
   const prevCreateElement = documentStub.createElement;
   const prevForceGraph3D = windowStub.ForceGraph3D;
   try {
@@ -788,6 +822,293 @@ test("Riesen-Cluster: Deny-Nachprüfung auf DENY_RECHECK_MAX gedeckelt (determin
     for (const n of record.graphDataSets[0].nodes) {
       assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z), "deterministische Seed-Koordinaten auch im Riesen-Cluster");
     }
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    liveGraph = makeGraph();
+  }
+});
+
+/* ---------------- 11) 3D-Stil (Design P3, 2026-10-06) ----------------
+   Kanten-Staffelung nach Typ, Drainer-Ring-Auswahl (deterministisch, Deckel
+   12), build3D-Stil-Flags (transparenter Clear, linkOpacity, additiver
+   Extend, Hover-API), Hover-Fokus mit reduced-motion-Degradation und die
+   Ring-Konstruktion aus rekonstruierten Bundle-Klassen — alles ohne
+   Browser/WebGL am Fake. Layout-Parameter (Entstapelung, Kollision) bleiben
+   unangetastet: Die Stil-Flags dürfen keine Overlap-Regression verursachen
+   (Abschnitt 10 bleibt der Regressionsschutz). */
+
+test("Kanten-Staffelung: cluster3dLinkWidth deterministisch nach XRPL-Typ", () => {
+  assert.equal(cluster3dLinkWidth("Payment"), 1.4, "Payment trägt den Geldfluss (breiteste Kante)");
+  assert.equal(cluster3dLinkWidth("EscrowCreate"), 1, "Escrow strukturiert");
+  assert.equal(cluster3dLinkWidth("EscrowFinish"), 1);
+  assert.equal(cluster3dLinkWidth("EscrowCancel"), 1);
+  assert.equal(cluster3dLinkWidth("CheckCreate"), 1, "Check strukturiert");
+  assert.equal(cluster3dLinkWidth("CheckCash"), 1);
+  assert.equal(cluster3dLinkWidth("NFTokenMint"), 1, "NFT strukturiert");
+  assert.equal(cluster3dLinkWidth("NFTokenAcceptOffer"), 1);
+  assert.equal(cluster3dLinkWidth("TrustSet"), 0.8, "Rest tritt zurück");
+  assert.equal(cluster3dLinkWidth("OfferCreate"), 0.8);
+  assert.equal(cluster3dLinkWidth("OfferCancel"), 0.8);
+  assert.equal(cluster3dLinkWidth("AccountSet"), 0.8);
+  assert.equal(cluster3dLinkWidth("PaymentChannelCreate"), 0.8);
+  assert.equal(cluster3dLinkWidth(""), 0.8, "leerer Typ -> Rest");
+  assert.equal(cluster3dLinkWidth(undefined), 0.8);
+  assert.equal(cluster3dLinkWidth(null), 0.8);
+});
+
+test("Drainer-Ring-Auswahl: deterministisch, Deckel 12, Rollen-Gate, Aggregat ausgeschlossen", () => {
+  assert.equal(GRAPH3D_RING_CAP, 12, "Halo-Deckel 12 (Performance-Schlüssel)");
+  const mk = (id, role, drops) => ({ id, role, inDrops: drops, outDrops: 0 });
+  // 20 Drainer mit absteigenden Drops-Summen -> genau die Top-12.
+  const drain = Array.from({ length: 20 }, (_, i) => mk("rTESTd" + String(i).padStart(2, "0"), "drainer", 1000 - i));
+  const sel = selectDrainerRingNodes(drain);
+  assert.equal(sel.size, 12, "Auswahl auf Deckel 12 gekappt");
+  assert.ok(sel.has("rTESTd00") && sel.has("rTESTd11"), "Top-12 nach Drops-Summe");
+  assert.ok(!sel.has("rTESTd12") && !sel.has("rTESTd19"), "ab Rank 13 kein Ring");
+  // Gleichstand: identische Drops -> Adresse asc entscheidet (Determinismus).
+  const tie = Array.from({ length: 15 }, (_, i) => mk("rTESTt" + String(i).padStart(2, "0"), "drainer", 500));
+  const selTie = selectDrainerRingNodes(tie);
+  assert.equal(selTie.size, 12);
+  assert.ok(selTie.has("rTESTt00") && selTie.has("rTESTt11") && !selTie.has("rTESTt12"), "Gleichstand bricht Adresse asc auf");
+  // Nicht-Drainer bleiben draußen — auch bei riesigen Drops — und der
+  // Aggregatknoten (role 'unknown') bekommt nie einen Ring.
+  const mixed = [
+    mk("rTESTbigSource", "source", 1e9),
+    mk("rTESTdr", "drainer", 1),
+    { id: "__aggregate__", role: "unknown", inDrops: 1e12, outDrops: 0, aggregateCount: 46000 },
+  ];
+  const selM = selectDrainerRingNodes(mixed);
+  assert.equal(selM.size, 1);
+  assert.ok(selM.has("rTESTdr"), "nur der Drainer");
+  // Zwei Läufe über flache Kopien: identisches Ergebnis (kein Random).
+  assert.deepEqual(
+    [...selectDrainerRingNodes(drain)].sort(),
+    [...selectDrainerRingNodes(drain.map((n) => ({ ...n })))].sort(),
+  );
+  assert.equal(selectDrainerRingNodes([]).size, 0, "leere Eingabe -> leere Auswahl");
+});
+
+test("build3D-Stil-Flags: transparenter Clear, linkOpacity 0.85, additiver Extend, Hover-API, Layout unverändert", async () => {
+  lang = "de";
+  liveGraph = makeGraph("Stil-Cluster", 5);
+  const record = makeRecord();
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  try {
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+
+    // Hintergrund: transparenter Clear statt Vollweiß (Design P3.1, am
+    // gepinnten Bundle Browser-verifiziert) — das CSS-Punkt-Substrat der
+    // Bühne (drilldown.css) scheint dadurch.
+    assert.equal(record.backgroundColor, "rgba(0,0,0,0)", "backgroundColor transparent statt '#ffffff'");
+    // Kanten: Grunddeckkraft 0.85 (Bundle-Default wäre 0.2).
+    assert.equal(record.linkOpacity, GRAPH3D_LINK_OPACITY);
+    assert.equal(GRAPH3D_LINK_OPACITY, 0.85);
+    // Ring: ADDITIV über nodeThreeObjectExtend (Plan-Kritik 8) — die
+    // Default-Sphären inkl. nodeVal/nodeRelSize-Skalierung bleiben Bundle-
+    // Sache, kein manueller Nachbau.
+    assert.equal(record.nodeThreeObjectExtend, true, "nodeThreeObjectExtend(true) gesetzt");
+    assert.equal(record.nodeThreeObjectFns.length, 1, "Ring-Accessor je build3D gesetzt");
+    assert.equal(typeof record.onNodeHover, "function", "onNodeHover im Init-Block registriert");
+    // Accessor ohne rekonstruierte Klassen (Szene leer) -> null, kein Crash
+    // (der Retry-Rahmen setzt im Browser nach; ohne rAF bleibt es ehrlich
+    // ohne Ring und ohne Legende).
+    assert.equal(record.nodeThreeObjectFns[0]({ id: "rTESTdr", role: "drainer", inDrops: 1, outDrops: 1 }), null);
+    // Kantenbreite: Typ-Staffelung über den Accessor verdrahtet (der Fake
+    // recordet die bereits ausgewertete innere Funktion).
+    const widthFn = record.linkWidthFns[record.linkWidthFns.length - 1];
+    assert.equal(typeof widthFn, "function", "linkWidth-Accessor gesetzt");
+    assert.equal(widthFn({ type: "Payment" }), 1.4);
+    assert.equal(widthFn({ type: "EscrowFinish" }), 1);
+    assert.equal(widthFn({ type: "TrustSet" }), 0.8);
+    // Layout-Parameter von den Stil-Flags unberührt (keine Overlap-
+    // Regression): Collide-Kraft, Warmup-Deckel und Radien-Skalierung
+    // bleiben wie in Abschnitt 10 verdrahtet.
+    assert.equal(typeof record.d3ForceSet.collide, "function", "Collide-Kraft bleibt gesetzt");
+    assert.equal(record.warmupTicksCalls[0], 30, "Warmup unverändert (N=3 -> Untergrenze 30)");
+    const k3 = Math.cbrt(3);
+    assert.deepEqual(record.nodeRelSizeCalls, [Math.max(1.2, 4 / k3)], "nodeRelSize-Formel unverändert");
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    liveGraph = makeGraph();
+  }
+});
+
+test("Hover-Fokus: beteiligte Kanten volle Farbe ×1.5, übrige ausgegraut; Highlight über displayAddr; Reset bei Hover-Ende", async () => {
+  lang = "de";
+  liveGraph = makeGraph("Hover-Cluster", 5);
+  const record = makeRecord();
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  try {
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+
+    const linkInvolved = { source: { id: A1 }, target: { id: A2 }, type: "payment" };
+    const linkOther = { source: { id: A2 }, target: { id: A3 }, type: "payment" };
+
+    // Grundzustand (kein Hover): volle Typfarbe — edgeColors-Stub ist leer,
+    // also edgeDefault '#999'. Der Fake recordet die bereits ausgewertete
+    // innere Funktion (fg3d.linkColor(linkColor3dAccessor())).
+    const color0 = record.linkColorFns[record.linkColorFns.length - 1];
+    assert.equal(color0(linkOther), "#999", "ohne Hover volle Typfarbe (edgeDefault)");
+
+    // Hover auf A1: EIN Setter-Je-Wechsel für Farbe und Breite.
+    const colorsBefore = record.linkColorFns.length;
+    const widthsBefore = record.linkWidthFns.length;
+    // Der Handler wurde im Init-Block registriert (build3D-Instanz-Aufbau).
+    const hover = record.onNodeHover;
+    assert.equal(typeof hover, "function", "onNodeHover-Handler registriert");
+    hover({ id: A1 });
+    assert.equal(record.linkColorFns.length, colorsBefore + 1, "ein linkColor-Setter je Hover-Wechsel");
+    assert.equal(record.linkWidthFns.length, widthsBefore + 1, "ein linkWidth-Setter je Hover-Wechsel");
+    const colorFn = record.linkColorFns[record.linkColorFns.length - 1];
+    assert.equal(colorFn(linkInvolved), "#999", "beteiligte Kante behält die Typfarbe");
+    assert.equal(colorFn(linkOther), GRAPH3D_LINK_FADED, "unbeteiligte Kante ausgegraut");
+    const widthFn = record.linkWidthFns[record.linkWidthFns.length - 1];
+    // Fixture-Typ ist kleingeschrieben ('payment') -> Staffel-Zweig 'Rest'
+    // 0.8; die ×1.5-Fokussierung wirkt darauf genauso (Groß-/Kleinschreibung
+    // prüft der Stil-Flags-Test mit den echten EDGE_COLORS-Typen).
+    assert.ok(Math.abs(widthFn(linkInvolved) - 0.8 * 1.5) < 1e-9, "beteiligte Kante ×1.5");
+    assert.equal(widthFn(linkOther), 0.8, "unbeteiligte Kante Basisbreite");
+    // Knoten-Highlight über das highlightSet-Muster (displayAddr-Vergleich).
+    const nodeFn = record.nodeColorFns[record.nodeColorFns.length - 1];
+    assert.equal(nodeFn({ id: A1, role: "source" }), "#222", "gehoverter Knoten im Highlight-Ton");
+    assert.equal(nodeFn({ id: A3, role: "sink" }), "#555", "anderer Knoten im Basis-Ton");
+
+    // Hover-Ende: Farbe/Breite zurück auf Basis.
+    hover(null);
+    const colorEnd = record.linkColorFns[record.linkColorFns.length - 1];
+    assert.equal(colorEnd(linkOther), "#999", "nach Hover-Ende wieder volle Typfarbe");
+    assert.equal(colorEnd(linkInvolved), "#999");
+    const nodeEnd = record.nodeColorFns[record.nodeColorFns.length - 1];
+    assert.equal(nodeEnd({ id: A1, role: "source" }), "#111", "Highlight nach Hover-Ende entfernt");
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    liveGraph = makeGraph();
+  }
+});
+
+test("Hover-Fokus-Degradation: prefers-reduced-motion lässt Farb-/Breiten-Setter aus", async () => {
+  lang = "de";
+  liveGraph = makeGraph("Reduced-Cluster", 5);
+  const record = makeRecord();
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  const prevMatchMedia = windowStub.matchMedia;
+  try {
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+    windowStub.matchMedia = () => ({ matches: true }); // reduzierte Bewegung
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+    const colorsBefore = record.linkColorFns.length;
+    const widthsBefore = record.linkWidthFns.length;
+    const nodesBefore = record.nodeColorFns.length;
+    record.onNodeHover({ id: A1 });
+    assert.equal(record.linkColorFns.length, colorsBefore, "kein Farb-Fokus unter reduced motion");
+    assert.equal(record.linkWidthFns.length, widthsBefore, "kein Breiten-Fokus unter reduced motion");
+    assert.equal(record.nodeColorFns.length, nodesBefore, "kein Knoten-Recolor unter reduced motion");
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    windowStub.matchMedia = prevMatchMedia;
+    liveGraph = makeGraph();
+  }
+});
+
+test("Drainer-Ring: Klassen-Recovery aus der Szene, Einheits-Band auf 1.45×Radius, opak ohne Emissive", async () => {
+  lang = "de";
+  // Eigener Graph mit Drainer-Rolle (makeGraph nutzt source/mid/sink) und
+  // roleColors mit drainer-Eintrag wie app.js ROLE_COLORS (#b3261e =
+  // --a6-role-drainer = --a6-sev-malicious).
+  const A1 = "rTESTdrainerAccount1111111";
+  const rcid = "cluster:" + A1;
+  liveGraph = {
+    clusters: [{
+      id: rcid, label: "Ring-Cluster", totalDrops: 1000, txCount: 2, distinctAccounts: 3,
+      firstSeen: "2026-10-05T10:00:00Z", lastSeen: "2026-10-05T10:05:00Z",
+      memberAddresses: [A1, A2, A3],
+    }],
+    nodes: [
+      { id: A1, clusterId: rcid, role: "drainer", inDrops: 0, outDrops: 1e9, degreeIn: 0, degreeOut: 2, severity: "malicious" },
+      { id: A2, clusterId: rcid, role: "source", inDrops: 1e6, outDrops: 0, degreeIn: 0, degreeOut: 1, severity: "info" },
+      { id: A3, clusterId: rcid, role: "collector", inDrops: 1e6, outDrops: 0, degreeIn: 1, degreeOut: 0, severity: "info" },
+    ],
+    edges: [
+      { from: A2, to: A1, type: "Payment", txHash: "RH1", closeTime: 1 },
+      { from: A1, to: A3, type: "Payment", txHash: "RH2", closeTime: 2 },
+    ],
+  };
+  // Fake-Bundle-Klassen: der Scene-Stub liefert ein Default-Knoten-Mesh
+  // (Konstruktoren = die 'Klassen', genau wie die Recovery im Browser).
+  class FakeMeshCls {
+    constructor(g, m) { this.geometry = g; this.material = m; this.scale = { setScalar(v) { FakeMeshCls.lastScale = v; } }; }
+  }
+  class FakeSphereGeometryCls { constructor(...a) { FakeSphereGeometryCls.lastArgs = a; } }
+  class FakeLambertCls { constructor(o) { FakeLambertCls.lastOpts = o; } }
+  const record = makeRecord();
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  try {
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+    const protoMesh = new FakeMeshCls(new FakeSphereGeometryCls(), new FakeLambertCls({}));
+    protoMesh.geometry.type = "SphereGeometry";
+    protoMesh.__graphObjType = "node";
+    record.sceneNodes = [protoMesh];
+
+    const ctx = makeCtx();
+    ctx.roleColors = {
+      ...ctx.roleColors,
+      drainer: { background: "#b3261e", border: "#7f1d1d", highlight: { background: "#d03b33" } },
+    };
+    const dd = initClusterDrilldown(ctx);
+    dd.openCluster(rcid);
+    await settle();
+
+    assert.equal(record.nodeThreeObjectFns.length, 1, "Ring-Accessor gesetzt");
+    const acc = record.nodeThreeObjectFns[0];
+    // Drainer: Ring-Mesh aus den rekonstruierten Klassen, skaliert auf das
+    // 1.45-Fache des Bundle-Radius (cbrt(val)·nodeRelSize, N=3).
+    const mesh = acc({ id: A1, role: "drainer", inDrops: 0, outDrops: 1e9, aggregateCount: 0 });
+    assert.ok(mesh instanceof FakeMeshCls, "Ring-Mesh aus der Mesh-Klasse des Bundles");
+    const layout = cluster3dLayoutParams([
+      { id: A1, inDrops: 0, outDrops: 1e9 },
+      { id: "x", inDrops: 0, outDrops: 0 },
+      { id: "y", inDrops: 0, outDrops: 0 },
+    ]);
+    assert.ok(
+      Math.abs(FakeMeshCls.lastScale - 1.45 * layout.radiusOf({ inDrops: 0, outDrops: 1e9 })) < 1e-9,
+      "Ring-Skala = 1.45 · Knotenradius (Bundle-Radiusformel)",
+    );
+    // Einheits-Band: eine Geometrie für alle Ringe (Radius 1, äquatorialer
+    // Ausschnitt), Material opak OHNE Emissive (Plan-Kritik 7b).
+    assert.deepEqual(
+      FakeSphereGeometryCls.lastArgs,
+      [1, 24, 1, 0, Math.PI * 2, 0.46 * Math.PI, 0.08 * Math.PI],
+      "Einheits-Kugelgürtel-Geometrie",
+    );
+    assert.deepEqual(
+      FakeLambertCls.lastOpts,
+      { color: "#b3261e", transparent: true, opacity: 0.9, side: 2 },
+      "Lambert-Material: Rollen-/Severity-Rot, opak 0.9, DoubleSide",
+    );
+    assert.ok(!("emissive" in FakeLambertCls.lastOpts), "kein Emissive (lab_graphite: kein Glow)");
+    // Nicht-Drainer und Aggregatknoten: null — kein Extra-Mesh.
+    assert.equal(acc({ id: A2, role: "source", inDrops: 1e6, outDrops: 0, aggregateCount: 0 }), null, "Quelle ohne Ring");
+    assert.equal(acc({ id: "__aggregate__", role: "unknown", inDrops: 1e12, outDrops: 0, aggregateCount: 100 }), null, "Aggregatknoten ohne Ring");
   } finally {
     documentStub.createElement = prevCreateElement;
     if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;

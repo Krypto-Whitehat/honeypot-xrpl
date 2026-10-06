@@ -27,7 +27,13 @@
    absolute positionierten Overlays auf. Höhe über die gemeinsame Leiter
    --a6-stage-height (style.css-Token-Block, 720/640/560/480 px) — zuvor fix
    520 px mit eigenen Stufen 400/320, sodass der Tab-Wechsel Live→Globe die
-   Bühne um 200 px springen ließ (Design-Audit 2026-10-06). */
+   Bühne um 200 px springen ließ (Design-Audit 2026-10-06).
+   Design P3.1 (2026-10-06): Das Kugel-Canvas ist transparent (globe.js
+   backgroundColor 'rgba(0,0,0,0)') — die Bühne bekommt dasselbe Substrat
+   wie die Drilldown-3D-Bühne (drilldown.css): 24-px-Raster plus versetztes
+   96-px-Sekundärraster als Tiefenebene und eine dezente inset-Vignette
+   (Raumtiefe ohne Glow, reines CSS). forced-colors nimmt die Vignette
+   zurück (Block unten). globe.js selbst bleibt unangetastet. */
 #globe {
   position: relative;
   width: 100%;
@@ -35,9 +41,11 @@
   overflow: hidden;
   background:
     radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 12px 12px / 96px 96px,
     var(--a6-graph-canvas);
   border: 1px solid var(--a6-line);
   border-radius: var(--a6-r-md);
+  box-shadow: inset 0 -40px 80px -60px rgba(20, 20, 22, 0.06);
 }
 
 #globe canvas {
@@ -113,6 +121,9 @@
   inset: 0;
   z-index: 2;
   display: flex;
+  /* column (Design P0): Illustration (globe.js showFallback,
+     public/icons.mjs svgGlobeFallback) über dem Hinweistext statt daneben. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -208,10 +219,12 @@
 /* Forced Colors (Vorbild style.css:846 ff.): Bühne und Hinweise bleiben über
    Systemfarben les- und trennbar, Schmuck-Hintergründe treten zurück. Das
    WebGL-Bild der Kugel selbst färbt forced-colors nicht um — der
-   textliche Fallback-Hinweis und die Cluster-Karten sichern die Information. */
+   textliche Fallback-Hinweis und die Cluster-Karten sichern die Information.
+   Die P3.1-Vignette (box-shadow) tritt zurück wie alle Schmuck-Schatten. */
 @media (forced-colors: active) {
   #globe {
     border-color: CanvasText;
+    box-shadow: none;
   }
 
   #globe .globe-note,

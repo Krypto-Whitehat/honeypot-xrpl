@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Honeypot XRPL — Favicon (Design P1): dunkles Quadrat in Ink-Ton #17171b,
+       Waben-Hexagon in Weiß, Ledger-Punkte in den Seitenecken, zentraler
+       Honig-Tropfen im Akzent-Ton der Marke (#ec5b00) statt des früheren
+       Token-fremden Orange-Tons. Eigenständige Vereinfachung der Marke für
+       16–32 px — nicht identisch mit dem Header-Logo (.brand-mark) und ohne
+       Bezug zu public/icons.mjs. -->
+  <rect width="32" height="32" rx="7" fill="#17171b"/>
+  <path d="M16,4.5 L26,10.25 L26,21.75 L16,27.5 L6,21.75 L6,10.25 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M10,13 L16,9.5 L22,13" fill="none" stroke="#ffffff" stroke-width="1.25" stroke-opacity="0.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="10.5" cy="13.5" r="1.4" fill="#ffffff"/>
+  <circle cx="21.5" cy="13.5" r="1.4" fill="#ffffff"/>
+  <circle cx="10.5" cy="20.5" r="1.4" fill="#ffffff"/>
+  <circle cx="21.5" cy="20.5" r="1.4" fill="#ffffff"/>
+  <path d="M16,12 C17.8,14.3 19.2,15.9 19.2,17.8 A3.2,3.2 0 1,1 12.8,17.8 C12.8,15.9 14.2,14.3 16,12 Z" fill="#ec5b00"/>
+</svg>

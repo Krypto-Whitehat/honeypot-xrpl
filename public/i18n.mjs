@@ -65,6 +65,11 @@ export const DICT = {
     'tab.history': 'History',
     'tab.check': 'Account Check',
     'tab.flowhost': 'Flow-Host',
+    'tab.about': 'About',
+    /* Info-Boxen Historie/Archiv (2026-10-06): Kurzhinweis als summary der
+       Details-Box in history.js renderShell, Langtext im Box-Körper. */
+    'tab.historyHint': 'Permanently stored malicious clusters — independent of the live feed and the dashboard archive mode.',
+    'tab.historyHintLong': 'The history permanently collects every cluster classified as malicious, even after it has left the current observation window. It fills through live analysis and visitor reports. The “Archive” data source on the dashboard, by contrast, only shows the persisted block window (24 hours to 7 days) — the history is independent of it.',
 
     /* index.html — Live-Block-Feed */
     'live.title': 'Live Block Feed',
@@ -159,6 +164,16 @@ export const DICT = {
     'cluster.txUnit': 'tx',
     'cluster.accountUnit': 'accounts',
     'cluster.chainAria': 'Money flow: start to collector along real edges',
+    /* Cluster-Karten — Verdichtung + Mega-Cluster (Design P2, 2026-10-06):
+       EINE gemeinsame '+N more accounts'-Wortfamilie für Adress-Chip-Zeile
+       und Mega-Meta-Zeile (Plan-Kritik 10: keine Doppel-Hinweise). */
+    'cluster.moreAccounts': '+{n} more accounts',
+    'cluster.moreAccountsTitle': '{n} accounts in this cluster in total',
+    'cluster.megaNote': '+{n} more accounts — aggregate in the detail view',
+    'cluster.densityAria': 'Cluster card density',
+    'cluster.densityComfortable': 'Comfortable',
+    'cluster.densityCompact': 'Compact',
+    'cluster.densityDense': 'Dense',
 
     /* app.js — Block-Karten und Log */
     'block.txs': 'txs',
@@ -204,6 +219,9 @@ export const DICT = {
     'mode.label': 'Data source',
     'mode.archive': 'Archive',
     'mode.archiveAria': 'Show the persisted block window (24 h / 3 d / 7 d) from the server',
+    /* Sichtbarer Hinweis unter der Modus-Auswahl (index.html #feed-archive-
+       hint), per aria-describedby an beide Modus-Buttons gebunden. */
+    'mode.archiveHint': 'Archive mode: persisted block window (24 h / 3 d / 7 d) from the server — also available when no live feed is connected.',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling',
     'range.label': 'Window',
@@ -269,6 +287,7 @@ export const DICT = {
     'modal.fallback2d': '3D view not available – 2D fallback view (vis-network).',
     'modal.noGraph': 'No graph available – details in role distribution, flow chain and accounts table.',
     'modal.downloadJson': 'Download as JSON',
+    'modal.graph3dLegend': 'Ring around a node = drainer account.',
 
     /* globe.js */
     'globe.note': 'Positions are derived deterministically from the address hash – the XRPL ledger contains no location data. The globe is a symbolic activity view; country assignment via the exchange registry is currently unavailable.',
@@ -394,6 +413,68 @@ export const DICT = {
     'fh.unreachable': 'Flow state unreachable — please try again later.',
     'fh.graphAria': 'Flow graph of the accumulated state',
 
+    /* about.html — Info-Seite für die XRPL-Community (eigenständige Seite im
+       App-Shell-Look, Muster history-host.html). Alle Inhalte via data-i18n;
+       Begriffe folgen exakt der Engine-Forensik (lib/detector.mjs,
+       lib/cluster.mjs, lib/tag-identity.mjs, lib/entity-resolve.mjs,
+       lib/flow-state.mjs, lib/block-window.mjs, lib/account-report.mjs). */
+    'about.sub': 'Purpose, detection methods, glossary and limits of the dashboard',
+    'about.missionTitle': 'What this dashboard is for',
+    'about.missionHint': 'Bait-independent real-time analysis of the public ledger',
+    'about.lead1': 'Honeypot XRPL is an open real-time threat dashboard for the XRPL community. Every validated block of the XRP Ledger mainnet is checked in real time for fraud, phishing and draining patterns; detected actors are connected into clusters by their money flow and assigned roles (source, drainer, collector, relay).',
+    'about.lead2': 'The analysis is bait-independent: no own honeypot or decoy accounts are operated for detection anymore. The data comes exclusively from the public ledger — in live mode through a direct WSS connection to honeycluster.io (one ledger command per block, no sampling), in archive mode through the persisted server window (24 hours to 7 days). Account names and exchange attributions come from xrpscan.com (CC BY-NC-SA 4.0).',
+    'about.lead3': 'The same analysis module (lib/detector.mjs) runs in the browser and on the server — the live analysis in the browser produces the same findings as the server walk that fills the window in the background.',
+    'about.addressNote': 'Every address shown is an actor address publicly visible in the ledger and is displayed in full. The protective layers around the historical bait accounts (hash deny-list, server-side sanitization) remain active regardless.',
+    'about.detectTitle': 'What is detected',
+    'about.detectHint': 'Roles and patterns of the detector engine — heuristics, not proof of guilt',
+    'about.rolesTitle': 'Roles in the cluster graph',
+    'about.roleDrainerT': 'Drainer',
+    'about.roleDrainerD': 'An account funded by at least two different senders that forwards at least 90 % of its inflow to a single target in one payment — the typical pattern of a victim account being swept.',
+    'about.roleCollectorT': 'Collector',
+    'about.roleCollectorD': 'A collection account with at least three inflows from different senders (at least one of them flagged), at most two outflows and clear accumulation — where the money gets bundled.',
+    'about.roleSourceT': 'Source',
+    'about.roleSourceD': 'An account with at least three small outgoing payments (at most 0.1 XRP each) to flagged targets — a typical sender of dust and lure payments.',
+    'about.roleRelayT': 'Relay',
+    'about.roleRelayD': 'A pass-through account with balanced inflow and outflow (difference at most 50 % of the larger value) — a waypoint for the money, not an offender by itself.',
+    'about.patternsTitle': 'Patterns and connections',
+    'about.patDrainerT': 'Draining (drainer sweep)',
+    'about.patDrainerD': 'A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation is the finding classified as malicious; without it, it stays suspect.',
+    'about.patCrossLedgerT': 'Cross-ledger sweep',
+    'about.patCrossLedgerD': 'Funding and sweeping across block boundaries: when an account is funded in ledger N and only swept in ledger N+1, the cross-ledger memory of the engine keeps the sweep visible. Stretched dusting campaigns are caught the same way, via the union of their tiny destinations over the window.',
+    'about.patPeelingT': 'Peeling chains',
+    'about.patPeelingD': 'Staged forwarding of 60 to 95 % of the inflow across unflagged 1:1 relays, from three hops onwards. Detection runs on the transaction view and follows inconspicuous intermediate accounts without assigning them a role.',
+    'about.patWashT': 'Wash trading (self-transfers)',
+    'about.patWashD': 'At least three self-payments of the same account within one ledger (sender and destination are identical) — volume generation without a real counterparty, a typical washing pattern.',
+    'about.patHubT': 'Hub connections',
+    'about.patHubD': 'Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.',
+    'about.patKnownBadT': 'Known-bad contact',
+    'about.patKnownBadD': 'When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.',
+    'about.detectNote': 'The engine rule catalog holds eleven rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.',
+    'about.glossaryTitle': 'Glossary',
+    'about.glossaryHint': 'The terms of the interface — short and precise',
+    'about.gClusterT': 'Cluster',
+    'about.gClusterD': 'A group of addresses connected through money-flow edges (transactions with at least one flagged endpoint). Clusters form via union-find, carry labels such as “Cluster A” and track members, roles, volume and first/last sighting.',
+    'about.gSeverityT': 'Severity',
+    'about.gSeverityD': 'The engine assigns the levels malicious, suspect and info. The account check reports its verdict as known malicious, risk-associated (contact to listed addresses), clean or unknown, plus an off-ramp assessment (likely unproblematic, worth reviewing, not assessable). Addresses on whitelists (known gateways, exchanges) count as benign — exemption from the broad rules as false-positive protection, not a value judgment.',
+    'about.gTagT': 'Destination tag and transit',
+    'about.gTagD': 'Exchange accounts are hosted accounts: many users share one r-address and are told apart by the 32-bit destination tag. If inflows at the same exchange account show at least two different tag identities, the connection counts as transit — it runs through a shared exchange account and is not a direct adjacency.',
+    'about.gEntityT': 'Entity resolution',
+    'about.gEntityD': 'Control clusters from cryptographic signals instead of money flow: regular key, signer-list fingerprint, email hash and a shared sponsor address (funding source) unite accounts into one entity. Domains only count after two-way verification via xrp-ledger.toml; join keys carried by more than 20 addresses (hubs) are excluded.',
+    'about.gWindowT': 'Block window vs. persistent cluster stock',
+    'about.gWindowD': 'The block window is the rolling persisted stock behind the archive view (24 hours / 3 days / 7 days): hourly rollups plus details of flagged transactions only, seven days of retention. The persistent cluster stock (flow state) is independent of it: it accumulates clusters across the run of a server walk with a cursor, keeps them at most seven days after their last sighting (then the top 200 by volume) and feeds the flow host.',
+    'about.gHistArchT': 'History vs. archive',
+    'about.gHistArchD': 'The history permanently collects every cluster classified as malicious — independent of the live feed, among others through visitor reports. The dashboard archive only shows the persisted block window (24 hours to 7 days). For the backwards search per address there is a separate archive of daily chunks: registry-linked clusters stay retrievable for 180 days, malicious ones for 30 days.',
+    'about.limitsTitle': 'Honest limits',
+    'about.limitsHint': 'What this dashboard can do — and what it cannot',
+    'about.limit1': 'All roles and patterns are heuristics from in/out degree and money flow. They name anomalies, not offenders — no proof of guilt, no legal statement or liability.',
+    'about.limit2': 'There is no 100 % promise: not every scheme matches a rule, and rules can misfire without context. Cross-checking the transactions on the public ledger is explicitly encouraged.',
+    'about.limit3': 'The account check assesses at most the last 300 transactions of the queried address — older contacts and patterns are not covered. The queried address is not stored.',
+    'about.limit4': 'The analysis runs against public endpoints with rate limits (honeycluster.io). The server walk fills the window every five minutes; live mode and endpoints throttle and cache (60 s) — under load, views may briefly lag or drop out (fail-closed instead of pretending success).',
+    'about.limit5': 'The archive backwards search reads day blocks on a limited read budget (62 days by default): the 180-day retention of registry-linked clusters exceeds what is queryable — old windows may be cut short (marked as truncated).',
+    'about.limit6': 'The off-ramp assessment of the account check is a heuristic — the decision about payouts rests with the respective provider.',
+    'about.sourcesTitle': 'Data sources',
+    'about.sourcesNote': 'Ledger data: XRP Ledger mainnet via honeycluster.io (WSS/JSON-RPC). Account names and exchange attribution: xrpscan.com (CC BY-NC-SA 4.0). Country borders on the globe: Natural Earth (TopoJSON). Every finding address can be verified directly on the public ledger.',
+
     /* Schweregrade */
     'sev.malicious': 'malicious',
     'sev.suspect': 'suspect',
@@ -456,6 +537,11 @@ export const DICT = {
     'tab.history': 'Historie',
     'tab.check': 'Konto-Check',
     'tab.flowhost': 'Flow-Host',
+    'tab.about': 'Info',
+    /* Info-Boxen Historie/Archiv (2026-10-06): Kurzhinweis als summary der
+       Details-Box in history.js renderShell, Langtext im Box-Körper. */
+    'tab.historyHint': 'Dauerhaft gespeicherte maliziöse Cluster — unabhängig vom Live-Feed und vom Archiv-Modus des Dashboards.',
+    'tab.historyHintLong': 'Die Historie sammelt dauerhaft jeden Cluster, der als maliziös eingestuft wurde — auch wenn er das aktuelle Beobachtungsfenster längst verlassen hat. Gefüllt wird sie durch die Live-Analyse und durch Meldungen von Besuchern. Die Datenquelle „Archiv“ im Dashboard zeigt hingegen nur das persistierte Block-Fenster (24 Stunden bis 7 Tage) — die Historie ist davon unabhängig.',
 
     /* index.html — Live-Block-Feed */
     'live.title': 'Live-Block-Feed',
@@ -550,6 +636,16 @@ export const DICT = {
     'cluster.txUnit': 'Tx',
     'cluster.accountUnit': 'Konten',
     'cluster.chainAria': 'Geldfluss: Start bis Kollektor entlang echter Kanten',
+    /* Cluster-Karten — Verdichtung + Mega-Cluster (Design P2, 2026-10-06):
+       EINE gemeinsame „+N weitere Konten“-Wortfamilie für Adress-Chip-Zeile
+       und Mega-Meta-Zeile (Plan-Kritik 10: keine Doppel-Hinweise). */
+    'cluster.moreAccounts': '+{n} weitere Konten',
+    'cluster.moreAccountsTitle': '{n} Konten insgesamt in diesem Cluster',
+    'cluster.megaNote': '+{n} weitere Konten — Aggregat im Detail',
+    'cluster.densityAria': 'Dichte der Cluster-Karten',
+    'cluster.densityComfortable': 'Übersichtlich',
+    'cluster.densityCompact': 'Kompakt',
+    'cluster.densityDense': 'Dicht',
 
     /* app.js — Block-Karten und Log */
     'block.txs': 'Txs',
@@ -595,6 +691,9 @@ export const DICT = {
     'mode.label': 'Datenquelle',
     'mode.archive': 'Archiv',
     'mode.archiveAria': 'Persistiertes Block-Fenster (24 h / 3 d / 7 d) vom Server anzeigen',
+    /* Sichtbarer Hinweis unter der Modus-Auswahl (index.html #feed-archive-
+       hint), per aria-describedby an beide Modus-Buttons gebunden. */
+    'mode.archiveHint': 'Archiv-Modus: persistiertes Block-Fenster (24 h / 3 T / 7 T) vom Server — auch verfügbar, wenn kein Live-Feed verbunden ist.',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direkter WSS zu honeycluster.io – ein Ledger-Kommando pro Block, ohne Stichprobe',
     'range.label': 'Fenster',
@@ -660,6 +759,7 @@ export const DICT = {
     'modal.fallback2d': '3D-Ansicht nicht verfügbar – 2D-Ausweichansicht (vis-network).',
     'modal.noGraph': 'Kein Graph verfügbar – Detaildaten in Rollen-Verteilung, Flusskette und Konten-Tabelle.',
     'modal.downloadJson': 'Als JSON herunterladen',
+    'modal.graph3dLegend': 'Ring um einen Knoten = Drainer-Konto.',
 
     /* globe.js */
     'globe.note': 'Positionen sind deterministisch aus dem Adress-Hash abgeleitet — das XRPL-Ledger enthält keine Standortdaten. Die Kugel ist eine symbolische Aktivitätsansicht; die Länderzuordnung über die Börsen-Registry ist derzeit nicht verfügbar.',
@@ -784,6 +884,68 @@ export const DICT = {
     'fh.statusHint': 'Hinweis: {reason}',
     'fh.unreachable': 'Flow-State nicht erreichbar — bitte später erneut versuchen.',
     'fh.graphAria': 'Flow-Graph des akkumulierten States',
+
+    /* about.html — Info-Seite für die XRPL-Community (eigenständige Seite im
+       App-Shell-Look, Muster history-host.html). Alle Inhalte via data-i18n;
+       Begriffe folgen exakt der Engine-Forensik (lib/detector.mjs,
+       lib/cluster.mjs, lib/tag-identity.mjs, lib/entity-resolve.mjs,
+       lib/flow-state.mjs, lib/block-window.mjs, lib/account-report.mjs). */
+    'about.sub': 'Zweck, Erkennungsmethoden, Glossar und Grenzen des Dashboards',
+    'about.missionTitle': 'Wofür dieses Dashboard gedacht ist',
+    'about.missionHint': 'Köderunabhängige Echtzeit-Analyse des öffentlichen Ledgers',
+    'about.lead1': 'Honeypot XRPL ist ein offenes Echtzeit-Bedrohungs-Dashboard für die XRPL-Community. Jeder validierte Block des XRP-Ledger-Mainnet wird in Echtzeit auf Betrugs-, Phishing- und Draining-Muster geprüft; erkannte Akteure werden über ihren Geldfluss zu Clustern verbunden und mit Rollen (Source, Drainer, Kollektor, Relay) versehen.',
+    'about.lead2': 'Die Analyse ist köderunabhängig: Zur Erkennung werden keine eigenen Köder- oder Honigfallen-Konten mehr eingesetzt. Die Daten stammen ausschließlich aus dem öffentlichen Ledger — im Live-Modus über eine direkte WSS-Verbindung zu honeycluster.io (ein Ledger-Kommando pro Block, ohne Stichproben), im Archiv-Modus über das persistierte Server-Fenster (24 Stunden bis 7 Tage). Kontonamen und Börsen-Zuordnungen kommen von xrpscan.com (CC BY-NC-SA 4.0).',
+    'about.lead3': 'Dasselbe Analyse-Modul (lib/detector.mjs) läuft im Browser wie auf dem Server — die Live-Analyse im Browser liefert dieselben Funde wie der Server-Walk, der das Fenster im Hintergrund füllt.',
+    'about.addressNote': 'Jede angezeigte Adresse ist eine Akteur-Adresse, die öffentlich im Ledger sichtbar ist, und wird vollständig angezeigt. Die Schutzschichten um die historischen Köder-Konten (Hash-Deny-Liste, serverseitige Sanitisierung) bleiben davon unberührt aktiv.',
+    'about.detectTitle': 'Was erkannt wird',
+    'about.detectHint': 'Rollen und Muster der Detektor-Engine — Heuristiken, kein Schuldnachweis',
+    'about.rolesTitle': 'Rollen im Cluster-Graph',
+    'about.roleDrainerT': 'Drainer',
+    'about.roleDrainerD': 'Ein Konto, das von mindestens zwei verschiedenen Sendern aufgefüllt wurde und mindestens 90 % des Eingangs in einer Zahlung an ein einziges Ziel weiterleitet — das typische Muster eines abgeräumten Opfer-Kontos.',
+    'about.roleCollectorT': 'Kollektor',
+    'about.roleCollectorD': 'Ein Sammel-Konto mit mindestens drei Eingängen verschiedener Sender (davon mindestens einer geflaggt), höchstens zwei Ausgängen und klarer Akkumulation — dort, wo das Geld gebündelt wird.',
+    'about.roleSourceT': 'Source',
+    'about.roleSourceD': 'Ein Konto mit mindestens drei kleinen Ausgangs-Zahlungen (je höchstens 0,1 XRP) an geflaggte Ziele — typischer Absender von Dust- und Lockzahlungen.',
+    'about.roleRelayT': 'Relay',
+    'about.roleRelayD': 'Ein Durchleitungskonto mit ausgeglichenem Ein- und Ausgang (Differenz höchstens 50 % des größeren Werts) — Zwischenstation auf dem Weg des Geldes, nicht selbst Täter.',
+    'about.patternsTitle': 'Muster und Verbindungen',
+    'about.patDrainerT': 'Draining (Drainer-Sweep)',
+    'about.patDrainerD': 'Ein frisch finanziertes Konto wird sofort wieder abgeräumt: Mindestens 90 % des Guthabens gehen in einer Zahlung an ein einziges Ziel. Nur mit Ledger-Beleg der Kontoerstellung wird der Fund als maliziös eingestuft, ohne Beleg bleibt er verdächtig.',
+    'about.patCrossLedgerT': 'Cross-Ledger-Sweep',
+    'about.patCrossLedgerD': 'Füttern und Abräumen über Blockgrenzen hinweg: Wird ein Konto in Ledger N finanziert und erst in Ledger N+1 abgeräumt, hält das Fenster-Gedächtnis der Engine den Sweep sichtbar. Auch zeitlich gestreckte Dusting-Kampagnen werden auf dieselbe Weise erkannt — über die Vereinigung ihrer Mini-Ziele im Fenster.',
+    'about.patPeelingT': 'Peeling-Ketten',
+    'about.patPeelingD': 'Gestaffelte Weiterleitung von 60 bis 95 % des Eingangs über ungeflaggte 1:1-Relays, ab drei Hops. Die Erkennung läuft über die Transaktionssicht und folgt auch unauffälligen Zwischenkonten, ohne ihnen eine Rolle zuzuweisen.',
+    'about.patWashT': 'Wash Trading (Selbsttransfers)',
+    'about.patWashD': 'Mindestens drei Selbstzahlungen desselben Kontos in einem Ledger (Absender und Empfänger sind identisch) — Volumenerzeugung ohne echte Gegenpartei, ein typisches Washing-Muster.',
+    'about.patHubT': 'Hub-Verbindungen',
+    'about.patHubD': 'Ungeflaggte Knoten mit mehr als 20 Fund-Kanten (Börsen-, Faucet- oder Sammel-Konten) werden aus der Cluster-Vereinigung herausgeschnitten: Zwei unabhängige Szenen verschmelzen nicht über eine gemeinsame Börse. Verbindungen, die über ein gemeinsames Börsen-Konto laufen (transit), werden als Durchleitung gekennzeichnet, nicht als direkte Nachbarschaft.',
+    'about.patKnownBadT': 'Known-Bad-Kontakt',
+    'about.patKnownBadD': 'Berührt eine Transaktion eine Adresse aus der Bedrohungsliste (kuratiert und aus der Honeypot-Historie abgeleitet), wird das als Treffer gemeldet — direkte Konto- oder Zahlungsberührung als maliziös, bloße Trustline- oder NFT-Positionen nur als verdächtig.',
+    'about.detectNote': 'Der Regelkatalog der Engine umfasst elf Regeln — neben den obigen unter anderem Memo-Phishing (URLs und Seed-Muster in Zahlungsmemos), Dusting (Mini-XRP an frische Konten), Fake-NFT-Betrug, Airdrop-TrustSet-Spam, Zahlungs-Bursts und Offer-Spam. Jede Regel trägt einen Schweregrad; alle Zuordnungen sind Heuristiken, kein Schuldnachweis.',
+    'about.glossaryTitle': 'Begriffs-Glossar',
+    'about.glossaryHint': 'Die Begriffe der Oberfläche — kurz und präzise',
+    'about.gClusterT': 'Cluster',
+    'about.gClusterD': 'Eine Gruppe von Adressen, die über Geldfluss-Kanten (Transaktionen mit mindestens einem geflaggten Endpunkt) zusammenhängen. Cluster entstehen per Union-Find, tragen Label wie „Cluster A“ und verfolgen Mitglieder, Rollen, Volumen sowie erste und letzte Sichtung.',
+    'about.gSeverityT': 'Schweregrad (Severity)',
+    'about.gSeverityD': 'Die Engine vergibt die Stufen maliziös, verdächtig und info. Der Konto-Check nennt in seinem Urteil bekannt maliziös, risikobehaftet (Kontakt zu gelisteten Adressen), sauber oder unbekannt und ergänzt eine Off-Ramp-Einschätzung (voraussichtlich unproblematisch, prüfungswürdig, nicht bewertbar). Adressen auf Whitelists (bekannte Gateways, Börsen) gelten als benigne — Ausnahme von den Breiten-Regeln als False-Positive-Schutz, keine Wertung.',
+    'about.gTagT': 'Destination-Tag und Transit',
+    'about.gTagD': 'Börsen-Konten sind Hosted-Accounts: Viele Nutzer teilen eine r-Adresse und werden über den 32-Bit-Destination-Tag unterschieden. Zeigen die Eingänge am selben Börsen-Konto mindestens zwei verschiedene Tag-Identitäten, gilt die Verbindung als transit — sie läuft über ein gemeinsames Börsen-Konto und ist keine direkte Nachbarschaft.',
+    'about.gEntityT': 'Entity-Auflösung',
+    'about.gEntityD': 'Kontroll-Cluster über kryptografische Signale statt Geldfluss: RegularKey, Signer-Listen-Fingerprint, EmailHash und gemeinsame Sponsor-Adresse (Finanzierungsquelle) vereinigen Konten zu einer Entität. Domains zählen erst nach beidseitiger Verifikation über xrp-ledger.toml; Join-Keys, die mehr als 20 Adressen tragen (Hubs), werden ausgeschlossen.',
+    'about.gWindowT': 'Block-Fenster vs. persistenter Cluster-Bestand',
+    'about.gWindowD': 'Das Block-Fenster ist der rollende, persistierte Bestand hinter der Archiv-Ansicht (24 Stunden / 3 Tage / 7 Tage): stündliche Rollups plus Details ausschließlich der geflaggten Transaktionen, sieben Tage Retention. Der persistente Cluster-Bestand (Flow-State) ist davon unabhängig: Er akkumuliert Cluster über den Lauf eines Server-Walks mit Cursor, hält sie höchstens sieben Tage nach der letzten Sichtung (danach die Top 200 nach Volumen) und füllt den Flow-Host.',
+    'about.gHistArchT': 'Historie vs. Archiv',
+    'about.gHistArchD': 'Die Historie sammelt dauerhaft jeden Cluster, der als maliziös eingestuft wurde — unabhängig vom Live-Feed, unter anderem durch Meldungen von Besuchern. Das Archiv im Dashboard zeigt nur das persistierte Block-Fenster (24 Stunden bis 7 Tage). Für die Rückwärtssuche pro Adresse existiert ein eigenes Archiv aus Tages-Chunks: Registry-verknüpfte Cluster bleiben 180 Tage abrufbar, maliziöse 30 Tage.',
+    'about.limitsTitle': 'Ehrliche Grenzen',
+    'about.limitsHint': 'Was dieses Dashboard leisten kann — und was nicht',
+    'about.limit1': 'Alle Rollen und Muster sind Heuristiken aus Ein-/Ausgrad und Geldfluss. Sie benennen Auffälligkeiten, keine Täter — kein Schuldnachweis, keine Rechts- oder Haftaussage.',
+    'about.limit2': 'Es gibt kein 100-%-Versprechen: Nicht jede Masche trifft eine Regel, und Regeln können ohne Kontext danebenliegen. Gegenlesen über die Transaktionen auf dem öffentlichen Ledger ist ausdrücklich erwünscht.',
+    'about.limit3': 'Der Konto-Check bewertet höchstens die letzten 300 Transaktionen der abgefragten Adresse — ältere Kontakte und Muster sind nicht erfasst. Die abgefragte Adresse wird nicht gespeichert.',
+    'about.limit4': 'Die Analyse läuft gegen öffentliche Endpunkte mit Rate-Limits (honeycluster.io). Der Server-Walk füllt das Fenster alle fünf Minuten; Live-Modus und Endpunkte drosseln und cachen (60 s) — unter Last können Ansichten kurz hinterherlaufen oder ausfallen (fail-closed statt Erfolgs-Vortäuschung).',
+    'about.limit5': 'Die Archiv-Rückwärtssuche liest Tages-Blöcke mit begrenztem Lese-Budget (standardmäßig 62 Tage): Die 180-Tage-Retention registry-verknüpfter Cluster übersteigt die Abfragbarkeit — alte Fenster können abgeschnitten sein (als truncated gekennzeichnet).',
+    'about.limit6': 'Die Off-Ramp-Einschätzung des Konto-Checks ist eine Heuristik — die Entscheidung über Auszahlungen liegt beim jeweiligen Anbieter.',
+    'about.sourcesTitle': 'Datenquellen',
+    'about.sourcesNote': 'Ledger-Daten: XRP-Ledger-Mainnet über honeycluster.io (WSS/JSON-RPC). Kontonamen und Börsen-Zuordnung: xrpscan.com (CC BY-NC-SA 4.0). Ländergrenzen der Weltkugel: Natural Earth (TopoJSON). Jede Fund-Adresse ist direkt auf dem öffentlichen Ledger nachvollziehbar.',
 
     /* Schweregrade */
     'sev.malicious': 'maliziös',
@@ -1012,11 +1174,14 @@ export function applyStatic(root) {
   }
 }
 
-const PAGE_TITLE = {
+// Exportiert seit der Info-Seite (2026-10-06): about.test.mjs prüft die
+// Vollständigkeit der about-Einträge (Titel/Meta je Sprache).
+export const PAGE_TITLE = {
   index: { en: 'Honeypot XRPL – Live Ledger Analysis', de: 'Honeypot XRPL – Live-Ledger-Analyse' },
   flowhost: { en: 'Honeypot XRPL – Flow-Host', de: 'Honeypot XRPL – Flow-Host' },
+  about: { en: 'Honeypot XRPL – About', de: 'Honeypot XRPL – Info' },
 };
-const PAGE_DESC = {
+export const PAGE_DESC = {
   index: {
     en: 'Live ledger analysis of the XRPL: validated blocks are checked in real time for malware, spam and draining patterns, and the detected actors are grouped into clusters (source, drainer, collector, relay).',
     de: 'Live-Ledger-Analyse der XRPL: validierte Blöcke werden in Echtzeit auf Malware-, Spam- und Draining-Muster geprüft und die erkannten Akteure zu Clustern gruppiert (Source, Drainer, Kollektor, Relay).',
@@ -1025,11 +1190,19 @@ const PAGE_DESC = {
     en: 'Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.',
     de: 'Akkumulierter Cross-Block-Flow-State des XRPL-Ledger-Walks: Cluster-View mit Rollen, Volumen und Sichtungszeiten sowie Cursor-Stand des Walks.',
   },
+  about: {
+    en: 'What Honeypot XRPL detects on the XRP Ledger: drainer, collector, source and relay roles, peeling chains, wash trading, cross-ledger sweeps, hub connections and known-bad contacts — plus glossary and honest limits.',
+    de: 'Was Honeypot XRPL auf dem XRP-Ledger erkennt: Rollen Drainer, Kollektor, Source und Relay, Peeling-Ketten, Wash Trading, Cross-Ledger-Sweeps, Hub-Verbindungen und Known-Bad-Kontakte — dazu Glossar und ehrliche Grenzen.',
+  },
 };
 
 function pageKind() {
   try {
-    if (typeof location !== 'undefined' && /history-host/i.test(String(location.pathname ?? ''))) return 'flowhost';
+    if (typeof location !== 'undefined') {
+      const p = String(location.pathname ?? '');
+      if (/history-host/i.test(p)) return 'flowhost';
+      if (/about/i.test(p)) return 'about';
+    }
   } catch { /* ohne location: index */ }
   return 'index';
 }

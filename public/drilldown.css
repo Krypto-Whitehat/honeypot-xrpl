@@ -144,19 +144,38 @@ body.cluster-modal-open {
   min-inline-size: 0;
 }
 
-/* 3D-Bühne: weiß wie --a6-graph-canvas; Höhe über die gemeinsame Leiter
-   --a6-stage-height (style.css-Token-Block: 720/640/560/480 px) — zuvor fix
-   520 px und damit ohne Anschluss an #graph/#globe. Rand in --a6-line-strong
-   als Bühnen-Anschluss; die Canvas-Füllfarbe selbst setzt drilldown.js
-   (bewusst nicht angetastet — JS-Farblogik ist Schutzzone). */
+/* 3D-Bühne (Design P3.1, 2026-10-06): Das WebGL-Canvas läuft mit transparentem
+   Clear (drilldown.js setzt backgroundColor 'rgba(0,0,0,0)' — am gepinnten
+   Bundle 3d-force-graph@1.80.0 Browser-verifiziert: der Renderer wird mit
+   alpha:true konstruiert, die Farbe wird inkl. Alpha-Anteil an
+   setClearColor gereicht). Darunter ein sparsames Punkt-Substrat statt
+   Voll-Partikel-Meer: feines 24-px-Raster plus versetztes Sekundär-Raster
+   (96 px) als Tiefenebene, darunter die Token-Bühnenfläche. Die Vignette
+   (inset, sehr dezent) gibt Raumtiefe OHNE Glow — reines CSS, 0 GPU-Kosten,
+   keine render-blockierende Ressource. Höhe über die gemeinsame Leiter
+   --a6-stage-height (style.css-Token-Block: 720/640/560/480 px). Rand in
+   --a6-line-strong als Bühnen-Anschluss; forced-colors nimmt die Vignette
+   mit box-shadow:none zurück (Block unten). */
 .cluster-3d {
   position: relative;
   width: 100%;
   height: var(--a6-stage-height, 520px);
-  background: var(--a6-graph-canvas);
+  background:
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    radial-gradient(var(--a6-graph-grid) 1px, transparent 1px) 12px 12px / 96px 96px,
+    var(--a6-graph-canvas);
   border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
   overflow: hidden;
+  box-shadow: inset 0 -40px 80px -60px rgba(20, 20, 22, 0.06);
+}
+
+/* Hover-Fokus (Design P3.4): drilldown.js setzt .is-hover-node über dem
+   Knoten (onNodeHover). Nur der Cursor — Farb-/Breitenwechsel laufen in den
+   Material-Accessoren (reduced-motion-neutral; unter prefers-reduced-motion
+   stellt drilldown.js den Farb-Fokus ganz ab, der Cursor bleibt). */
+.cluster-3d.is-hover-node canvas {
+  cursor: pointer;
 }
 
 .cluster-3d .graph-note { padding: 16px; margin: 0; }
@@ -281,6 +300,22 @@ body.cluster-modal-open {
 
 /* ---------------- Konten-Tabelle ---------------- */
 
+/* Volle Modal-Breite (Layout-Fix 2026-10-06): Die Konten-Tabelle ist kein Kind
+   der Side-Spalte mehr (drilldown.js hängt sie als letztes direktes Kind an
+   .cluster-modal-body) — grid-column:1/-1 spannt beide Grid-Spalten, die
+   Tabelle läuft über die volle Body-Breite statt über 45 % Seitenbreite mit
+   horizontalem Scroll (gemessen: Naturbreite 1283 px auf 606 px Client-Breite;
+   verifiziert 1600/1440/1280 VP ohne Overflow). min-inline-size:0 hält das
+   Grid-Kind schrumpffähig. Folgekosten bewusst akzeptiert und dokumentiert:
+   Das Modal wird höher als der Viewport (3D-Bühne 720 px + Tabelle darunter),
+   .cluster-modal-body scrollt vertikal (overflow:auto siehe Body-Regel oben);
+   unter 900 VP bleibt der Body einspaltig und der bestehende
+   overflow-x:auto-Fallback des Wrappers aktiv. */
+.cluster-modal-table {
+  grid-column: 1 / -1;
+  min-inline-size: 0;
+}
+
 .cluster-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--a6-line);
@@ -298,8 +333,18 @@ body.cluster-modal-open {
 }
 
 .cluster-table {
-  width: max-content;
-  min-width: 100%;
+  /* width:100% statt max-content + min-width:100% (Layout-Fix 2026-10-06):
+     max-content ließ die Tabelle NIE schrumpfen — mehrwortige Header
+     („Eingehende Drops“, „Kanten (in / aus)“) brachen selbst bei
+     white-space:normal nie um, weil die Tabelle ihre präferierte Breite
+     behielt, und der Wrapper scrollte horizontal. Mit 100 % teilt der
+     Auto-Table-Layout-Algorithmus die verfügbare Breite zu: Bei Engpass
+     schrumpfen die umbrechbereiten th-Spalten (siehe white-space:normal im
+     th-Block) zweizeilig, Zahlen-/Aktions-Zellen bleiben nowrap; Volldressen
+     bleiben einzeilig (verifiziert 1280 VP, Spalte 268.8 px, Text einzeilig).
+     Bei Luft dehnt min-Verhalten 100 % die Tabelle wie bisher auf volle
+     Breite (früher via min-width:100%). */
+  width: 100%;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -335,6 +380,14 @@ body.cluster-modal-open {
   letter-spacing: 0.08em;
   color: var(--a6-muted);
   background: var(--a6-surface-alt);
+  /* Header umbrechbar (Layout-Fix 2026-10-06): überschreibt das nowrap der
+     gemeinsamen th/td-Regel oben (gleiche Spezifität, spätere Quelle gewinnt)
+     — mehrwortige DE/EN-Header („Eingehende Drops“, „Edges (in / out)“)
+     schrumpfen zweizeilig, wenn die verfügbare Breite unter die max-content-
+     Summe fällt (gemessen: Spalte „Eingehende Drops“ 161 → 135 px bei 1280
+     VP). td bleiben einzeilig (Zahlen, Badges, Aktionen). Wirkt nur zusammen
+     mit width:100% der Tabelle (siehe dort). */
+  white-space: normal;
   /* Sticky-Kopf (Design-Audit, defensiv): bleibt beim vertikalen Scrollen im
      .cluster-table-wrap oben liegen — die opake surface-alt-Fläche deckt
      Zeilen ab; solange der Wrapper nicht höhenbeschränkt scrollt, ist die
@@ -353,7 +406,11 @@ body.cluster-modal-open {
      sie nicht mehr. */
   overflow-wrap: anywhere;
   white-space: normal;
-  min-width: 220px;
+  /* 220 → 200 px (Layout-Fix 2026-10-06): bei Volladressen bleibt die Spalte
+     inhaltsgetrieben (~269 px, bleibt einzeilig — verifiziert); die Absenkung
+     wirkt nur für den Kurzform-Fall und hält die Mindestbreite eine Stufe
+     unter der Nature-Breite kürzerer Anzeigewerte. */
+  min-width: 200px;
   max-width: 340px;
 }
 
@@ -365,11 +422,13 @@ body.cluster-modal-open {
 .cluster-table-dash { color: var(--a6-muted); }
 
 /* ---------------- JSON-Export des Clusters (A1/A5) ----------------
-   Der Button steht als letztes Kind in aside.cluster-modal-side (nach der
-   Konten-Tabelle) — nicht direktes Kind von .cluster-modal-body, dessen
-   2-Spalten-Grid sonst gebrochen würde. Erbt den .download-btn-Stil aus
-   style.css (inkl. forced-colors-Regel); hidden, solange kein Export-Payload
-   existiert (drilldown.js A4). */
+   Der Button steht als letztes Kind in aside.cluster-modal-side (nach
+   Rollen/Zeitachse/Kette). Die Konten-Tabelle ist seit dem Layout-Fix
+   2026-10-06 kein Side-Kind mehr — sie liegt als letztes direktes Kind von
+   .cluster-modal-body hinter der aside und spannt die volle Breite
+   (grid-column:1/-1, siehe Regel im Konten-Tabelle-Abschnitt). Der Export-
+   Block erbt den .download-btn-Stil aus style.css (inkl. forced-colors-Regel);
+   hidden, solange kein Export-Payload existiert (drilldown.js A4). */
 .cluster-modal-export {
   display: flex;
   flex-direction: column;

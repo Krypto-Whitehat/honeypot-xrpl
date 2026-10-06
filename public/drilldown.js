@@ -160,6 +160,49 @@ export function makeCluster3dCollideForce(radiusOf, strength = 0.8) {
   return force;
 }
 
+/* ---------------- 3D-Stil-Konstanten (Design P3, 2026-10-06) ----------------
+ * Sichtbare Kanten-Staffelung statt Einheitsbreite: Payments tragen den
+ * Geldfluss (breiteste Kante), strukturierte Mehrfach-Kontroll-Operationen
+ * (Escrow/Check/NFToken) bleiben mittel, alles Übrige (TrustSet, Offers,
+ * AccountSet, PaymentChannel) tritt auf 0.8 zurück. Basis-Deckkraft 0.85
+ * (Bundle-Default wäre 0.2 — Kanten wären neben den Knoten kaum lesbar).
+ * Alle Werte bewusst Modul-Level und exportiert: drilldown-freeze.test.mjs
+ * prüft die Staffelung deterministisch ohne Browser. */
+export const GRAPH3D_LINK_WIDTHS = Object.freeze({ payment: 1.4, structured: 1, other: 0.8 });
+export const GRAPH3D_LINK_OPACITY = 0.85;
+// ausgegraute Kantenfarbe für den Hover-Fokus (nicht beteiligte Kanten);
+// Kontrolllinien-Ton — kein neues Farbsystem, keine Severity-Überladung.
+export const GRAPH3D_LINK_FADED = '#c9c9cf';
+// Deckel der Drainer-Ringe (Design P3.2: „Customizing ≤ 12 Knoten ist der
+// Performance-Schlüssel" — genau ein zusätzliches Mesh je markiertem Knoten).
+export const GRAPH3D_RING_CAP = 12;
+
+// Kantenbreite nach Transaktionstyp. Schlüssel wie EDGE_COLORS (app.js):
+// großgeschriebene XRPL-Typnamen; unbekannte Typen fallen auf 0.8 zurück.
+export function cluster3dLinkWidth(type) {
+  const ty = String(type ?? '');
+  if (ty === 'Payment') return GRAPH3D_LINK_WIDTHS.payment;
+  if (ty.startsWith('Escrow') || ty.startsWith('Check') || ty.startsWith('NFToken')) {
+    return GRAPH3D_LINK_WIDTHS.structured;
+  }
+  return GRAPH3D_LINK_WIDTHS.other;
+}
+
+// Deterministische Ring-Auswahl: Drainer-Rolle, Top-Cap nach Drops-Summe
+// (desc), Gleichstand über Adresse asc — dieselbe Ordnung wie die 3D-Knoten-
+// Kappe und die Deny-Nachprüfung (Drops desc, dann id asc). Der Aggregat-
+// knoten (role 'unknown') bleibt ausgeschlossen.
+export function selectDrainerRingNodes(nodes, cap = GRAPH3D_RING_CAP) {
+  const drainers = [];
+  for (const n of nodes) {
+    if (n && String(n.role) === 'drainer') drainers.push(n);
+  }
+  drainers.sort((a, b) =>
+    ((Number(b?.inDrops) || 0) + (Number(b?.outDrops) || 0)) - ((Number(a?.inDrops) || 0) + (Number(a?.outDrops) || 0))
+    || (String(a?.id) < String(b?.id) ? -1 : String(a?.id) > String(b?.id) ? 1 : 0));
+  return new Set(drainers.slice(0, Math.max(0, cap)).map((n) => String(n.id)));
+}
+
 export function initClusterDrilldown(ctx) {
   const esc = ctx.esc;
   // Fail-closed-Anzeige-Maske (TRUNC-Invariante 2026-10-06): Der Host (app.js)
@@ -291,6 +334,21 @@ export function initClusterDrilldown(ctx) {
   let fg3dResizeObs = null;     // ResizeObserver der 3D-Bühne
   let vis2d = null;             // 2D-Ausweich-Instanz
   const highlightSet = new Set();
+  // Hover-Fokus (Design P3.4): rohe Knoten-Id des gehoverten Knotens plus
+  // ihr Anzeige-Wert-Pendant im highlightSet (Tabellen-Hover nutzt denselben
+  // Mechanismus über displayAddr). null = kein aktiver Hover.
+  let hover3dNodeId = null;
+  let hover3dShown = null;
+  let fg3dStageEl = null;       // Bühnen-Container (.cluster-3d) für die Cursor-Klasse
+  // Drainer-Ring (Design P3.2): Auswahl + Layout des aktuellen Builds, die
+  // gemeinsame Einheits-Geometrie/Material (ein Mesh je Ring) und der
+  // Klassen-Abruf aus dem Bundle. Dispose ausschließlich in teardown3D.
+  let ring3dIds = new Set();
+  let ring3dLayout = null;
+  let ring3dUnitGeo = null;     // Kugelgürtel-Band (Radius 1), gemeinsam für alle Ringe
+  let ring3dMat = null;         // MeshLambertMaterial, Drainer-Rot, opacity 0.9, OHNE Emissive
+  let ring3dClasses = null;     // {Mesh, SphereGeometry, MeshLambertMaterial} aus dem Bundle
+  let ring3dClassesFailed = false;
 
   // Export-Payload (A3/A4): Cluster-Rohobjekt aus dem letzten Vollrender —
   // wird ausschließlich in render() gesetzt und in openCluster/close/
@@ -408,18 +466,31 @@ export function initClusterDrilldown(ctx) {
             <section class="cluster-modal-roles" aria-label="${esc(t('modal.rolesAria'))}"></section>
             <section class="cluster-modal-timeline" aria-label="${esc(t('modal.timelineAria'))}"></section>
             <section class="cluster-modal-chain" aria-label="${esc(t('modal.chainAria'))}"></section>
-            <section class="cluster-modal-table" aria-label="${esc(t('modal.tableAria'))}"></section>
-            <!-- JSON-Export des Clusters (A1): als letztes Kind der Side-Spalte
-                 (nicht direktes Kind von .cluster-modal-body — das 2-Spalten-Grid
-                 würde durch ein weiteres Kind gebrochen). Label initial per t()
-                 und zusätzlich data-i18n, damit applyStatic bei hx:langchange
-                 (app.js) den Text in der neuen Sprache setzt — das Digest-Gate
-                 in render() überspringt ein Retranslate sonst möglicherweise. -->
+            <!-- JSON-Export des Clusters (A1): verbleibt als letztes Kind der
+                 Side-Spalte (Rollen/Zeitachse/Kette darüber). Die Konten-Tabelle
+                 ist seit dem Layout-Fix 2026-10-06 kein Side-Kind mehr — sie
+                 steht als letztes direktes Kind von .cluster-modal-body hinter
+                 der aside und spannt via grid-column:1/-1 (drilldown.css) die
+                 volle Modal-Breite. Label initial per t() und zusätzlich
+                 data-i18n, damit applyStatic bei hx:langchange (app.js) den
+                 Text in der neuen Sprache setzt — das Digest-Gate in render()
+                 überspringt ein Retranslate sonst möglicherweise. -->
             <div class="cluster-modal-export">
               <button type="button" class="download-btn cluster-json-download" id="cluster-json-download" data-i18n="modal.downloadJson" hidden>${esc(t('modal.downloadJson'))}</button>
               <p class="graph-note cluster-export-note" data-i18n="export.clusterNote" hidden>${esc(t('export.clusterNote'))}</p>
             </div>
           </aside>
+          <!-- Konten-Tabelle (Layout-Fix 2026-10-06): bewusst LETZTES direktes
+               Kind von .cluster-modal-body HINTER der aside — vorher steckte sie
+               in der Side-Spalte und lief auf 45 % Body-Breite (gemessen 606 px
+               Client-Breite bei 1283 px Naturbreite → horizontaler Scroll ab
+               jeder Desktop-Größe). drilldown.css setzt grid-column:1/-1: Das
+               2-Spalten-Grid (Graph + Side) bleibt für die erste Zeile
+               erhalten, die Tabelle läuft als zweite, volle Zeile darunter;
+               der Body scrollt dafür vertikal (overflow:auto, dokumentiert in
+               drilldown.css). renderTable füllt sie positionsunabhängig per
+               querySelector('.cluster-modal-table'). -->
+          <section class="cluster-modal-table" aria-label="${esc(t('modal.tableAria'))}"></section>
         </div>
       </div>`;
     document.body.appendChild(overlay);
@@ -540,6 +611,7 @@ export function initClusterDrilldown(ctx) {
     overlay.hidden = true;
     document.body.classList.remove('cluster-modal-open');
     highlightSet.clear();
+    reset3dHover(); // Hover-Fokus bleibt nicht über das geschlossene Modal stehen
     if (fg3d) { try { fg3d.pauseAnimation(); } catch { /* egal */ } }
     // Fokus-Rückkehr: Karte, deren aktueller Index dieselbe cluster.id trägt,
     // sonst die Cluster-Liste.
@@ -1347,6 +1419,190 @@ export function initClusterDrilldown(ctx) {
     };
   }
 
+  /* ---------------- 3D-Stil (Design P3, 2026-10-06) ----------------
+   * Tiefenstaffelung/Kanten-Fokus ohne Speed-Verlust: kein Postprocessing
+   * (kein EffectComposer/Bloom), keine per-Frame-Materialwechsel — Farb- und
+   * Breitenwechsel laufen ausschließlich ereignisgesteuert über EINEN
+   * Accessor-Set je Hover-Wechsel; das Punkt-Substrat unter der Bühne ist
+   * reines CSS (drilldown.css). */
+
+  // Kante berührt den Knoten? source/target sind nach dem Digest Knoten-
+  // Objekte (wie im linkLabel-Callback oben behandelt).
+  function linkTouches3d(l, nodeId) {
+    if (!l) return false;
+    const s = l.source && typeof l.source === 'object' ? String(l.source.id ?? '') : String(l.source ?? '');
+    const t = l.target && typeof l.target === 'object' ? String(l.target.id ?? '') : String(l.target ?? '');
+    return s === nodeId || t === nodeId;
+  }
+
+  // Kantenfarbe: Typfarbe wie bisher; im Hover-Fokus treten nicht beteiligte
+  // Kanten auf den Kontrolllinien-Ton zurück (pro Kante steuerbar — das
+  // Bundle kennt KEINE pro-Kanten-Deckkraft, linkOpacity ist global; eine
+  // globale Abblendung auf 0.35 würde die fokussierten Kanten mit treffen).
+  function linkColor3dAccessor() {
+    return (l) => {
+      const base = edgeColors[String(l.type)] || edgeDefault;
+      if (!hover3dNodeId) return base;
+      return linkTouches3d(l, hover3dNodeId) ? base : GRAPH3D_LINK_FADED;
+    };
+  }
+
+  // Kantenbreite: Typ-Staffelung (Payment 1.4 / Escrow-Check-NFT 1 / Rest
+  // 0.8); im Hover-Fokus beteiligte Kanten ×1.5.
+  function linkWidth3dAccessor() {
+    return (l) => {
+      const base = cluster3dLinkWidth(l.type);
+      if (!hover3dNodeId) return base;
+      return linkTouches3d(l, hover3dNodeId) ? base * 1.5 : base;
+    };
+  }
+
+  // Hover-Fokus (Design P3.4): Cursor + Knoten-Highlight über das bestehende
+  // highlightSet-Muster (Anzeige-Maske displayAddr wie beim Tabellen-Hover)
+  // + EIN Farb-/Breiten-Setter je Wechsel. Degradation prefers-reduced-
+  // motion: Der Zeiger-Cursor bleibt, der Farb-/Breiten-Fokus (großflächige
+  // Helligkeitswechsel beim schnellen Überfahren) entfällt — Tabellen-Sync
+  // bleibt ohnehin an den Klick gebunden.
+  function reset3dHover() {
+    if (hover3dShown) highlightSet.delete(hover3dShown);
+    hover3dNodeId = null;
+    hover3dShown = null;
+    if (fg3dStageEl) fg3dStageEl.classList.remove('is-hover-node');
+  }
+
+  function on3dNodeHover(node) {
+    if (!fg3d) return;
+    if (fg3dStageEl) fg3dStageEl.classList.toggle('is-hover-node', Boolean(node));
+    if (reducedMotion()) return;
+    if (hover3dShown) highlightSet.delete(hover3dShown);
+    hover3dNodeId = node ? String(node.id ?? '') : null;
+    hover3dShown = node ? displayAddr(hover3dNodeId) : null;
+    if (hover3dShown) highlightSet.add(hover3dShown);
+    try {
+      fg3d.nodeColor(nodeColorAccessor());
+      fg3d.linkColor(linkColor3dAccessor());
+      fg3d.linkWidth(linkWidth3dAccessor());
+    } catch { /* Accessor-Set nicht verfügbar -> nur Cursor-Fokus */ }
+  }
+
+  /* Drainer-Ring (Design P3.2, Plan-Kritik 7b/8): ADDITIV über
+   * nodeThreeObjectExtend(true) — das Bundle behält seine Default-Sphere
+   * inkl. nodeVal/nodeRelSize-Skalierung und hängt das zurückgegebene Objekt
+   * als Kind an (Bundle-Nachweis: onCreateObj -> n = new vf.Mesh … n.add(s)).
+   * Der Ring selbst ist ein äquatorialer Band-Ausschnitt einer Einheits-
+   * kugel (dünn, 24 radiale Segmente), per einheitlicher Skalierung auf das
+   * 1.45-Fache des Knotenradius gesetzt — von jeder Kameraseite sichtbar,
+   * opak (opacity 0.9) und bewusst OHNE Emissive (lab_graphite: kein Glow).
+   * Die three-Klassen werden aus bereits verdauten Knoten-Meshes der Instanz
+   * rekonstruiert (fg3d.scene() -> traverse): das Bundle legt die Klassen
+   * nicht global ab (window.THREE wird vom Bundle nur gelesen, nie
+   * geschrieben — grep-Nachweis), aber Mesh/SphereGeometry/
+   * MeshLambertMaterial sind über Instanz-Konstruktoren erreichbar und
+   * identisch mit den bundle-eigenen Klassen. Browser-verifiziert am
+   * gepinnten Bundle 2026-10-06 (Magenta-Transparenz-Probe). */
+  function resolve3dRingClasses() {
+    if (ring3dClassesFailed) return null;
+    if (ring3dClasses) return ring3dClasses;
+    try {
+      const scene = typeof fg3d.scene === 'function' ? fg3d.scene() : null;
+      if (!scene || typeof scene.traverse !== 'function') return null;
+      let mesh = null;
+      scene.traverse((o) => {
+        if (mesh || !o || o.__graphObjType !== 'node' || !o.geometry) return;
+        if (String(o.geometry.type).indexOf('Sphere') === 0) mesh = o;
+      });
+      if (!mesh) return null; // noch kein Default-Knoten-Mesh verdaut -> später erneut
+      ring3dClasses = {
+        Mesh: mesh.constructor,
+        SphereGeometry: mesh.geometry.constructor,
+        MeshLambertMaterial: mesh.material.constructor,
+      };
+      return ring3dClasses;
+    } catch {
+      ring3dClassesFailed = true; // kein Endlos-Retry gegen kaputte Szene
+      return null;
+    }
+  }
+
+  function drainerRing3d(n) {
+    if (!ring3dIds.has(String(n?.id ?? ''))) return null;
+    const cls = resolve3dRingClasses();
+    if (!cls || !ring3dLayout) return null; // Retry-Rahmen in build3D setzt nach
+    if (!ring3dUnitGeo) {
+      // Einheits-Band (Radius 1, äquatorial 0.46π..0.54π): eine Geometrie für
+      // alle Ringe, Knotenbezug nur über mesh.scale (uniform — Normalen
+      // bleiben korrekt).
+      ring3dUnitGeo = new cls.SphereGeometry(1, 24, 1, 0, Math.PI * 2, 0.46 * Math.PI, 0.08 * Math.PI);
+    }
+    if (!ring3dMat) {
+      const drainer = roleColors.drainer;
+      ring3dMat = new cls.MeshLambertMaterial({
+        // Severity-/Rollen-Token --a6-role-drainer (#b3261e) via Host-ctx;
+        // Fallback derselbe Wert (konsistente Farb-Sprache, kein zweites Rot).
+        color: drainer && drainer.background ? drainer.background : '#b3261e',
+        transparent: true,
+        opacity: 0.9,
+        side: 2, // 2 = three-Konstante DoubleSide (Band-Innenseite mitrendern)
+      });
+    }
+    const mesh = new cls.Mesh(ring3dUnitGeo, ring3dMat);
+    mesh.scale.setScalar(1.45 * ring3dLayout.radiusOf(n));
+    return mesh;
+  }
+
+  // Ring-Legende (ehrlich: nur zeigen, was auch gerendert wurde): zählt
+  // Knoten-Objekte mit Custom-Kind in der Szene.
+  function count3dRings() {
+    let count = 0;
+    try {
+      const scene = typeof fg3d.scene === 'function' ? fg3d.scene() : null;
+      if (scene && typeof scene.traverse === 'function') {
+        scene.traverse((o) => {
+          if (o && o.__graphObjType === 'node' && o.children && o.children.length) count += 1;
+        });
+      }
+    } catch { /* egal */ }
+    return count;
+  }
+
+  function updateRingLegend(count) {
+    const note = overlay && overlay.querySelector('.cluster-graph-note');
+    if (!note) return;
+    if (count > 0) {
+      note.textContent = t('modal.graph3dLegend');
+      note.hidden = false;
+    } else {
+      note.hidden = true;
+    }
+  }
+
+  // Der erste Accessor-Durchlauf läuft, bevor irgendein Default-Knoten-Mesh
+  // existiert (Klassen-Recovery braucht ein Vorbild in der Szene). Einmal je
+  // Frame: Klassen lösen (Meshes der letzten Digest sind dann da), Accessor
+  // erneut setzen (Mapper baut die Knoten-Objekte NEU — Positionen wohnen auf
+  // den Datenobjekten und bleiben erhalten), danach Ringe zählen. Deckel 11
+  // Frames; ohne requestAnimationFrame (Node-Test-Stub) kein Retry und keine
+  // Legende — nie eine Legende ohne gerenderte Ringe.
+  function schedule3dRingRetry(attempt) {
+    if (!fg3d || !isOpen) return;
+    if (attempt > 11) { updateRingLegend(0); return; }
+    requestAnimationFrame(() => {
+      if (!fg3d || !isOpen) return;
+      if (count3dRings() > 0) { updateRingLegend(count3dRings()); return; }
+      const cls = resolve3dRingClasses();
+      if (!cls) {
+        if (ring3dClassesFailed) { updateRingLegend(0); return; }
+        schedule3dRingRetry(attempt + 1);
+        return;
+      }
+      try { fg3d.nodeThreeObject((n) => drainerRing3d(n)); } catch { updateRingLegend(0); return; }
+      requestAnimationFrame(() => {
+        if (!fg3d || !isOpen) return;
+        updateRingLegend(count3dRings());
+      });
+    });
+  }
+
   function build3D(clusterNodes, clusterEdges, graphEl, clusterId) {
     teardown2D();
     // Deckel (Diagnose-Performance): Top-N Knoten nach Drops-Summe; die
@@ -1415,6 +1671,12 @@ export function initClusterDrilldown(ctx) {
       } catch { /* fg3d.graphData() nicht lesbar -> alle neu geseedet */ }
     }
     seedCluster3dPositions(data.nodes.filter((n) => !Number.isFinite(n.x)), layout.seedRadius);
+    // Drainer-Ring-Auswahl des Builds (deterministisch, Deckel 12) und Hover-
+    // Reset: Der gehoverte Knoten des Vorgänger-Stands darf keinen Fokus
+    // tragen, wenn der Datensatz ihn nicht mehr enthält.
+    ring3dIds = selectDrainerRingNodes(data.nodes);
+    ring3dLayout = layout;
+    reset3dHover();
     if (!fg3d) {
       graphEl.innerHTML = '';
       fg3d = window.ForceGraph3D()(graphEl);
@@ -1435,8 +1697,16 @@ export function initClusterDrilldown(ctx) {
         fg3dResizeObs = new ResizeObserver(sizeToContainer);
         fg3dResizeObs.observe(graphEl);
       }
+      fg3dStageEl = graphEl;
       fg3d
-        .backgroundColor('#ffffff')
+        // Transparenter Clear statt Vollweiß (Design P3.1): das Bundle parst
+        // den Alpha-Anteil der Farbe und ruft renderer.setClearColor(Farbe,
+        // Alpha); der Renderer läuft mit alpha:true (Bundle-Grep-Nachweis).
+        // Browser-verifiziert am gepinnten Bundle 3d-force-graph@1.80.0
+        // (2026-10-06, Magenta-Probe): das CSS-Punkt-Substrat der Bühne
+        // (drilldown.css) scheint durch. Der 2D-Fallback (build2D) und der
+        // PNG-Export (app.js, vis-2D-Canvas) sind davon unberührt.
+        .backgroundColor('rgba(0,0,0,0)')
         // Aggregatknoten: zahlenmäßiges Label '+N' (sprachneutral, keine
         // Adresse — der Knoten steht für N nicht einzeln gezeigte Knoten).
         // Labels: Adresse bleibt primär, XRPScan-Name als ergänzte zweite
@@ -1457,7 +1727,15 @@ export function initClusterDrilldown(ctx) {
           const tagSuffix = l.toTag != null && multiUserEntryOf(String(to ?? '')) ? ` · #${l.toTag}` : '';
           return `${esc(displayAddr(from) + (nameFrom ? ` (${nameFrom.name})` : ''))} → ${esc(displayAddr(to) + (nameTo ? ` (${nameTo.name})` : ''))} (${esc(String(l.type ?? ''))})${tagSuffix ? esc(tagSuffix) : ''}`;
         })
-        .linkWidth(1)
+        // Kanten-Grunddeckkraft (Bundle-Default 0.2 wäre neben den Knoten
+        // nicht lesbar); die Breite staffelt der Accessor je Typ (unten).
+        .linkOpacity(GRAPH3D_LINK_OPACITY)
+        // Drainer-Ring ADDITIV (Plan-Kritik 8): das Bundle behält Default-
+        // Sphere + nodeVal/nodeRelSize-Skalierung und hängt das Ring-Mesh
+        // als Kind an — keine manuelle Sphären-Replikation.
+        .nodeThreeObjectExtend(true)
+        // Hover-Fokus (P3.4): nur Ereignis-Setter, keine per-Frame-Arbeit.
+        .onNodeHover((node) => on3dNodeHover(node))
         .linkDirectionalArrowLength(3)
         .onNodeClick((node) => on3dNodeClick(node));
     }
@@ -1484,14 +1762,26 @@ export function initClusterDrilldown(ctx) {
     // graphData bei JEDER inhaltlichen Änderung des angezeigten Clusters —
     // Mitglieder/Kanten/Metriken werden nie blockiert. Ein vorheriger
     // Alterungs-Pause (Cluster war kurzzeitig verschwunden) wird gelöst.
+    // Reihenfolge: Accessor-Konfiguration VOR graphData, damit der Digest
+    // der Knoten-/Kanten-Objekte die Stil-Accessoren bereits sieht (ein
+    //digest statt zweier). Physik-Zugriffe stehen ohnehin schon davor.
     fg3d
-      .graphData(data)
       .nodeColor(nodeColorAccessor())
       .nodeRelSize(layout.nodeRelSize) // Radius skaliert mit Knotenanzahl (5..300 lesbar)
       .nodeVal((n) => 1 + ((n.inDrops ?? 0) + (n.outDrops ?? 0)) / 1e6)
-      .linkColor((l) => edgeColors[String(l.type)] || edgeDefault)
+      // Ring-Accessor (P3.2): null für alle Knoten außerhalb der Auswahl —
+      // das Bundle erzeugt dann nur die Default-Sphere (kein Extra-Mesh).
+      .nodeThreeObject((n) => drainerRing3d(n))
+      .linkColor(linkColor3dAccessor())
+      .linkWidth(linkWidth3dAccessor())
       .linkDirectionalParticles((l) => (String(l.type) === 'Payment' && !reducedMotion() ? 2 : 0))
-      .linkDirectionalParticleWidth(2);
+      .linkDirectionalParticleWidth(2)
+      .graphData(data);
+    // Ring-Nachziehen + Legende nur im Browser (rAF vorhanden) und nur bei
+    // Auswahl — siehe schedule3dRingRetry.
+    if (ring3dIds.size && typeof requestAnimationFrame === 'function') {
+      schedule3dRingRetry(0);
+    }
     try { fg3d.resumeAnimation(); } catch { /* egal */ }
     if (reducedMotion()) {
       // Reduced Motion (Befund 2026-09-29): Kraft-Simulation einfrieren —
@@ -1584,6 +1874,19 @@ export function initClusterDrilldown(ctx) {
       try { fg3dResizeObs.disconnect(); } catch { /* egal */ }
       fg3dResizeObs = null;
     }
+    // Ring-Ressourcen der Instanz freigeben (ein Mesh je Drainer, Geometrie/
+    // Material geteilt): dispose ist idempotent — auch wenn der Mapper des
+    // Bundles die Kind-Geometrien bereits freigegeben hat.
+    try { if (ring3dUnitGeo && typeof ring3dUnitGeo.dispose === 'function') ring3dUnitGeo.dispose(); } catch { /* egal */ }
+    try { if (ring3dMat && typeof ring3dMat.dispose === 'function') ring3dMat.dispose(); } catch { /* egal */ }
+    ring3dUnitGeo = null;
+    ring3dMat = null;
+    ring3dClasses = null;
+    ring3dClassesFailed = false;
+    ring3dIds = new Set();
+    ring3dLayout = null;
+    reset3dHover();
+    fg3dStageEl = null;
     if (!fg3d) return;
     try { fg3d.pauseAnimation(); } catch { /* egal */ }
     // ECHTES Freigeben (Symptom 2b, WebGL-Context-Leck): Nur pause+null ließ
