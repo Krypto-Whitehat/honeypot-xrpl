@@ -99,6 +99,12 @@ import {
  * die Chip-Funktionen (nameChipHtml/tagChipHtml) werden injiziert und
  * tragen die Host-Gates (isFullShownAddr, multiUserEntryOf). */
 import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
+/* Cluster-Akkumulation (Fix 2026-10-06, zweite Runde): DOM-freier Shared-
+ * Helfer für View-Normalisierung und Fenster-/Bestands-Merge. Dedup nur
+ * über die id (die frühere ≥1-Mitglied-Absorption ließ den Mega-Cluster
+ * als Karte verschwinden — Live-Befund 2026-10-06); SEV_RANK single source
+ * aus dem Modul (Sortierung + Severity-Union). */
+import { SEV_RANK, serverClustersFromView, mergeClusterViews } from './cluster-views.mjs';
 
 /* Cluster-Modul: nicht-blockierender dynamischer Import. Der Live-Feed startet
  * sofort; die Cluster-Schicht aktiviert sich, sobald das Modul eintrifft
@@ -1194,7 +1200,8 @@ function setGraphTab(tab) {
 
 /* ---------------- Cluster-Zusammenfassungs-Karten ---------------- */
 
-const SEV_RANK = { info: 0, suspect: 1, malicious: 2 };
+// SEV_RANK kommt jetzt aus ./cluster-views.mjs (Import oben) — single source
+// für Karten-Badge und Merge-Sortierung.
 const ROLE_ORDER = ['drainer', 'collector', 'relay', 'source', 'unknown']; // Dominanz wie Rollenkonflikt
 // ROLE_LABEL bleibt die kanonische (deutsche) Rollen-Tafel — ctx-Partner
 // (drilldown/account-check) greifen darauf zurück. Für Anzeigen im Host
@@ -1681,105 +1688,66 @@ const txWindow = [];
 const findingsWindow = [];
 
 /* Cluster-Akkumulation (Fix 2026-10-06): die Live-Liste zeigt den
- * AKKUMULIERTEN Stand, nicht nur das letzte Block-Fenster. Die persistierten
- * View-Cluster aus /api/flow-state (60-s-Poll, auch im Live-Modus) bilden
- * die Akkumulationsschicht: persistierte Cluster verschwinden nicht, wenn
- * sie in den letzten Blöcken still waren (firstSeen/lastSeen aus dem
- * persistierten View), neue Fenster-Cluster kommen hinzu.
+ * AKKUMULIERTEN Stand, nicht nur das letzte Block-Fenster. Zwei Schichten:
+ * (1) die persistierten View-Cluster aus /api/flow-state (60-s-Poll, auch im
+ * Live-Modus) — persistierte Cluster verschwinden nicht, wenn sie in den
+ * letzten Blöcken still waren (firstSeen/lastSeen aus dem persistierten
+ * View); (2) die Session-Schicht — Fenster-Cluster, die aus dem
+ * mengen-gedeckelten FIFO-Fenster (TX_WINDOW_CAP) herausrollen, bleiben
+ * dieser Tab-Session erhalten (Live-Befund 2026-10-06: Kartenzahl fiel
+ * 12→7→5→1, weil Fenster-Cluster beim Herausröllen verschwanden und der
+ * serverseitige Bestand eingefroren war). Server-Cluster sind die dauerhafte
+ * Akkumulation (sobald Advance-Ticks laufen), die Session-Schicht die
+ * clientseitige Überbrückung mit harter Eintrags-Kappe.
  * serverFlowClusters: letzte normalisierte Server-Cluster (leer bis zum
- * ersten erfolgreichen Poll). */
+ * ersten erfolgreichen Poll). Normalisierung (serverClustersFromView) und
+ * Merge (mergeClusterViews) leben im DOM-freien Shared-Modul
+ * ./cluster-views.mjs (Tests: public/cluster-views.test.mjs). */
 let serverFlowClusters = [];
 
-/* Cluster der Server-View in die Karten-/Graph-Form bringen (aus
- * applyFlowStateView extrahiert, identisches Mapping): die Server-View trägt
- * rolesByAddress statt memberAddresses; memberAddresses wird für die
- * bestehenden Konsumenten (renderClusterList, drilldown, globe)
- * deterministisch aus rolesByAddress abgeleitet. */
-function serverClustersFromView(view) {
-  return (Array.isArray(view?.clusters) ? view.clusters : []).map((c) => {
-    // Die Server-View liefert roles als Rolle->Anzahl (viewRoleCounts,
-    // lib/flow-state.mjs) und rolesByAddress als Adresse->Rolle.
-    // clusterCardHtml (lib/cluster-Markup des Hosts) erwartet die
-    // Adresse->Rolle-Form — sie wird aus rolesByAddress abgeleitet, die
-    // Rollen-Zählung ergibt sich dort wieder automatisch.
-    const rolesByAddress = c?.rolesByAddress && typeof c?.rolesByAddress === 'object' ? c.rolesByAddress : {};
-    return {
-      id: String(c?.id ?? ''),
-      label: c?.label ?? null,
-      roles: rolesByAddress,
-      rolesByAddress,
-      severityByAddress: c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {},
-      memberAddresses: Object.keys(rolesByAddress),
-      edges: Array.isArray(c?.edges) ? c.edges : [],
-      totalDrops: Number(c?.totalDrops) || 0,
-      txCount: Number(c?.txCount) || 0,
-      distinctAccounts: Number(c?.distinctAccounts) || 0,
-      firstSeen: c?.firstSeen ?? null,
-      lastSeen: c?.lastSeen ?? null,
-      // Persistierte Peeling-Ketten der Server-View (projectFlowStateView,
-      // lib/flow-state.mjs): durchgereicht an Karten-Flusskette und
-      // Drilldown-Graph-Kontext.
-      peelingChains: Array.isArray(c?.peelingChains) ? c.peelingChains : [],
-    };
-  });
-}
+// Session-Akkumulation: id -> letzter bekannter Fenster-/Merge-Zustand des
+// Clusters (frisch gewinnt, siehe rememberSessionClusters). Kappe nach
+// Aktivität (lastSeen asc, dann id asc) — die Liste bleibt begrenzt, auch
+// über stundenlang offene Tabs.
+const sessionFlowClusters = new Map();
+const SESSION_FLOW_CLUSTER_CAP = 250;
 
-/* Merge der Fenster-Cluster (WSS, frisch) mit den persistierten View-
- * Clustern (Server). Dedup: gleiche id ODER Member-Überschneidung — der
- * Fenster-Cluster gewinnt (er trägt die frischsten Knotenaggregate), der
- * persistierte Zwilling entfällt. Persistierte Cluster ohne Fenster-
- * Gegenstück bleiben mit ihren persistierten firstSeen/lastSeen stehen.
- * Sortierung nach AKTIVITÄT + SCHWERE (Auftragsvertrag): Schweregrad desc
- * (malicious > suspect > info, max über severityByAddress), dann lastSeen
- * desc (Aktivität — stille Cluster ranken nach ihrer letzten Aktivität),
- * dann totalDrops desc, dann id asc (deterministische Totalordnung).
- * Das Ergebnis MUSS vor renderClusterList in lastClusterGraph.clusters
- * stehen (drilldown.js findCardForClusterId :419-425 indexiert die
- * Drilldown-Karte über den Array-Index dieses Caches — Liste und Cache
- * müssen exakt übereinstimmen, sonst zeigt der Klick den falschen Cluster). */
-function mergeClusterViews(windowClusters, persistedClusters) {
-  const win = (Array.isArray(windowClusters) ? windowClusters : []).filter((c) => c && typeof c === 'object');
-  const persisted = Array.isArray(persistedClusters) ? persistedClusters : [];
-  const merged = win.slice();
-  const winSets = win.map((c) => new Set((Array.isArray(c.memberAddresses) ? c.memberAddresses : []).map(String)));
-  for (const p of persisted) {
-    if (!p || typeof p !== 'object') continue;
-    const pMembers = (Array.isArray(p.memberAddresses) ? p.memberAddresses : []).map(String);
-    const pSet = new Set(pMembers);
-    let absorbed = false;
-    for (let i = 0; i < merged.length; i++) {
-      if (p.id && merged[i].id === p.id) { absorbed = true; break; }
-      for (const m of winSets[i]) {
-        if (pSet.has(m)) { absorbed = true; break; }
-      }
-      if (absorbed) break;
-    }
-    if (absorbed) continue;
-    merged.push(p);
+function rememberSessionClusters(clusters) {
+  for (const c of Array.isArray(clusters) ? clusters : []) {
+    if (!c || typeof c !== 'object') continue;
+    const id = String(c?.id ?? '');
+    if (!id) continue;
+    sessionFlowClusters.set(id, c);
   }
-  const sevRankOf = (c) => {
-    let s = 0;
-    const own = c?.severityByAddress;
-    if (own && typeof own === 'object') {
-      for (const v of Object.values(own)) {
-        const r = SEV_RANK[v] ?? 0;
-        if (r > s) s = r;
-      }
-    }
-    return s;
-  };
+  if (sessionFlowClusters.size <= SESSION_FLOW_CLUSTER_CAP) return;
   const lastSeenMs = (c) => {
     const ms = Date.parse(String(c?.lastSeen ?? ''));
     return Number.isFinite(ms) ? ms : 0;
   };
-  merged.sort((a, b) =>
-    sevRankOf(b) - sevRankOf(a) ||
-    lastSeenMs(b) - lastSeenMs(a) ||
-    (Number(b?.totalDrops) || 0) - (Number(a?.totalDrops) || 0) ||
-    (String(a?.id ?? '') < String(b?.id ?? '') ? -1 : String(a?.id ?? '') > String(b?.id ?? '') ? 1 : 0)
-  );
-  return merged;
+  const excess = sessionFlowClusters.size - SESSION_FLOW_CLUSTER_CAP;
+  const evict = [...sessionFlowClusters.entries()]
+    .sort((a, b) => lastSeenMs(a[1]) - lastSeenMs(b[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+    .slice(0, excess);
+  for (const [id] of evict) sessionFlowClusters.delete(id);
 }
+
+/* Merge der Fenster-Cluster (WSS, frisch) mit den akkumulierten Clustern
+ * (Server-View + Session-Schicht): Dedup NUR über die id mit Statistik-
+ * Union — die frühere Absorption bei ≥1 gemeinsamer Member-Adresse warf den
+ * persistierten Zwilling komplett weg, und weil der Mega-Cluster (46.660
+ * Accounts) mit fast jedem Fenster-Cluster ein Exchange-Konto teilt,
+ * verschwand er als Karte samt akkumulierter Statistik (Live-Befund
+ * 2026-10-06: Karte 04:28 vorhanden, danach abwesend, API lieferte ihn
+ * weiterhin). Implementierung, Semantik-Begründung und Tests:
+ * ./cluster-views.mjs + public/cluster-views.test.mjs. Sortierung nach
+ * AKTIVITÄT + SCHWERE unverändert: Schweregrad desc (malicious > suspect >
+ * info, max über severityByAddress), dann lastSeen desc (Aktivität — stille
+ * Cluster ranken nach ihrer letzten Aktivität), dann totalDrops desc, dann
+ * id asc (deterministische Totalordnung). Das Ergebnis MUSS vor
+ * renderClusterList in lastClusterGraph.clusters stehen (drilldown.js
+ * findCardForClusterId :419-425 indexiert die Drilldown-Karte über den
+ * Array-Index dieses Caches — Liste und Cache müssen exakt übereinstimmen,
+ * sonst zeigt der Klick den falschen Cluster). */
 
 // Cluster-Neubau aus den rollenden Fenstern — mit clientseitigem Köder-Filter
 // (Hash-Deny) als Pendant zur serverseitigen baitLabels-Filterung der
@@ -1818,14 +1786,19 @@ async function rebuildClusterGraph() {
     maxEdges: CLUSTER_MAX_EDGES,
     ...(multiUserAccounts ? { multiUserAccounts } : {}),
   });
-  // Cluster-Akkumulation (Fix 2026-10-06): die persistierten View-Cluster
-  // (serverFlowClusters, 60-s-Poll) werden VOR dem Rendern in
-  // lastClusterGraph.clusters mergen — drilldown.js indexiert die
-  // Drilldown-Karten über den Array-Index genau dieses Caches
+  // Cluster-Akkumulation (Fix 2026-10-06): die FENSTER-Cluster gehen zuerst
+  // in die Session-Schicht (id -> letzter Zustand, frisch gewinnt, Kappe
+  // SESSION_FLOW_CLUSTER_CAP) — rollt ein Cluster später aus dem FIFO-Fenster
+  // heraus, bleibt sein letzter Stand diese Session als Karte stehen. Danach
+  // mergen Server-View (serverFlowClusters, 60-s-Poll) PLUS Session-Schicht
+  // VOR dem Rendern in lastClusterGraph.clusters — drilldown.js indexiert
+  // die Drilldown-Karten über den Array-Index genau dieses Caches
   // (findCardForClusterId), Liste und Cache müssen exakt übereinstimmen.
-  // Stille persistierte Cluster bleiben stehen, neue Fenster-Cluster kommen
-  // hinzu; die Live-Liste zeigt den akkumulierten Stand.
-  cg.clusters = mergeClusterViews(cg.clusters, serverFlowClusters);
+  // Dedup nur über die id (Union der Statistik, cluster-views.mjs): stille
+  // persistierte Cluster bleiben stehen, neue Fenster-Cluster kommen hinzu,
+  // und der Mega-Cluster verschwindet nicht mehr bei Mitglied-Überlappung.
+  rememberSessionClusters(cg.clusters);
+  cg.clusters = mergeClusterViews(cg.clusters, [...serverFlowClusters, ...sessionFlowClusters.values()]);
   lastClusterGraph = cg;
   // Lazy-Namensindex (ANDOCKSTELLE des Bulk-Fetches im Live-Takt): der erste
   // Cluster-Daten-Takt stößt GENAU EINEN Bulk-Fetch pro Session an (Guard/TTL

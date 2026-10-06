@@ -115,6 +115,21 @@ export function seedCluster3dPositions(nodes, radius) {
 // geschwindigkeitsbasiert auseinander; schwere Knoten bewegen sich weniger
 // (Gewichtung rb²/(ra²+rb²), Muster der d3-Collide). Deckungsgleiche Punkte
 // bekommen eine feste Richtung — bleibt deterministisch.
+// Kosten-Deckel der asynchronen Köder-Nachprüfung im Modal-Refresh (Live-
+// Befund 2026-10-06): die vollständige sequenzielle Nachprüfung hasht JEDE
+// Knoten-Adresse (webcrypto) — der 46.660-Knoten-Mega-Cluster blockierte das
+// Öffnen/Refreshen des Modals im Browser >75 s (dazu LRU-Verdrängung: der
+// Hash-Cache des Hosts fasst 10.000 Adressen, app.js ADDR_HASH_CACHE_MAX —
+// die Nachprüfung lief also ohnehin nie stabil über den vollen Bestand).
+// Deterministische Auswahl statt Zeitbudget: Top-N nach Drops-Summe (desc),
+// dann Adresse asc — dieselbe Ordnung wie die 3D-Knoten-Kappe
+// (GRAPH3D_MAX_NODES) in build3D. Adressen jenseits der Kappe bleiben vom
+// SYNCHRONEN isDeniedAddr-Knoten-Gate (unten, fail-closed) und der
+// Anzeige-Maske displayAddr gedeckt; der JSON-Export trägt sie wie bisher
+// (unter LRU-Verdrängung war die Abdeckung zuvor ohnehin unvollständig —
+// jetzt ist die Grenze deterministisch und dokumentiert).
+export const DENY_RECHECK_MAX = 2000;
+
 export function makeCluster3dCollideForce(radiusOf, strength = 0.8) {
   let nodes = [];
   const force = () => {
@@ -846,9 +861,19 @@ export function initClusterDrilldown(ctx) {
     // isDeniedAddr (Defense-in-Depth wie oben).
     if (isDeniedAddrAsync) {
       try {
+        // Nachprüfung mit Kosten-Deckel DENY_RECHECK_MAX (Modul-Level,
+        // Begründung dort): Top-N nach Drops-Summe, dann Adresse asc —
+        // deterministisch, unabhängig von Insertions-Reihenfolge und
+        // Cache-Zustand. Synchrone isDeniedAddr-Knoten-Gate-Filterung und
+        // Anzeige-Maske displayAddr greifen weiterhin für ALLE Adressen.
+        const recheck = [...clusterNodes]
+          .sort((a, b) =>
+            ((Number(b?.inDrops) || 0) + (Number(b?.outDrops) || 0)) - ((Number(a?.inDrops) || 0) + (Number(a?.outDrops) || 0)) ||
+            (String(a?.id) < String(b?.id) ? -1 : String(a?.id) > String(b?.id) ? 1 : 0))
+          .slice(0, DENY_RECHECK_MAX);
         const denied = new Set();
-        for (const a of nodeIds) {
-          if (await isDeniedAddrAsync(a)) denied.add(a);
+        for (const n of recheck) {
+          if (await isDeniedAddrAsync(String(n.id))) denied.add(String(n.id));
         }
         if (denied.size) {
           for (const a of denied) nodeIds.delete(a);

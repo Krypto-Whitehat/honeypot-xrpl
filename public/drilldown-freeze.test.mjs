@@ -31,6 +31,7 @@ import {
   cluster3dLayoutParams,
   seedCluster3dPositions,
   makeCluster3dCollideForce,
+  DENY_RECHECK_MAX,
 } from "./drilldown.js";
 import { LANG_KEY, t } from "./i18n.mjs";
 
@@ -728,5 +729,68 @@ test("build3D-Verdrahtung: Physik-Konfiguration, Warmup nur bei Cluster-Wechsel,
   } finally {
     documentStub.createElement = prevCreateElement;
     if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+  }
+});
+
+test("Riesen-Cluster: Deny-Nachprüfung auf DENY_RECHECK_MAX gedeckelt (deterministisch), 3D-Knoten-Kappe greift", async () => {
+  lang = "de";
+  // Live-Repro (2026-10-06): die vollständige sequenzielle Köder-Nachprüfung
+  // hashte im 46.660-Knoten-Mega-Modal jede Adresse (>75 s Browser-Block,
+  // dazu LRU-Verdrängung im 10.000er-Hash-Cache des Hosts). Erwartung jetzt:
+  // genau DENY_RECHECK_MAX Nachprüfungen in deterministischer Reihenfolge
+  // (Drops desc, dann Adresse asc) UND die bestehende 3D-Knoten-Kappe
+  // (GRAPH3D_MAX_NODES 300 + Aggregatknoten) hält den Graphen klein.
+  const bigN = DENY_RECHECK_MAX + 500;
+  const bigNodes = Array.from({ length: bigN }, (_, i) => ({
+    id: `rTESTbigNode${String(i).padStart(5, "0")}`,
+    clusterId: CID,
+    role: i % 3 === 0 ? "source" : (i % 3 === 1 ? "mid" : "sink"),
+    inDrops: bigN - i, outDrops: 0, degreeIn: 1, degreeOut: 1, // Node 0 = höchste Drops-Summe
+    severity: i % 7 === 0 ? "suspect" : "info",
+  }));
+  liveGraph = {
+    clusters: [{
+      id: CID, label: "Riesen-Cluster", totalDrops: 1000, txCount: bigN, distinctAccounts: bigN,
+      firstSeen: "2026-10-05T10:00:00Z", lastSeen: "2026-10-05T10:05:00Z",
+      memberAddresses: bigNodes.map((n) => n.id),
+    }],
+    nodes: bigNodes,
+    edges: bigNodes.slice(1).map((n, i) => ({ from: bigNodes[i].id, to: n.id, type: "payment", txHash: `BH${i}`, closeTime: i })),
+  };
+  const denyCalls = [];
+  const record = {
+    destructorCalls: 0, resumeCalls: 0, zoomToFitCalls: 0,
+    graphDataSets: [], warmupTicksCalls: [], cooldownTicksCalls: [],
+    nodeRelSizeCalls: [], d3ForceSet: {},
+  };
+  const prevCreateElement = documentStub.createElement;
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  try {
+    documentStub.createElement = (tag) => (tag === "canvas" ? { getContext: () => ({ fake: true }) } : makeEl(tag));
+    windowStub.ForceGraph3D = () => () => makeFakeFg3d(record);
+    const dd = initClusterDrilldown(makeCtx({
+      isDeniedAddrAsync: async (a) => { denyCalls.push(String(a)); return false; },
+    }));
+    dd.openCluster(CID);
+    await settle();
+    assert.equal(record.graphDataSets.length, 1, "graphData gesetzt");
+    // 3D-Knoten-Kappe: 300 Top-Knoten + 1 Aggregatknoten — nie bigN.
+    assert.equal(record.graphDataSets[0].nodes.length, 301, "GRAPH3D_MAX_NODES 300 + Aggregatknoten halten den Graphen klein");
+    assert.ok(record.graphDataSets[0].nodes.some((n) => n.id === "__aggregate__"), "Aggregatknoten für die gebündelten Knoten vorhanden");
+    // Nachprüfung: genau DENY_RECHECK_MAX Aufrufe, deterministische Reihenfolge
+    // (höchste Drops-Summe zuerst).
+    assert.equal(denyCalls.length, DENY_RECHECK_MAX, "Nachprüfung auf DENY_RECHECK_MAX gedeckelt");
+    assert.equal(denyCalls[0], bigNodes[0].id, "höchste Drops-Summe zuerst (Determinismus der Auswahl)");
+    assert.ok(!denyCalls.includes(bigNodes[bigN - 1].id), "Adressen jenseits der Kappe werden nicht nachgeprüft (synches Gate + Anzeige-Maske greifen weiterhin)");
+    // Layout/Schutz unter dem Deckel unverändert: Collide aktiv, Warmup bei Erstrender.
+    assert.equal(typeof record.d3ForceSet.collide, "function", "Collide-Kraft bleibt aktiv (3D-Knoten sind ohnehin gedeckelt)");
+    assert.equal(record.warmupTicksCalls[0], 120, "Warmup-Deckel 120 bei Erstrender (N=301 nach Kappe)");
+    for (const n of record.graphDataSets[0].nodes) {
+      assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y) && Number.isFinite(n.z), "deterministische Seed-Koordinaten auch im Riesen-Cluster");
+    }
+  } finally {
+    documentStub.createElement = prevCreateElement;
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    liveGraph = makeGraph();
   }
 });
