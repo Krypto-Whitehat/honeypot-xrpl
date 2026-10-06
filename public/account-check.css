@@ -105,7 +105,7 @@
 
 .check-card-error {
   background: var(--a6-error-soft);
-  border-color: rgba(179, 38, 30, 0.5);
+  border-color: var(--a6-error); /* Vollton statt Alpha: komponierte Border <3:1 (WCAG 1.4.11) */
   border-left-color: var(--a6-error);
 }
 
@@ -316,13 +316,13 @@
 
 .check-eligibility-ok {
   background: var(--a6-success-soft);
-  border-color: rgba(6, 99, 72, 0.35);
+  border-color: var(--a6-success); /* Vollton statt Alpha: komponierte Border <3:1 (WCAG 1.4.11) */
   color: var(--a6-success);
 }
 
 .check-eligibility-review {
   background: var(--a6-warn-soft);
-  border-color: rgba(154, 91, 0, 0.4);
+  border-color: var(--a6-warn);
   color: var(--a6-warn);
 }
 

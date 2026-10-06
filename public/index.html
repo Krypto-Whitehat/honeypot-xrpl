@@ -13,7 +13,10 @@
   <link rel="stylesheet" href="drilldown.css">
   <link rel="stylesheet" href="globe.css">
   <link rel="stylesheet" href="history.css">
-  <link rel="stylesheet" href="account-check.css">
+  <!-- data-account-check-css = Idempotenz-Marke des Injektors (account-check.js
+       ensureStylesheet): Ohne die Marke legte das Modul einen ZWEITEN Link an
+       und die Datei lud 2× (Live-Audit: Ressourcen-Duplikat). -->
+  <link rel="stylesheet" href="account-check.css" data-account-check-css>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
 </head>
 <body data-a6 data-theme="noir">

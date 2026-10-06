@@ -770,27 +770,32 @@ main {
   font-size: 12px;
 }
 
+/* Severity-Badges: Border = Severity-Vollton-Token (identisch zur Text-Farbe).
+   Die früheren Alpha-Borders (z. B. rgba(154,91,0,.4)) komponierten über dem
+   Soft-Fill auf <3:1 (Live-Audit: noir 1,77:1 / light 1,79:1) und verletzten
+   WCAG 1.4.11 — der Vollton erbt die geprüfte Text-Paarung (≥4,5:1 gegen den
+   Fill in beiden Themes) und liegt damit sicher über der UI-Grenze 3:1. */
 .badge-malicious {
   background: var(--a6-error-soft);
-  border-color: rgba(179, 38, 30, 0.5);
+  border-color: var(--a6-error);
   color: var(--a6-error);
 }
 
 .badge-suspect {
   background: var(--a6-warn-soft);
-  border-color: rgba(154, 91, 0, 0.4);
+  border-color: var(--a6-warn);
   color: var(--a6-warn);
 }
 
 .badge-info {
   background: var(--a6-info-soft);
-  border-color: rgba(29, 78, 216, 0.35);
+  border-color: var(--a6-info);
   color: var(--a6-info);
 }
 
 .badge-clean {
   background: var(--a6-success-soft);
-  border-color: rgba(6, 99, 72, 0.35);
+  border-color: var(--a6-success);
   color: var(--a6-success);
 }
 
@@ -1600,16 +1605,18 @@ main {
   font-family: var(--a6-mono);
 }
 
+/* Verdict-Badges: Border = Severity-Vollton-Token (gleiche Begründung wie
+   .badge-* oben — Alpha-Borders komponieren <3:1, WCAG 1.4.11). */
 .risk-malicious {
   background: var(--a6-error-soft);
   color: var(--a6-error);
-  border: 1px solid rgba(179, 38, 30, 0.5);
+  border: 1px solid var(--a6-error);
 }
 
 .risk-suspect {
   background: var(--a6-warn-soft);
   color: var(--a6-warn);
-  border: 1px solid rgba(154, 91, 0, 0.4);
+  border: 1px solid var(--a6-warn);
 }
 
 /* ---------------- Live-Statusleiste (Astra-6 .a6-stage, SKILL hero_system) --

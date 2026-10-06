@@ -86,6 +86,8 @@
         <dl class="about-defs">
           <dt data-i18n="about.patDrainerT">Draining (drainer sweep)</dt>
           <dd data-i18n="about.patDrainerD">A freshly funded account is swept immediately: at least 90 % of the balance leaves to a single target in one payment. Only with ledger proof of account creation — or with an entity-snapshot proof of fresh account activity across ticks — is the finding classified as malicious; without it, it stays suspect.</dd>
+          <dt data-i18n="about.patFreshProofT">Fresh-activity proof (verifiedFresh)</dt>
+          <dd data-i18n="about.patFreshProofD">The malicious classification of a drainer sweep rests on a second proof of freshness: a ledger proof of account creation, or an entity-snapshot proof of fresh account activity within the last 21,600 ledgers (about 24 hours). verifiedFresh is a second evidence path — never a finding source by itself and never a downgrade; the threshold is published as verifiedFreshGapLedgers in the dashboard's machine-readable rules catalog.</dd>
           <dt data-i18n="about.patCrossLedgerT">Cross-ledger sweep</dt>
           <dd data-i18n="about.patCrossLedgerD">Funding and sweeping across block boundaries: when an account is funded in ledger N and only swept in ledger N+1, the cross-ledger memory of the engine keeps the sweep visible. Stretched dusting campaigns are caught the same way, via the union of their tiny destinations over the window.</dd>
           <dt data-i18n="about.patPeelingT">Peeling chains</dt>
@@ -94,6 +96,8 @@
           <dd data-i18n="about.patWashD">At least three self-payments of the same account within one ledger (sender and destination are identical) — volume generation without a real counterparty, a typical washing pattern.</dd>
           <dt data-i18n="about.patWashCycleT">Wash cycle (cross-account)</dt>
           <dd data-i18n="about.patWashCycleD">At least two payments in each direction between the same two accounts (A→B and B→A) with at least 80 % volume conservation within one hour — volume generated across two identities. Single payment pairs stay exempt (normal refunds and market moves), exchanges never take part as cycle members; the finding class is suspect.</dd>
+          <dt data-i18n="about.patMotifT">Motif counters (gather-scatter)</dt>
+          <dd data-i18n="about.patMotifD">Deterministic counters over the accumulated flow edges — no learning architecture, zero extra requests. Gather-scatter (fan-in and fan-out of at least 3 different counterparties at one node) is recorded as a purely informative note; the wash-cycle thresholds above come from the same machinery. A cluster carries the motifs field only when a qualified pattern exists — no field means no motif. All counters and caps appear in the dashboard's machine-readable rules catalog.</dd>
           <dt data-i18n="about.patHubT">Hub connections</dt>
           <dd data-i18n="about.patHubD">Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.</dd>
           <dt data-i18n="about.patKnownBadT">Known-bad contact</dt>
@@ -101,6 +105,7 @@
         </dl>
       </div>
       <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds twelve rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
+      <p class="graph-note" data-i18n="about.detectApi">Every threshold of the twelve rules is machine-readable in the dashboard's rules catalog (thresholds per rule), and the deployed commit is reported in the x-deploy-commit response header of the same endpoint.</p>
     </section>
 
     <section class="panel" aria-labelledby="about-glossary-title">
