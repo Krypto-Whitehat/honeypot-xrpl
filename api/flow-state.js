@@ -319,8 +319,22 @@ async function handleBlockWindow(req, res) {
   }
 }
 
+// Deploy-Verifikation (Live-Audit 2026-10-07, NOTE "Deploy-Commit nicht
+// verifizierbar"): Vercel setzt VERCEL_GIT_COMMIT_SHA automatisch je
+// Deployment — als Response-Header x-a6-commit lesbar, OHNE neuen Endpoint
+// (Vercel-Hobby-Limit 12 Functions; Budget +0 Requests, nur Header-Bytes).
+// Nur formatvalidierte 40-Zeichen-SHAs werden ausgegeben (kein Env-Reflex);
+// lokal ohne Git-Env bleibt der Header schadlos weg.
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
+const deployCommit = COMMIT_SHA_RE.test(
+  String(process.env?.VERCEL_GIT_COMMIT_SHA ?? "").trim().toLowerCase(),
+)
+  ? String(process.env.VERCEL_GIT_COMMIT_SHA).trim().toLowerCase()
+  : null;
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
+  if (deployCommit) res.setHeader("x-a6-commit", deployCommit);
   const method = String(req?.method ?? "GET").toUpperCase();
   if (method !== "GET") {
     res.setHeader("Allow", "GET");

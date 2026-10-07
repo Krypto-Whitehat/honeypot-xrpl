@@ -453,6 +453,17 @@ const ADDR_HASH_CACHE_MAX = 10000;       // LRU-Kappung des Hash-Caches (Befund
 
 const baitHashDeny = new Set();   // sha256-hex (klein) der Bait-Union
 const addrHashCache = new Map();  // Adresse -> sha256-hex (synchrone Deny-Prüfung)
+// Verifiziert-vollanzeigbar (Befund 2026-10-07, Masken-Oszillation der
+// Top-10-Box): Adresse -> sha256-hex. Aufnahme NUR nach echtem Hash-Vergleich
+// gegen die DANN geladene Deny-Liste (denyLoaded-Pflicht in
+// verifyFullShownAsync). Der Fallback in isFullShownAddr prüft den
+// gespeicherten Hash IMMER live gegen das AKTUELLE baitHashDeny — eine Deny-
+// Rotation maskiert einen frisch aktivierten Köder also sofort, ohne auf die
+// Revalidation in rebuildDisplayAndKnownBad zu warten. Köder-Adressen werden
+// nie aufgenommen (Aufnahme nur bei Nicht-Treffer); FIFO-Kappung wie beim
+// Hash-Cache.
+const VERIFIED_FULL_SHOWN_MAX = 12000; // > ADDR_HASH_CACHE_MAX (Gedächtnis, nicht Arbeitsvorrat)
+const verifiedFullShown = new Map();   // Adresse -> sha256-hex (unverdrängbar)
 const pendingCandidates = [];     // knownBad-Kandidaten vor dem Deny-Load
 let denyLoaded = false;
 let denyFailCount = 0;
@@ -533,11 +544,26 @@ function isFullShownAddr(addr) {
   const a = String(addr ?? '').trim();
   if (!a || !fullDisplay) return false;
   const h = addrHashCacheGet(a);
-  return h !== undefined && !baitHashDeny.has(h);
+  if (h !== undefined) return !baitHashDeny.has(h);
+  // Verdrängungs-Fallback (Befund 2026-10-07): Der Hash-LRU verliert zwischen
+  // zwei Renders Zeilen-Adressen (der WSS-Zufluss hasht jede Tx-Akteur-
+  // Adresse) — dieselbe Zeile flackerte je Poll zwischen voller und Kurzform.
+  // Verifizierte Adressen bleiben daher über verifiedFullShown vollanzeige-
+  // fähig; die Deny-Prüfung läuft auch hier gegen den LIVE-Stand der Liste
+  // (dieselbe Bedingung wie beim Cache-Treffer — keine Lockerung der Maske).
+  const vh = verifiedFullShown.get(a);
+  return vh !== undefined && !baitHashDeny.has(vh);
 }
 
 async function rebuildDisplayAndKnownBad() {
   fullDisplay = denyLoaded && !denyPermanentlyFailed;
+  // Gedächtnis-Hygiene (Befund 2026-10-07): verifiziert-vollanzeigbare
+  // Adressen, deren Hash die ROTIERTE Deny-Liste nun trifft, fliegen aus dem
+  // Gedächtnis. Die Anzeige-Entscheidung selbst prüft live gegen baitHashDeny
+  // (Fallback in isFullShownAddr) — dies räumt nur belegte Kapazität auf.
+  for (const [a, h] of verifiedFullShown) {
+    if (baitHashDeny.has(h)) verifiedFullShown.delete(a);
+  }
   // knownBad nach jedem Deny-Load neu bewerten: Hash-Treffer entfernen, damit
   // known-bad-hit (Engine) nie eine Köder-Adresse trifft.
   for (const a of [...knownBad]) {
@@ -548,6 +574,32 @@ async function rebuildDisplayAndKnownBad() {
   for (const a of buffered) {
     if (!baitHashDeny.has(await hashOf(a))) knownBadAdd(a);
   }
+}
+
+// Verifikation EINER Adresse für die dauerhafte Vollanzeige (fail-closed):
+// erst bei geladener Deny-Liste entscheiden, dann nur bei Nicht-Treffer in
+// verifiedFullShown aufnehmen (Köder-Adressen kommen dort nie hinein; ein
+// nach einer Rotation getroffener Eintrag wird in rebuildDisplayAndKnownBad
+// entfernt und vom Live-Fallback in isFullShownAddr sofort wieder maskiert).
+// Rückgabe true = Adresse ist jetzt verifiziert vollanzeigefähig.
+async function verifyFullShownAsync(addr) {
+  const a = String(addr ?? '').trim();
+  if (!a || !denyLoaded) return false;
+  const h = await hashOf(a);
+  if (!h) return false;
+  if (baitHashDeny.has(h)) {
+    verifiedFullShown.delete(a);
+    return false;
+  }
+  if (!verifiedFullShown.has(a)) {
+    verifiedFullShown.set(a, h);
+    while (verifiedFullShown.size > VERIFIED_FULL_SHOWN_MAX) {
+      const oldest = verifiedFullShown.keys().next().value;
+      if (oldest === undefined) break;
+      verifiedFullShown.delete(oldest);
+    }
+  }
+  return true;
 }
 
 async function refetchBaitHashes(force) {
@@ -648,7 +700,13 @@ async function primeAddrHashes(cg, findings) {
     }
   }
   const list = [...targets].slice(0, 4000);
-  if (list.length) await Promise.all(list.map((a) => hashOf(a)));
+  if (!list.length) return;
+  await Promise.all(list.map((a) => hashOf(a)));
+  // Zugleich für die dauerhafte Vollanzeige verifizieren (Befund 2026-10-07,
+  // Masken-Oszillation): die frischen Hashes sind so gegen spätere LRU-
+  // Verdrängung abgesichert. denyLoaded prüft verifyFullShownAsync selbst —
+  // vor dem ersten Deny-Load bleibt alles fail-closed in der Kurzform.
+  await Promise.all(list.map((a) => verifyFullShownAsync(a)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -2725,6 +2783,7 @@ async function applyFlowStateView(view) {
  * machen die Grenzen der Box sichtbar. */
 let exoutWindow = 7;             // aktives Fenster des Umschalters (7 | 30)
 let exoutUnionRetryDone = false; // Einmal-Guard des Nachzieh-Takts (kein Loop)
+let exoutMaskRepairInFlight = false; // Einmal-Guard des Masken-Nachziehs (kein Loop)
 
 function renderExchangeOutflows(viewData) {
   const listEl = document.getElementById('exchange-outflow-list');
@@ -2786,6 +2845,28 @@ function renderExchangeOutflows(viewData) {
     listEl.innerHTML = rows.map((row, i) => exchangeOutflowRowHtml(row, i + 1, ui)).join('');
     listEl.hidden = false;
     emptyEl.hidden = true;
+    // Masken-Nachzieh (Befund 2026-10-07: Masken-Oszillation der Top-10-Box):
+    // Der Render ist bewusst synchron (displayFindingAddr entscheidet nur aus
+    // gecachten Hashes) — ist der Hash einer Zeilen-Adresse gerade aus dem
+    // LRU verdrängt, zeigt sie die Kurzform, obwohl sie kein Köder ist. Die
+    // Zeilen-Adressen werden hier asynchron verifiziert (verifyFullShownAsync
+    // füllt zugleich den Hash-LRU frisch); hat sich dadurch eine Anzeige-
+    // Entscheidung geändert, läuft GENAU EIN Nachzieh-Render. Der Guard
+    // verhindert Mikrotask-Loops: der zweite Durchlauf findet nichts mehr zu
+    // reparieren (vorher==nachher). Budget +0 Requests — nur lokale Hashes.
+    if (!exoutMaskRepairInFlight) {
+      exoutMaskRepairInFlight = true;
+      const before = rows.map((row) => isFullShownAddr(row.address));
+      Promise.all(rows.map((row) => verifyFullShownAsync(row.address)))
+        .then(() => {
+          exoutMaskRepairInFlight = false;
+          const after = rows.map((row) => isFullShownAddr(row.address));
+          if (after.some((v, i) => v !== before[i]) && flowData) {
+            renderExchangeOutflows(flowData);
+          }
+        })
+        .catch(() => { exoutMaskRepairInFlight = false; });
+    }
   } else {
     listEl.innerHTML = '';
     listEl.hidden = true;
@@ -3601,37 +3682,39 @@ mountEmptyIllu(document.getElementById('cluster-empty'), svgEmptyCluster());
   } catch { /* DOM nicht schreibbar: Signet entfällt, wirft aber nicht */ }
 })();
 
-/* ---------- Idle-Preload schwerer Vendoren erst nach Erstanstrich ----------
+/* ---------- Cache-Wärmung schwerer Vendoren erst nach Erstanstrich ----------
  * globe.gl (1,9 MB), 3d-force-graph (1,3 MB), topojson-client (7 kB) —
- * zusammen 3,2 MB / ~868 kB gzip. Kein Preload im HTML-Head (würde mit dem
- * FCP konkurrieren); nach window 'load' + requestIdleCallback (Fallback
+ * zusammen 3,2 MB / ~868 kB gzip. Kein Wärmefetch im HTML-Head (würde mit
+ * dem FCP konkurrieren); nach window 'load' + requestIdleCallback (Fallback
  * setTimeout ~1 s) ist das Leerlauffenster frei und die Bundles liegen im
- * HTTP-Cache, wenn Globe-/3D-Tab sie lazy anfordern. crossOrigin='anonymous'
- * muss auf dem Preload stehen, sonst matcht der Eintrag nicht zum späteren
- * CORS-Modus-Fetch der Loader (globe.js loadGlobeGl/loadTopojson,
- * drilldown.js loadForceGraph3D — alle mit integrity + crossOrigin). */
+ * HTTP-Cache, wenn Globe-/3D-Tab sie lazy anfordern.
+ * Audit 2026-10-07 (Preload-Warnungen): Früher über link rel=preload
+ * (as=script, crossOrigin='anonymous', integrity) — öffnete der Nutzer
+ * Globe/3D nie, blieb der Preload-Eintrag unkonsumiert und Chrome warnte
+ * je Neuladen 2× "preloaded using link preload but not used within a few
+ * seconds". Der Fetch wärmt denselben HTTP-Cache-Eintrag ohne preload-
+ * Ledger (keine Warnung); die SRI-Prüfung bleibt unverändert an den
+ * Consumern hängen (globe.js loadGlobeGl/loadTopojson, drilldown.js
+ * loadForceGraph3D — alle mit integrity + crossOrigin, fail-closed beim
+ * ersten echten Load). Der Body wird bewusst konsumiert: erst ein
+ * gelesener Response landet vollständig im HTTP-Cache; Vercel-Static
+ * liefert must-revalidate — der spätere Modul-Load revalidiert dann per
+ * 304, statt den Body erneut zu übertragen. */
 function preloadHeavyVendors() {
   const schedule = typeof requestIdleCallback === 'function'
     ? (fn) => requestIdleCallback(fn, { timeout: 2000 })
     : (fn) => setTimeout(fn, 1000);
   schedule(() => {
-    /* Integritätswerte müssen exakt zu den Consumer-Konstanten passen
-     * (globe.js GLOBE_GL_INTEGRITY/TOPOJSON_INTEGRITY, drilldown.js
-     * FORCE_GRAPH_INTEGRITY): ohne l.integrity verwirft Chrome den
-     * Preload-Eintrag beim ersten Consumer mit SRI-Pin
-     * ("integrity mismatch") und das Bundle lädt doppelt. */
-    for (const [href, integrity] of [
-      ['vendor/globe.gl.min.js', 'sha384-1uolMBZ25k3zJcNwCLEv49+L+m2dZudqAzsoSAJfQTzDCSBxJzrMuZ2dkp/5JKiT'],
-      ['vendor/3d-force-graph.min.js', 'sha384-Y7bC2PBKu8ujxtvo5+Z61OeGdSVRzFsYWBK4i5dnL/U6aFDTodk61qOUkTfInaxS'],
-      ['vendor/topojson-client.min.js', 'sha384-Ukv1p/xTma6P4/2bY5KzWBw+ydSpXmhCMtyciIQVDJ1RmOxtCYNMF1uXT9T63H67'],
+    for (const href of [
+      'vendor/globe.gl.min.js',
+      'vendor/3d-force-graph.min.js',
+      'vendor/topojson-client.min.js',
     ]) {
-      const l = document.createElement('link');
-      l.rel = 'preload';
-      l.as = 'script';
-      l.href = href;
-      l.crossOrigin = 'anonymous';
-      l.integrity = integrity;
-      document.head.appendChild(l);
+      // Best-effort-Wärmung: Netz-/Cache-Fehler im Idle-Fenster bleiben stumm,
+      // die Consumer-Loader laden im Bedarfsfall ohnehin selbst nach.
+      fetch(href, { cache: 'default', credentials: 'same-origin' })
+        .then((res) => { if (res.ok) return res.arrayBuffer(); return null; })
+        .catch(() => { /* Wärmung ist optional — kein Fehlerpfad für den Nutzer */ });
     }
   });
 }

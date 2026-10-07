@@ -1201,7 +1201,8 @@ main {
    (txCategory, edge-colors.mjs): Payment GRÜN (success-Familie — die alte
    payment==drainer-Rot-Kollision ist behoben), market = DEX+AMM, admin =
    Protokoll-Verwaltung, nft = Fuchsia, fraud = Severity-Rot (Override).
-   Farben ausschließlich über die --a6-edge-*/swatch-Tokens (beide Themes). */
+   Farben ausschließlich über die --a6-edge- und --a6-swatch-Tokens
+   (beide Themes). */
 .swatch-payment { background: var(--a6-swatch-payment); }
 .swatch-escrow { background: var(--a6-edge-escrow); }
 .swatch-check { background: var(--a6-edge-check); }
