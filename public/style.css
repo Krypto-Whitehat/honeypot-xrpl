@@ -707,6 +707,13 @@ main {
 #exchange-outflows-panel {
   position: relative;
   isolation: isolate;
+  margin: 22px auto; /* Abstand zum Sektions-Rhythmus (Forensik 2026-10-07):
+     das Panel ist direktes body-Kind außerhalb von main — ohne eigene
+     Margin stießen die 1px-Ink-Borders von Bühne und view-nav aneinander
+     (Astra-6 lab_graphite: Borders dürfen nicht verschmelzen). 22 px =
+     der vierfach hartcodierte Panel-Rhythmus (console-grid/console-col/
+     main, 647/653/660/663); auto wirkt horizontal erst, wenn das Panel
+     je eingefasst wird (Vollbreite ist Design-Entscheidung, kein Fix). */
   background: var(--a6-frost-fill);
   backdrop-filter: var(--a6-frost-blur);
   border-color: var(--a6-frost-border);
@@ -988,6 +995,13 @@ main {
 .download-btn {
   position: relative; /* Anker des Hover-Shines (::after unten) */
   isolation: isolate;
+  overflow: hidden; /* Clipping des Shine-Bands (Forensik 2026-10-07):
+     isolation erzeugt nur den Stacking-Kontext, schneidet nichts — ohne
+     Clipping malt das inset:0-Band (-120 %→+120 %) außerhalb der Pille
+     und parkt nach 700 ms statisch daneben. Haus-Pattern hidden (wie
+     drilldown.css/globe.css); die Clip-Kante folgt dem border-radius.
+     Fokus-Ring (outline + offset, 398-401) und box-shadow gehören zum
+     Element selbst und bleiben unbeschnitten. */
   min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
@@ -1179,6 +1193,8 @@ main {
 .graph-tab {
   position: relative; /* Anker des Hover-Shines (::after unten) */
   isolation: isolate;
+  overflow: hidden; /* Clipping des Shine-Bands — wie .download-btn oben
+     (Forensik 2026-10-07); Kante folgt der Pillen-Rundung */
   min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
@@ -1215,10 +1231,19 @@ main {
    -120 %→+120 %, EINMAL beim Hover, kein Dauerlauf): die Buttons behalten
    ihre 1px-control-line-Randführung (≥3.57:1 UI, beide Themes); der Shine
    ist reines Hover-Feedback auf der ungewählten Fläche. Ausgeschlossen:
-   :disabled und die Ink-Auswahlflächen (aria-selected/aria-pressed=true) —
-   auf --a6-ink-fill wäre ein Akzent-Band ein Flickern auf der Auswahl. */
+   :disabled und die Ink-Flächen — die Auswahlflächen aria-selected/
+   aria-pressed=true (Selektor unten) und die über account-check.css
+   ink-gefüllte Primäraktion #check-go (Forensik 2026-10-07: der ID-
+   Selektor account-check.css:74 (1,0,0) schlägt .download-btn:hover
+   (0,2,0), die Ink-Füllung bleibt also auch im Hover — auf --a6-ink-fill
+   wäre ein Akzent-Band ein Flickern auf der Primärfläche). Das Band wird
+   durch overflow:hidden an den Basis-Klassen auf die Button-Box
+   beschnitten; der aria-current-Tab (about.html) braucht KEINEN
+   Ausschluss: .graph-tab:not([aria-selected="true"]):hover (0,3,0)
+   schlägt .view-tab[aria-current="page"] (0,2,0), der Shine läuft dort
+   über surface-alt, nicht über Ink. */
 @media (hover: hover) and (pointer: fine) {
-  .download-btn:not(:disabled):hover::after,
+  .download-btn:not(:disabled):not(#check-go):hover::after,
   .graph-tab:not([aria-selected="true"]):not([aria-pressed="true"]):hover::after {
     content: "";
     position: absolute;
@@ -2270,6 +2295,7 @@ main {
   .topbar { padding: 12px 14px; }
   .panel { padding: 14px; }
   .hx-stage { margin-top: 14px; }
+  #exchange-outflows-panel { margin: 14px auto; } /* mobiler Rhythmus wie .hx-stage */
   [data-a6] { --a6-stage-height: 480px; } /* Leiter-Endstufe: 720 → 640 → 560 → 480 */
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }
