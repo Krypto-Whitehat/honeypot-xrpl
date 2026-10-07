@@ -137,7 +137,8 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/threats?q=<text>` | wie oben, gefiltert nach Adresse/Grund (Case-insensitive Substring) |
 | `GET /api/check/:address` | `{ address, network, checkedTxCount, truncated, selfListed, verdict: "clean"\|"contact"\|"unknown", contacts: [{ txType, time, direction, note, counterparty, risk }], hint }` |
 | `GET /api/graph`   | `{ nodes: [{ id: "attacker:r…" \| "honeypot:1", label, type }], edges: [{ from, to, type }] }` |
-| `GET /api/flow-state` | `{ cursor, updatedAt, validatedIndex, clusters: [{ id, label, roles, rolesByAddress, edges, totalDrops, txCount, distinctAccounts, firstSeen, lastSeen }] }` — normalisierte Projektion des persistierten Flow-States (serverseitig baitLabels-gefiltert, Top-200, 7-Tage-Fenster); ohne Token `200 + reason` (fail-closed) |
+| `GET /api/flow-state` | `{ cursor, updatedAt, validatedIndex, clusters: [{ id, label, roles, rolesByAddress, edges, totalDrops, txCount, distinctAccounts, firstSeen, lastSeen, fieldsCapped? }] }` — normalisierte Projektion des persistierten Flow-States (serverseitig baitLabels-gefiltert, Top-200, 7-Tage-Fenster, 30 Tage für Cluster mit Betrugsevidenz — `FLOW_STATE_MALICIOUS_RETENTION_MS`); `fieldsCapped: true` nur wenn die Write-Pfad-Feldkappe (`FLOW_STATE_MEMBER_CAP` 300) `memberAddresses` gekürzt hat — `distinctAccounts` bleibt der je gesehene WAHRE Bestand (monoton, `lib/ledger-walk.mjs` mergeCluster; Vergleich bait-inklusiv vor dem STILL-Filter); ohne Token `200 + reason` (fail-closed) |
+| `GET /api/flow-state?route=archive&address=…&from=…&to=…&range=30d\|90d` | `{ address, from, to, hops: [{ from, to, type, amountDrops, txHash, ledgerSeq }], truncated, queryDays, range? }` — Rückwärts-Replay über die Flow-Archiv-Tages-Chunks; `type` je Hop seit Kritik-Runde 3 (Parität zum Live-Kantenvertrag); `range` steuert die Lese-Tiefe (30 d = 1 Block, 90 d = 3 Blöcke nötig — bei Default-Kappe 2 ehrlich `truncated: true` + `queryDays: 62`); ungültiger `range` → 400 |
 | `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed). Bedient von der Function `api/flow-state.js` (Zweig `route=block-window`) via Rewrite — Hobby-Limit: max. 12 Serverless Functions pro Deployment |
 | `GET /…`           | statische Files aus `public/` |
 
@@ -214,10 +215,21 @@ Monitor-Logik:
   Clawbacks laufen Issuer → Holder-Adresse als Absender — die Flussrichtung
   ist im Kanten-Vertrag (account → destination) nicht ausdrückbar. Beide
   Typen zählen als Berührung/Evidenz, erzeugen aber keine Kante.
-- **AMM/Offer-Füllungen ohne Kanten:** AMMCreate/Deposit/Withdraw und
-  sofort gefüllte OfferCreates haben ihre Gegenpartei nur in den
-  Ledger-Meta (AMM-Account, Balance-Deltas) — sie erzeugen keine Kante;
-  AMMVote/Bid/Delete und alle reinen Admin-Tx sind bewusst kantenlos.
+- **AMM-Kanten meta-basiert (Kritik-Runde 3):** AMMCreate/AMMDeposit
+  erzeugen jetzt eine Kante `tx.Account → AMM-Konto` — die Gegenpartei
+  kommt aus der Ledger-Meta des expand:true-Entries (CreatedNode/
+  ModifiedNode `LedgerEntryType: "AMM"`, `FinalFields.Account` bzw.
+  `NewFields.Account`, xrpl@4.0.0 `ledger/AMM.d.ts:12`; ohne Meta keine
+  Kante, keine erfundene Adresse, +0 Requests). **Bewusst kantenlos
+  bleiben** AMMWithdraw/AMMDelete/AMMVote/AMMBid (kein Gegenpartei-Feld
+  in der Spec, Richtung AMM → Account im Kanten-Vertrag nicht
+  ausdrückbar) sowie AMMClawback/VaultClawback (Holder → Issuer nicht
+  ausdrückbar) und die **NFTokenCreateOffer-Owner-Zuordnung** (kein
+  Owner-Feld in der Tx; `Destination` funktioniert über die generische
+  Empfänger-Zeile). Tot gelesene Felder (`tx.NFTokenOfferAmount`,
+  `tx.VaultOwner` — existieren in keiner Spec) sind entfernt.
+  Sofort gefüllte OfferCreates erzeugen weiterhin keine Kante
+  (Balance-Deltas in der Meta, keine Gegenpartei-Adresse).
 - **Kanten-Codierung (Tx-Kategorie):** Kanten färben je Tx-Kategorie
   (`txCategory`, edge-colors.mjs): Betrug = Rot (Severity-Override VOR der
   Kategorie), Payment = Grün (success-Familie; im Noir-Theme exakt
@@ -232,6 +244,18 @@ Monitor-Logik:
   EscrowFinish/CheckCash/AMM-/NFT-Verkäufe zählen nicht in `sweepRatio`
   und unterschätzen non-Payment-Sweeps (bewusste Grenze der
   Drainer-Bestätigung).
+- **Market-Regeln (Kritik-Runde 3, `lib/detector.mjs`):** `amm-wash-swap`,
+  `thin-pool-exploit` und `spoof-offer-cycle` sind deterministische
+  Volumen-/Zyklus-Heuristiken auf OfferCreate/OfferCancel-Fills und
+  Ledger-Meta (expand:true liefert beides bereits, +0 Requests), alle
+  `suspect` — kein Schuldnachweis, keine 30-Tage-malicious-Retention
+  (`HISTORY_FRAUD_RULES` bleibt dreiköpfig). Dünne Pools brauchen **≥ 5
+  beobachtete Fills desselben Pairs** im Fenster — darunter gilt
+  „nicht messbar statt raten" (kein Fund). Börsen-/Multi-User-Konten
+  fallen über `marketExcludes` raus (Advance-Pfad: Exchange-Registry ∪
+  multiUser ∪ config-benign ∪ Köder; Snapshot-Pfade: config-benign ∪
+  Köder — dokumentierte Guard-Grenze). Schwellen sind Tuning-Defaults,
+  maschinenlesbar über `/api/rules` (Re-Export von `MARKET_THRESHOLDS`).
 - **Selbst-Check nur gegen Bekanntes:** Der Check findet ausschließlich
   Kontakte zu Adressen, die dieser Monitor bereits als Bedrohung erfasst hat.
   Eine Adresse, die von einer noch unbekannten Scam-Adresse angeschrieben
@@ -424,10 +448,12 @@ erlaubt `lib/history.mjs` nur EINEN 409-Retry pro Write. Commit-Volumen:
 Tick alle ~100 s = bis zu ~864 Flow-State-Commits/Tag plus 1 Block-Fenster-
 Commit pro Tick (Tages-Chunks, ≤ ~2,4 MB/Datei).
 
-## Flow-Archiv (jenseits des 7-Tage-Fensters)
+## Flow-Archiv (jenseits des Flow-State-Fensters)
 
-Der Flow-State wird im Advance-Tick beschnitten (7-Tage-Fenster,
-`lib/flow-state.mjs`). **Vor** dem Pruning archiviert `archiveFromFlowState`
+Der Flow-State wird im Advance-Tick beschnitten (7-Tage-Fenster, 30 Tage für
+Cluster mit Betrugsevidenz — `FLOW_STATE_RETENTION_MS` /
+`FLOW_STATE_MALICIOUS_RETENTION_MS`, `lib/flow-state.mjs`). **Vor** dem
+Pruning archiviert `archiveFromFlowState`
 die Cluster, die das Prädikat verlieren, als Tages-Chunks
 `data/flow-archive/<YYYY-MM-DD>.json` (`api/advance.js`, Schritt (iii.5)) —
 Betrugsevidenz bleibt rückwärts lesbar, obwohl sie aus dem Live-State fällt.
@@ -437,17 +463,35 @@ Reine Benign-Cluster werden nicht archiviert.
   registry-verknüpfte Cluster (`ARCHIVE_RETENTION_MALICIOUS_MS` /
   `ARCHIVE_RETENTION_REGISTRY_MS`, `lib/flow-state.mjs`); Tages-Chunks löscht
   der Advance-Tick im Muster des Block-Fensters (404-sicher).
+- **Checkpoint-Zeilen und Verdrängungspriorität:** Der Tages-Checkpoint
+  (`checkpointFromFlowState`) archiviert alle Betrugsevidenz-Cluster des
+  live Bestandes mit `reason: 'checkpoint'`. Bei Byte-Druck kappt
+  `capArchiveDoc` in dieser Reihenfolge: ZUERST Checkpoint-Zeilen
+  (reproduzierbare Snapshots lebender Cluster), DANN die ältesten
+  Verlust-Zeilen — Checkpoints dürfen Verlust-Archiv-Evidenz nie
+  verdrängen.
 - **Rückwärts-Lesen:** `GET /api/flow-state?route=archive&address=…&from=…&to=…`
   (Zweig in `api/flow-state.js`, keine eigene Function — Hobby-Limit 12
   Serverless Functions) rekonstruiert Hops über `replayArchive`;
-  Köder-Endpunkte fallen STILL raus (B2).
+  Köder-Endpunkte fallen STILL raus (B2). Die Hops tragen ab Kritik-Runde 3
+  den **Tx-Typ** pro Hop (`type`, Parität zum Live-Kantenvertrag —
+  Archivzeilen persistieren `type`/Tags plus `roles`/`severityByAddress`
+  je Cluster; ältere Bestände ohne Felder bleiben feldlos/`null`, defensiv).
 - **Lese-Fenster:** rückwärts in Blöcken à 31 Tagen mit harter Kappe von
   2 Blöcken → max. 62 Tage / 62 GitHub-Reads pro Aufruf (`ARCHIVE_QUERY_DAYS`
   / `ARCHIVE_MAX_DAY_BLOCKS`, ENV `ARCHIVE_MAX_DAY_BLOCKS` überschreibbar,
   Kappe 6); `truncated: true` signalisiert die Kappe ohne Fensterabdeckung.
+- **Range-Parameter (Kritik-Runde 3):** `?range=30d|90d` auf
+  `route=archive` steuert die Lese-Tiefe — 30 d = 1 Block (voll abfragbar,
+  `truncated: false` bei Abdeckung), 90 d = 3 Blöcke nötig; bei Default-Kappe
+  2 werden ehrlich 62 d gelesen (`queryDays: 62`) und `truncated: true`
+  gemeldet — erst ENV `ARCHIVE_MAX_DAY_BLOCKS>=3` macht 90 d voll abfragbar.
+  Die block-window-Route bleibt bei 24h|3d|7d: ihre Daten-Retention ist
+  7 Tage, 30d/90d wären dort ein Fenster-Versprechen auf nicht mehr
+  existierende Daten (ehrliche Obergrenze, `lib/block-window.mjs`).
 - **Dokumentierte Restlücke (ehrlich):** die Retention (180 d) übersteigt
-  die Abfragbarkeit (62 d) — ältere registry-verknüpfte Cluster sind über
-  diese Route nicht erreichbar.
+  die Abfragbarkeit (62 d bei Default) — ältere registry-verknüpfte Cluster
+  sind über diese Route nicht erreichbar.
 
 ## Hinweise
 

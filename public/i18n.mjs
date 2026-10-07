@@ -143,6 +143,11 @@ export const DICT = {
     'cluster.aria': 'Cluster summary',
     'cluster.empty': 'No clusters yet – waiting for ledgers.',
     'graph.note': 'Nodes are actors visible in the public ledger from the live analysis – addresses are shown in full as soon as the bait-hash allowlist is loaded (bait addresses always remain hidden via the hash deny-list). Clicking a cluster card or a cluster bubble opens the cluster detail view.',
+    /* Archiv-Graph-Parität + ehrliche Fenster (Kritik-Runde 3): Notiz im
+       Archiv-Modus (app.js renderGraphArchiveNote) und truncated-Kennzeichnung
+       des Bühnenfensters (renderGraphWindowNote, nur bei belegter Überschreitung). */
+    'graph.noteArchive': 'Archive graph: edges carry the recorded transaction type (color = category, dashed = fraud), nodes their recorded role. Retention: block window 7 d, fraud state 30 d (malicious), archive 30 d (malicious) / 180 d (registry-linked) – older evidence is removed from the state, capped fields are marked on the cards.',
+    'graph.windowTruncated': 'Window {range}: the oldest evidence in the state is from {depth} – the window reaches beyond the retained data.',
 
     /* index.html — Fuß */
     'foot.updated': 'As of: ',
@@ -195,6 +200,10 @@ export const DICT = {
     'cluster.lastSeen': 'Last seen: ',
     'cluster.txUnit': 'tx',
     'cluster.accountUnit': 'accounts',
+    /* Kap-Kennzeichnung der Cluster-Karte (Kritik-Runde 3): distinctAccounts
+       ist nach dem Monotonie-Fix der je gesehene Bestand, die Mitgliederliste
+       ist auf 300 gekappt (FLOW_STATE_MEMBER_CAP, lib/flow-state.mjs). */
+    'cluster.membersCapped': 'Field cap: {n} distinct accounts seen – the member list is capped at 300.',
     'cluster.chainAria': 'Money flow: start to collector along real edges',
     /* Cluster-Karten — Verdichtung + Mega-Cluster (Design P2, 2026-10-06):
        EINE gemeinsame '+N more accounts'-Wortfamilie für Adress-Chip-Zeile
@@ -250,22 +259,27 @@ export const DICT = {
     /* app.js — Server-Fenster-Modus (Standard) und Opt-in-LIVE */
     'mode.label': 'Data source',
     'mode.archive': 'Archive',
-    'mode.archiveAria': 'Show the persisted block window (24 h / 3 d / 7 d) from the server',
+    'mode.archiveAria': 'Show the persisted block window (24 h / 3 d / 7 d) from the server, or the fraud-state windows 30 d / 90 d',
     /* Sichtbarer Hinweis unter der Modus-Auswahl (index.html #feed-archive-
        hint), per aria-describedby an beide Modus-Buttons gebunden. */
-    'mode.archiveHint': 'Archive mode: persisted block window (24 h / 3 d / 7 d) from the server — also available when no live feed is connected.',
+    'mode.archiveHint': 'Archive mode: persisted block window (24 h / 3 d / 7 d) from the server — the 30 d / 90 d windows show the persisted fraud state instead. Also available when no live feed is connected.',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling',
     'range.label': 'Window',
     'range.24h': '24 h',
     'range.3d': '3 d',
     'range.7d': '7 d',
+    'range.30d': '30 d',
+    'range.90d': '90 d',
     'feed.loadMore': 'Load more',
     'feed.loadMoreAria': 'Load more block entries',
     'feed.serverEmpty': 'No blocks in the window yet – the server walk fills the window every 5 minutes.',
     'feed.windowNote': 'Server window: {range} · {blocks} blocks · {txns} txs · {flagged} flagged blocks · as of {time}',
     'feed.persistOff': 'Persistence not configured – the server window is empty. Activate the Live mode for direct analysis.',
     'feed.windowError': 'Server window unreachable ({msg})',
+    /* Ehrliche Retention-Grenze (Kritik-Runde 3): das Block-Fenster endet bei
+       7 d — 30 d/90d zeigen den persistierten Fraud-Bestand, nie Blockkarten. */
+    'feed.windowBeyondBlockRetention': 'The block window covers 24 h / 3 d / 7 d only – the 30 d / 90 d windows show the persisted fraud state in graph, cluster cards and drilldown, not block cards.',
     'chart.aria': 'Hourly activity in the selected window: transactions per hour, flagged hours highlighted',
     'chart.flagged': 'flagged hours: {n}',
     'conn.server': 'Server data – window updated',
@@ -490,8 +504,8 @@ export const DICT = {
     'about.patHubD': 'Unflagged nodes with more than 20 finding edges (exchange, faucet or aggregation accounts) are cut out of the cluster union: two independent scenes never merge through a shared exchange. Connections that run through a shared exchange account (transit) are marked as pass-through, not as direct adjacency.',
     'about.patKnownBadT': 'Known-bad contact',
     'about.patKnownBadD': 'When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.',
-    'about.detectNote': 'The engine rule catalog holds twelve rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.',
-    'about.detectApi': 'Every threshold of the twelve rules is machine-readable in the dashboard\u2019s rules catalog (thresholds per rule), and the deployed commit is reported in the x-deploy-commit response header of the same endpoint.',
+    'about.detectNote': 'The engine rule catalog holds fifteen rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts, offer spam, AMM washing, thin-pool exploits and spoof offer cycles. Every rule carries a severity; all assignments are heuristics, not proof of guilt.',
+    'about.detectApi': 'Every threshold of the rules with numeric thresholds is machine-readable in the dashboard\u2019s rules catalog (thresholds per rule), and the deployed commit is reported in the x-deploy-commit response header of the same endpoint.',
     'about.glossaryTitle': 'Glossary',
     'about.glossaryHint': 'The terms of the interface — short and precise',
     'about.gClusterT': 'Cluster',
@@ -535,6 +549,9 @@ export const DICT = {
     'rule.wash-self-transfer': 'Self-Transfer Washing',
     'rule.peeling-chain': 'Peeling chain (staged forwarding 60–90 %)',
     'rule.wash-cycle': 'Wash cycle (cross-account loop with volume conservation)',
+    'rule.amm-wash-swap': 'AMM washing — bidirectional self-cycle with volume conservation',
+    'rule.thin-pool-exploit': 'Thin-pool exploit — price impact in thin liquidity',
+    'rule.spoof-offer-cycle': 'Spoof offers — place-and-pull cycles in the order book',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Known-malicious address involved ({type}).',
@@ -554,6 +571,9 @@ export const DICT = {
     'note.peeling-chain': 'Peeling chain: {hops} staged hops (avg {ratio} % forwarding).',
     'note.fake-nft-fraud-fee': 'NFTokenMint with usurious transfer fee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer to the same target {addr} in one ledger.',
+    'note.amm-wash-swap': 'Bidirectional OfferCreate fills on {pair} in volume balance (conservation {conserve} %, drift {drift} %).',
+    'note.thin-pool-exploit': '{n} fills on {pair} with >= {devPct} % price deviation from the window median in the favorable direction (thin pool).',
+    'note.spoof-offer-cycle': '{n} place-and-pull cycles (create→cancel <= {maxCancel} ledgers) across {levels} price levels in the order book.',
 
     /* index.html — Top-10-Börsen-Zuflüsse (Daten-Forensik 2026-10-07,
        public/exchange-outflows.mjs): ehrliche Box — Grenzen (50-Kanten-Deckel,
@@ -640,7 +660,7 @@ export const DICT = {
     'legend.drainer': 'Drainer',
     'legend.collector': 'Kollektor',
     'legend.relay': 'Relay',
-    'legend.unknown': 'Unknown',
+    'legend.unknown': 'Unbekannt',
     'legend.cluster': 'Cluster',
     'legend.payment': 'Payment',
     'legend.check': 'Check/Channel',
@@ -663,6 +683,11 @@ export const DICT = {
     'cluster.aria': 'Cluster-Zusammenfassung',
     'cluster.empty': 'Noch keine Cluster – warte auf Ledger.',
     'graph.note': 'Knoten sind öffentlich im Ledger sichtbare Akteure aus der Live-Analyse – Adressen werden vollständig angezeigt, sobald die Bait-Hash-Allowlist geladen ist (Köder-Adressen bleiben über die Hash-Deny-Liste stets verborgen). Klick auf eine Cluster-Karte oder eine Cluster-Bubble öffnet die Cluster-Detailansicht.',
+    /* Archiv-Graph-Parität + ehrliche Fenster (Kritik-Runde 3): Notiz im
+       Archiv-Modus (app.js renderGraphArchiveNote) und truncated-Kennzeichnung
+       des Bühnenfensters (renderGraphWindowNote, nur bei belegter Überschreitung). */
+    'graph.noteArchive': 'Archiv-Graph: Kanten tragen den aufgezeichneten Transaktionstyp (Farbe = Kategorie, gestrichelt = Betrug), Knoten ihre aufgezeichnete Rolle. Retention: Block-Fenster 7 Tage, Betrugsgestand 30 Tage (maliziös), Archiv 30 Tage (maliziös) / 180 Tage (registry-verknüpft) – ältere Evidenz wird aus dem Bestand entfernt, gekappte Felder sind auf den Karten gekennzeichnet.',
+    'graph.windowTruncated': 'Fenster {range}: die älteste Evidenz im Bestand stammt vom {depth} – das Fenster greift über die gespeicherten Daten hinaus.',
 
     /* index.html — Fuß */
     'foot.updated': 'Stand: ',
@@ -715,6 +740,10 @@ export const DICT = {
     'cluster.lastSeen': 'Letzte Sichtung: ',
     'cluster.txUnit': 'Tx',
     'cluster.accountUnit': 'Konten',
+    /* Kap-Kennzeichnung der Cluster-Karte (Kritik-Runde 3): distinctAccounts
+       ist nach dem Monotonie-Fix der je gesehene Bestand, die Mitgliederliste
+       ist auf 300 gekappt (FLOW_STATE_MEMBER_CAP, lib/flow-state.mjs). */
+    'cluster.membersCapped': 'Feldkappe: {n} verschiedene Konten je gesehen – die Mitgliederliste ist auf 300 gekappt.',
     'cluster.chainAria': 'Geldfluss: Start bis Kollektor entlang echter Kanten',
     /* Cluster-Karten — Verdichtung + Mega-Cluster (Design P2, 2026-10-06):
        EINE gemeinsame „+N weitere Konten“-Wortfamilie für Adress-Chip-Zeile
@@ -770,22 +799,27 @@ export const DICT = {
     /* app.js — Server-Fenster-Modus (Standard) und Opt-in-LIVE */
     'mode.label': 'Datenquelle',
     'mode.archive': 'Archiv',
-    'mode.archiveAria': 'Persistiertes Block-Fenster (24 h / 3 d / 7 d) vom Server anzeigen',
+    'mode.archiveAria': 'Persistiertes Block-Fenster (24 h / 3 T / 7 T) vom Server anzeigen, oder die Betrugsbestands-Fenster 30 T / 90 T',
     /* Sichtbarer Hinweis unter der Modus-Auswahl (index.html #feed-archive-
        hint), per aria-describedby an beide Modus-Buttons gebunden. */
-    'mode.archiveHint': 'Archiv-Modus: persistiertes Block-Fenster (24 h / 3 T / 7 T) vom Server — auch verfügbar, wenn kein Live-Feed verbunden ist.',
+    'mode.archiveHint': 'Archiv-Modus: persistiertes Block-Fenster (24 h / 3 T / 7 T) vom Server – die Fenster 30 T / 90 T zeigen stattdessen den persistierten Betrugsbestand. Auch verfügbar, wenn kein Live-Feed verbunden ist.',
     'mode.live': 'Live',
     'mode.liveAria': 'Opt-in: direkter WSS zu honeycluster.io – ein Ledger-Kommando pro Block, ohne Stichprobe',
     'range.label': 'Fenster',
     'range.24h': '24 h',
     'range.3d': '3 T',
     'range.7d': '7 T',
+    'range.30d': '30 T',
+    'range.90d': '90 T',
     'feed.loadMore': 'Mehr laden',
     'feed.loadMoreAria': 'Weitere Block-Einträge laden',
     'feed.serverEmpty': 'Noch keine Blöcke im Fenster – der Server-Walk füllt es alle 5 Minuten.',
     'feed.windowNote': 'Server-Fenster: {range} · {blocks} Blöcke · {txns} Txs · {flagged} geflaggte Blöcke · Stand {time}',
     'feed.persistOff': 'Persistenz nicht konfiguriert – das Server-Fenster ist leer. Aktiviere den Live-Modus für die direkte Analyse.',
     'feed.windowError': 'Server-Fenster nicht erreichbar ({msg})',
+    /* Ehrliche Retention-Grenze (Kritik-Runde 3): das Block-Fenster endet bei
+       7 Tagen — 30 T/90 T zeigen den persistierten Betrugsgestand, nie Blockkarten. */
+    'feed.windowBeyondBlockRetention': 'Das Block-Fenster deckt nur 24 h / 3 T / 7 T ab – die Fenster 30 T / 90 T zeigen den persistierten Betrugsbestand in Graph, Cluster-Karten und Drilldown, nicht als Block-Karten.',
     'chart.aria': 'Stündliche Aktivität im gewählten Fenster: Transaktionen pro Stunde, geflaggte Stunden hervorgehoben',
     'chart.flagged': 'geflaggte Stunden: {n}',
     'conn.server': 'Server-Daten – Fenster aktualisiert',
@@ -1010,8 +1044,8 @@ export const DICT = {
     'about.patHubD': 'Ungeflaggte Knoten mit mehr als 20 Fund-Kanten (Börsen-, Faucet- oder Sammel-Konten) werden aus der Cluster-Vereinigung herausgeschnitten: Zwei unabhängige Szenen verschmelzen nicht über eine gemeinsame Börse. Verbindungen, die über ein gemeinsames Börsen-Konto laufen (transit), werden als Durchleitung gekennzeichnet, nicht als direkte Nachbarschaft.',
     'about.patKnownBadT': 'Known-Bad-Kontakt',
     'about.patKnownBadD': 'Berührt eine Transaktion eine Adresse aus der Bedrohungsliste (kuratiert und aus der Honeypot-Historie abgeleitet), wird das als Treffer gemeldet — direkte Konto- oder Zahlungsberührung als maliziös, bloße Trustline- oder NFT-Positionen nur als verdächtig.',
-    'about.detectNote': 'Der Regelkatalog der Engine umfasst zwölf Regeln — neben den obigen unter anderem Memo-Phishing (URLs und Seed-Muster in Zahlungsmemos), Dusting (Mini-XRP an frische Konten), Fake-NFT-Betrug, Airdrop-TrustSet-Spam, Zahlungs-Bursts und Offer-Spam. Jede Regel trägt einen Schweregrad; alle Zuordnungen sind Heuristiken, kein Schuldnachweis.',
-    'about.detectApi': 'Alle Schwellen der zwölf Regeln sind im Regeln-Katalog des Dashboards (thresholds je Regel) maschinenlesbar, und der ausgelieferte Commit steht im Response-Header x-deploy-commit desselben Endpoints.',
+    'about.detectNote': 'Der Regelkatalog der Engine umfasst fünfzehn Regeln — neben den obigen unter anderem Memo-Phishing (URLs und Seed-Muster in Zahlungsmemos), Dusting (Mini-XRP an frische Konten), Fake-NFT-Betrug, Airdrop-TrustSet-Spam, Zahlungs-Bursts, Offer-Spam, AMM-Washing, Thin-Pool-Exploits und Spoof-Offer-Zyklen. Jede Regel trägt einen Schweregrad; alle Zuordnungen sind Heuristiken, kein Schuldnachweis.',
+    'about.detectApi': 'Alle Schwellen der Regeln mit numerischen Schwellen sind im Regeln-Katalog des Dashboards (thresholds je Regel) maschinenlesbar, und der ausgelieferte Commit steht im Response-Header x-deploy-commit desselben Endpoints.',
     'about.glossaryTitle': 'Begriffs-Glossar',
     'about.glossaryHint': 'Die Begriffe der Oberfläche — kurz und präzise',
     'about.gClusterT': 'Cluster',
@@ -1055,6 +1089,9 @@ export const DICT = {
     'rule.wash-self-transfer': 'Washing — Selbsttransfer (Volumenerzeugung)',
     'rule.peeling-chain': 'Peeling-Kette (gestaffelte Weiterleitung 60–90 %)',
     'rule.wash-cycle': 'Wash-Zyklus (Kreuz-Konto-Kreislauf mit Volumenerhalt)',
+    'rule.amm-wash-swap': 'AMM-Washing — bidirektionaler Selbstzyklus mit Volumenerhalt',
+    'rule.thin-pool-exploit': 'Thin-Pool-Exploit — Preisimpact in dünner Liquidität',
+    'rule.spoof-offer-cycle': 'Spoof-Offers — Place-and-Pull-Zyklen im Orderbuch',
 
     /* Detector-Notes (noteKey/noteParams aus lib/detector.mjs) */
     'note.known-bad-hit': 'Bekannt-maliziöse Adresse beteiligt ({type}).',
@@ -1074,6 +1111,9 @@ export const DICT = {
     'note.peeling-chain': 'Peeling-Kette: {hops} gestaffelte Hops (Ø {ratio} % Weiterleitung).',
     'note.fake-nft-fraud-fee': 'NFTokenMint mit Wucher-TransferFee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer auf dasselbe Ziel {addr} in einem Ledger.',
+    'note.amm-wash-swap': 'Bidirektionale OfferCreate-Fills auf {pair} im Volumen-Gleichgewicht (Volumenerhalt {conserve} %, Drift {drift} %).',
+    'note.thin-pool-exploit': '{n} Fills auf {pair} mit >= {devPct} % Preisabweichung vom Fenster-Median in die günstige Richtung (dünner Pool).',
+    'note.spoof-offer-cycle': '{n} Place-and-Pull-Zyklen (Create→Cancel <= {maxCancel} Ledger) auf {levels} Preislevel im Orderbuch.',
 
     /* index.html — Top-10-Börsen-Zuflüsse (Daten-Forensik 2026-10-07,
        public/exchange-outflows.mjs): ehrliche Box — Grenzen (50-Kanten-Deckel,

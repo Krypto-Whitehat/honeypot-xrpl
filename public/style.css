@@ -104,6 +104,32 @@
     radial-gradient(ellipse at 95% 0%, rgba(22, 48, 92, 0.10), transparent 55%),
     radial-gradient(ellipse at 0% 100%, rgba(15, 118, 110, 0.08), transparent 60%);
 
+  /* Frost-/Glas-Schicht der Top-10-Box (Design-Tranche, Referenzmuster
+     a6-hero__box/.phases — MUSTER, nicht kopierte Werte): halbtransparente
+     Füllung + Blur über der Bühne, 1px-Rand in Frost-Tinte, Hairline-
+     Verlauf und Sheen-Band. Kontraste per node nachgerechnet (WCAG):
+     Frost-Fill komposit auf dem dunkelsten Bühnenendpunkt #eeeef1 → #fcfcfc,
+     Ink darauf 17.93 ✓; Frost-Rand komposit #818184 vs #eeeef1 = 3.35 ✓ UI;
+     Hairline-Mittelstop komposit #7e8da5 vs Frost-Fill = 3.34 ✓ (dekorativ,
+     trotzdem ≥3). Der Sheen ist ein reines Lichtband (overlay) ohne Text-
+     Funktion. */
+  --a6-frost-fill: rgba(255, 255, 255, 0.80);
+  --a6-frost-blur: blur(10px) saturate(150%);
+  --a6-frost-border: rgba(20, 20, 22, 0.50);
+  --a6-hairline-grad: linear-gradient(90deg, transparent, rgba(22, 48, 92, 0.55), transparent);
+  --a6-sheen-grad: linear-gradient(115deg, transparent 32%, rgba(255, 255, 255, 0.55) 46%, transparent 58%);
+
+  /* Shining-Word (Muster a6-blue.css .a6-title em / hero-file h1 em — der
+     Referenz-Hell-Stop #ffb26b auf Weiß = 1.77:1 ist ein Kontrast-Blindpunkt
+     und wird NICHT übernommen; #ec5b00 = 3.46 <4.5 ebenfalls verworfen).
+     Beide Stops sind nachgerechnet: --a6-accent-text #a63c00 = 5.55 gegen
+     den dunkelsten Bühnenendpunkt #eeeef1 (6.43 auf Weiß), Mittelstop
+     #b8490a = 4.54 dort (5.26 auf Weiß) — jeder sichtbare Gradient-Pixel
+     bleibt ≥4.5. --a6-shine-word-base ist der statische Fallback für
+     reduced-motion/forced-colors (Wort bleibt in Akzent-Tinte lesbar). */
+  --a6-shine-word-grad: linear-gradient(90deg, var(--a6-accent-text) 0%, #b8490a 50%, var(--a6-accent-text) 100%);
+  --a6-shine-word-base: var(--a6-accent-text);
+
   /* Astra-6-Marke (lab_graphite): graphitfarbene Primäraktion, warmer Akzent
      nur auf der Hero-Bühne und für Status-Signale — kein Glow auf jeder Karte
      (SKILL lab_graphite.avoid). */
@@ -337,6 +363,23 @@
      Anteil über die Bühne — Mischziel seit diesem Umbau der Token
      --a6-graph-canvas, nicht mehr hartes Weiß). */
   --a6-globe-atmosphere: rgba(143, 123, 255, 0.10);
+  /* Frost-/Glas-Schicht in Noir: dunkle Füllung über der Indigo-Bühne
+     (komposit #13121e, Ink darauf 16.52 ✓), Frost-Rand komposit #66656e vs
+     dunkelster Bühnenendpunkt #100f1a = 3.30 ✓ UI, Hairline-Mittelstop
+     komposit #6457b1 vs Frost-Fill = 3.07 ✓ (dekorativ, trotzdem ≥3). */
+  --a6-frost-fill: rgba(20, 19, 31, 0.72);
+  --a6-frost-blur: blur(10px) saturate(140%);
+  --a6-frost-border: rgba(242, 241, 248, 0.38);
+  --a6-hairline-grad: linear-gradient(90deg, transparent, rgba(143, 123, 255, 0.65), transparent);
+  /* Sheen in Noir mit gesenktem Alpha (overlay-Band auf dunkler Bühne —
+     das Hell-Band .55 wäre hier ein Blend-Flash) */
+  --a6-sheen-grad: linear-gradient(115deg, transparent 32%, rgba(242, 241, 248, 0.10) 46%, transparent 58%);
+  /* Shining-Word Noir (Muster a6-blue.css: accent-text → accent → Shimmer →
+     accent → accent-text). Alle Stops gegen den dunkelsten Bühnenendpunkt
+     #100f1a nachgerechnet: #b9a8ff 9.15 ✓, #8f7bff 5.83 ✓, Shimmer #e4dcff
+     14.46 ✓ — jeder sichtbare Gradient-Pixel bleibt ≥4.5. */
+  --a6-shine-word-grad: linear-gradient(90deg, var(--a6-accent-text) 0%, #8f7bff 34%, #e4dcff 50%, #8f7bff 66%, var(--a6-accent-text) 100%);
+  --a6-shine-word-base: var(--a6-accent-text);
 }
 
 *,
@@ -651,6 +694,52 @@ main {
   letter-spacing: -0.01em;
 }
 
+/* ---------------- Frost-Panel: Top-10-Box (Design-Tranche) ----------------
+   Die Box liegt als einzige Glas-Schicht auf der Bühne (Rest bleibt matte
+   surface-Fläche — lab_graphite.avoid: kein Glow/Filter auf jeder Karte).
+   Schichten: Frost-Füllung + backdrop-filter über der Bühne, 1px-Rand in
+   Frost-Tinte, Hairline-::BEFORE als Border-Verlauf, der links/rechts
+   sauber transparent ausläuft (12 % Einlauf, Muster hero-file .sheet::before
+   + .rail), und Sheen-::AFTER als 115°-Lichtband mit minimalem ±12 %-Swing
+   um die Mitte (11 s, Muster a6-blue.css .a6-hero__sheen — bewusst KEIN
+   Dauer-Sweep). Bewusst NUR auf #exchange-outflows-panel: die übrigen
+   Panels behalten .panel (surface + line-strong). */
+#exchange-outflows-panel {
+  position: relative;
+  isolation: isolate;
+  background: var(--a6-frost-fill);
+  backdrop-filter: var(--a6-frost-blur);
+  border-color: var(--a6-frost-border);
+}
+
+#exchange-outflows-panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 1px;
+  background: var(--a6-hairline-grad);
+  pointer-events: none;
+}
+
+#exchange-outflows-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--a6-sheen-grad);
+  mix-blend-mode: overlay;
+  transform: translateX(-12%);
+  animation: a6-sheen 11s var(--a6-ease) infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes a6-sheen {
+  from { transform: translateX(-12%); }
+  to { transform: translateX(12%); }
+}
+
 .hint {
   color: var(--a6-muted);
   font-size: 12px;
@@ -897,6 +986,8 @@ main {
 }
 
 .download-btn {
+  position: relative; /* Anker des Hover-Shines (::after unten) */
+  isolation: isolate;
   min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
@@ -907,7 +998,7 @@ main {
   font-weight: 650;
   cursor: pointer;
   box-shadow: var(--a6-e1);
-  transition: transform var(--a6-ui) var(--a6-ease);
+  transition: transform var(--a6-ui) var(--a6-ease), background-color var(--a6-fast);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1086,6 +1177,8 @@ main {
 }
 
 .graph-tab {
+  position: relative; /* Anker des Hover-Shines (::after unten) */
+  isolation: isolate;
   min-height: 44px; /* Astra-6-Touch-Mindestziel (44 px) — war 40 px (Befund 2026-09-29) */
   padding: 8px 18px;
   background: var(--a6-surface);
@@ -1116,6 +1209,32 @@ main {
 
 @media (hover: hover) and (pointer: fine) {
   .graph-tab:not([aria-selected="true"]):hover { background: var(--a6-surface-alt); }
+}
+
+/* Hover-Shine der Console-Buttons (Muster hero-file .b::after — 105°-Band,
+   -120 %→+120 %, EINMAL beim Hover, kein Dauerlauf): die Buttons behalten
+   ihre 1px-control-line-Randführung (≥3.57:1 UI, beide Themes); der Shine
+   ist reines Hover-Feedback auf der ungewählten Fläche. Ausgeschlossen:
+   :disabled und die Ink-Auswahlflächen (aria-selected/aria-pressed=true) —
+   auf --a6-ink-fill wäre ein Akzent-Band ein Flickern auf der Auswahl. */
+@media (hover: hover) and (pointer: fine) {
+  .download-btn:not(:disabled):hover::after,
+  .graph-tab:not([aria-selected="true"]):not([aria-pressed="true"]):hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(105deg, transparent 30%, var(--a6-accent-soft) 48%, transparent 66%);
+    opacity: 0.6;
+    transform: translateX(-120%);
+    animation: a6-btn-shine 700ms var(--a6-ease);
+    pointer-events: none;
+  }
+}
+
+@keyframes a6-btn-shine {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
 }
 
 /* Verdichtungs-Umschalter der Cluster-Karten (Design P2, index.html
@@ -1697,6 +1816,19 @@ main {
   color: var(--a6-muted);
 }
 
+/* Feldkappe-Fußnote der Cluster-Karte (Kritik-Runde 3, Markup app.js
+   clusterCardHtml): ehrliche Kennzeichnung, wenn die Write-Pfad-Feldkappe des
+   Servers (300 Mitglieder) die Liste komprimiert hat — Meta-Ton wie der
+   Transit-Hinweis, Warn-Haarlinie als Zweitkanal (der Text trägt den Inhalt,
+   Farbe ist nie alleiniges Signal). */
+.cluster-capped-note {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--a6-warn);
+  font-size: 12px;
+  color: var(--a6-muted);
+}
+
 #cluster-empty { margin-top: 14px; }
 
 /* Leerzustände (Design-Audit): bisher reiner Fließtext — jetzt gestaltete
@@ -1837,6 +1969,41 @@ main {
   overflow-wrap: anywhere;
   hyphens: auto;
   text-wrap: balance;
+}
+
+/* Shining-Word (Muster hero-file h1 em / a6-blue.css .a6-title em — das
+   „Wien"-Muster, NICHT kopiert): ein heller Gradient-Streifen oszilliert
+   minimal durch die Wortmitte (background-size 200 %, Position 42 %↔58 %,
+   11 s alternate — kein 250 %-Durchlauf, kein Dauer-Sweep). Angewandt auf
+   die drei Schlüssel-Überschriften der Console: .hx-title (Radar-Titel),
+   #exout-title (Top-10-Box), #graph-title (Aktivitäts-Graph). Bewusst
+   NICHT auf .role-chip/.legend: 12-px-Typo mit background-clip:text ist
+   ein Lesbarkeitsrisiko (Glyphen-Abschneidung), und die Rollen-Wörter
+   sind Labels, keine Überschriften.
+   Kontrast: jeder sichtbare Gradient-Pixel ≥4.5 in BEIDEN Themes —
+   Hell #a63c00 5.55 / #b8490a 4.54 gegen den dunkelsten Bühnenendpunkt
+   #eeeef1; Noir #b9a8ff 9.15 / #8f7bff 5.83 / #e4dcff 14.46 gegen #100f1a
+   (Token-Kommentare oben, per node nachgerechnet).
+   background-clip:text frisst Unterlinien — text-decoration:none.
+   Die Padding-Zugabe (Muster elementor-head-startseite.html:102-103)
+   verhindert Glyphen-Abschneidung am Gradient-Rand. */
+.hx-shine-word {
+  background-image: var(--a6-shine-word-grad);
+  background-size: 200% 100%;
+  background-position: 50% 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-decoration: none;
+  padding: 0 0.09em 0.02em 0.03em;
+  animation: a6-shine-word 11s var(--a6-ease) infinite alternate;
+}
+
+@keyframes a6-shine-word {
+  from { background-position: 42% 0; }
+  to { background-position: 58% 0; }
 }
 
 .hx-lead {
@@ -2122,6 +2289,22 @@ main {
   .cluster-card,
   .lang-btn,
   .download-btn { transform: none !important; }
+
+  /* Shining-Word reduced-motion: das Wort bleibt STATISCH in Akzent-Tinte
+     lesbar (Muster a6-blue.css:161-166) — animation:none allein ließe den
+     transparenten Text auf dem Gradient-Standbild; der Base-Fallback
+     (--a6-shine-word-base = --a6-accent-text, 5.55/8.85:1) stellt die
+     Vollfarbe her. */
+  .hx-shine-word {
+    background-image: none;
+    color: var(--a6-shine-word-base);
+    -webkit-text-fill-color: var(--a6-shine-word-base);
+  }
+
+  /* Das Sheen-Band steht ohne Animation als statischer Schrägstrich —
+     ohne Bewegung ist es Design-Rauschen und tritt zurück. Die Hairline
+     (::before) bleibt: sie ist statisch. */
+  #exchange-outflows-panel::after { display: none; }
 }
 
 @media (forced-colors: active) {
@@ -2145,7 +2328,8 @@ main {
   .feed-chart,
   .empty,
   #fh-graph,
-  #graph {
+  #graph,
+  #exchange-outflows-panel {
     border: 1px solid CanvasText;
     box-shadow: none;
   }
@@ -2154,5 +2338,21 @@ main {
      vollständig zurück (SKILL forced_colors_css: .a6-stage::before). */
   .hx-stage::before {
     display: none;
+  }
+
+  /* Frost-Schicht der Top-10-Box: Hairline und Sheen sind reine Dekoration
+     und treten zurück (Muster .hx-stage::before oben); der Rand steht schon
+     in der CanvasText-Liste. */
+  #exchange-outflows-panel::before,
+  #exchange-outflows-panel::after {
+    display: none;
+  }
+
+  /* Shining-Word in erzwungenen Farben: background-clip:text mit
+     transparentem Text wäre unsichtbar — zurück auf CanvasText. */
+  .hx-shine-word {
+    background-image: none;
+    color: CanvasText;
+    -webkit-text-fill-color: CanvasText;
   }
 }

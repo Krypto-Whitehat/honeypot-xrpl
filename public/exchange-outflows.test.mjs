@@ -394,8 +394,12 @@ test("Verdrahtung index.html: Panel-Markup + nur existierende exout-Keys referen
   assert.ok(html.includes('id="exout-coverage"'), "Abdeckungszeitraum-Element vorhanden (Pflicht 11)");
   assert.ok(html.includes('id="exout-capped"'), "Cap-Hinweis-Element vorhanden");
   assert.ok(html.includes('id="exout-window-7d"') && html.includes('id="exout-window-30d"'), "Fenster-Umschalter vorhanden");
-  assert.ok(html.indexOf('id="exchange-outflows-panel"') < html.indexOf('id="view-history"'), "Panel liegt VOR view-history (tab-unabhängig im Dashboard)");
-  assert.ok(html.indexOf('id="exchange-outflows-panel"') > html.indexOf("console-grid"), "Panel liegt NACH dem console-grid");
+  assert.ok(html.indexOf('id="exchange-outflows-panel"') < html.indexOf('id="view-history"'), "Panel liegt VOR view-history (tab-unabhängig sichtbar)");
+  // Umzug 2026-10-07 (Kritik-Runde 3, Ask-Punkt 3): die Box liegt direkt
+  // unter der hx-stage-Bühne (über der Fold, in allen Views sichtbar) —
+  // die Render-Logik ist positionsfrei (nur getElementById, app.js).
+  assert.ok(html.indexOf('id="exchange-outflows-panel"') > html.indexOf('class="hx-stage"'), "Panel liegt NACH der hx-stage-Bühne");
+  assert.ok(html.indexOf('id="exchange-outflows-panel"') < html.indexOf("console-grid"), "Panel liegt VOR dem console-grid");
   // Jede referenzierte exout-i18n-Key muss in BEIDEN Sprachen existieren.
   const refs = [...html.matchAll(/data-i18n(?:-aria)?="(exout\.[A-Za-z0-9]+)"/g)].map((m) => m[1]);
   assert.ok(refs.length >= 8, `genug statische Keys referenziert (gefunden: ${refs.length})`);

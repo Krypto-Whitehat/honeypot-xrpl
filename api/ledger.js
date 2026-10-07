@@ -154,6 +154,12 @@ async function buildCtx() {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
     benignAccounts: new Set(config.benign_accounts || []),
+    // marketExcludes (Kritik-Runde 3, T1.7): FP-Guard der Market-Regeln
+    // (lib/detector.mjs amm-wash-swap/thin-pool-exploit/spoof-offer-cycle).
+    // Dieser Pfad hat keine Exchange-Registry-Maschinerie — Guard-Quellen
+    // sind config-benign-Konten + Köder (fail-open, dokumentierte Grenze
+    // gegenüber dem Advance-Pfad mit Registry ∪ multiUser).
+    marketExcludes: new Set([...(config.benign_accounts || []), ...baitLabels.keys()]),
     threats: new Map(),
     firstSeenAt,
     history: ledgerHistory,

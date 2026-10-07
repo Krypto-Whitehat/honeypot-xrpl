@@ -15,7 +15,7 @@
 //  - Deploy-Nachweis im Response-Header x-deploy-commit (VERCEL_GIT_COMMIT_SHA,
 //    von Vercel in Functions automatisch gesetzt) — der Commit-Claim ist ohne
 //    eigenen Version-Endpoint gegen die Live-Deployment prüfbar.
-import { ruleCatalog, DEFAULT_THRESHOLDS } from "../lib/detector.mjs";
+import { ruleCatalog, DEFAULT_THRESHOLDS, MARKET_THRESHOLDS } from "../lib/detector.mjs";
 import { PEELING_THRESHOLDS, MOTIF_THRESHOLDS } from "../lib/cluster.mjs";
 import { ENTITY_FRESH_THRESHOLDS } from "../lib/entity-resolve.mjs";
 
@@ -65,6 +65,34 @@ export const THRESHOLDS_BY_RULE = {
   },
   "peeling-chain": { ...PEELING_THRESHOLDS }, // minRatio/maxRatio/minHops/dustDrops
   "wash-cycle": { ...MOTIF_THRESHOLDS },      // V4 Motiv-Zähler (Gather-Scatter/Zyklen)
+  // Kritik-Runde 3 (Backend-Tranche T1.5): die drei Market-Regeln (AMM/DEX)
+  // tragen ihre Schwellen als DIRECTEN Re-Export aus MARKET_THRESHOLDS
+  // (lib/detector.mjs) — keine abgeschriebenen Kopien. MOTIF_THRESHOLDS ist
+  // hier der FALSCHE Ort: die Market-Schwellen leben in der Detector-Pipeline,
+  // nicht in der Cluster-Motiv-Maschinerie. Je Regel nur die Felder, die ihre
+  // Bewertung tatsächlich liest (maschinenlesbar, keine Irreführung durch
+  // fremde Schlüssel).
+  "amm-wash-swap": {
+    minFillsPerSide: MARKET_THRESHOLDS.washMinFillsPerSide,   // >= 2 Fills je Richtung (Refund-Guard)
+    conserveMin: MARKET_THRESHOLDS.washConserveMin,            // Volumenerhalt >= 90 %
+    maxDrift: MARKET_THRESHOLDS.washMaxDrift,                  // Netto-Positionsdrift <= 10 %
+    windowLedgers: MARKET_THRESHOLDS.washWindowLedgers,        // Fenster <= 150 Ledger
+    minNotionalDrops: MARKET_THRESHOLDS.washMinNotionalDrops,  // >= 1 XRP je Richtung
+  },
+  "thin-pool-exploit": {
+    minPairSamples: MARKET_THRESHOLDS.thinMinPairSamples,      // >= 5 Fills desselben Pairs im Fenster
+    minFillsPerAccount: MARKET_THRESHOLDS.thinMinFillsPerAccount, // >= 2 Fills je Konto/Pair
+    deviationMin: MARKET_THRESHOLDS.thinDeviationMin,          // >= 25 % Abweichung vom Median
+    windowLedgers: MARKET_THRESHOLDS.thinWindowLedgers,        // Fenster <= 150 Ledger
+    minNotionalDrops: MARKET_THRESHOLDS.thinMinNotionalDrops,  // >= 10 XRP Notional
+  },
+  "spoof-offer-cycle": {
+    maxCancelLedgers: MARKET_THRESHOLDS.spoofMaxCancelLedgers,           // Create->Cancel <= 75 Ledger
+    minCycles: MARKET_THRESHOLDS.spoofMinCycles,                         // >= 3 Zyklen je BookDirectory
+    minPriceLevels: MARKET_THRESHOLDS.spoofMinPriceLevels,               // >= 2 BookNode-Preislevel
+    windowLedgers: MARKET_THRESHOLDS.spoofWindowLedgers,                 // Fenster <= 300 Ledger
+    minCancelNotionalDrops: MARKET_THRESHOLDS.spoofMinCancelNotionalDrops, // >= 100 XRP Cancel-Notional
+  },
 };
 
 export default async function handler(req, res) {

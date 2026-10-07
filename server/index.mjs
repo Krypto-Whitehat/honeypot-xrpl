@@ -739,6 +739,12 @@ function localLedgerCtx() {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
     benignAccounts: new Set(config.benign_accounts || []),
+    // marketExcludes (Kritik-Runde 3, T1.7): FP-Guard der Market-Regeln
+    // (lib/detector.mjs amm-wash-swap/thin-pool-exploit/spoof-offer-cycle) —
+    // im lokalen Snapshot-Pfad: config-benign-Konten + rotierende
+    // baitLabels-Union (fail-open, dokumentierte Grenze gegenüber dem
+    // Advance-Pfad mit Exchange-Registry ∪ multiUser).
+    marketExcludes: new Set([...(config.benign_accounts || []), ...baitLabels.keys()]),
     threats: new Map(),
     firstSeenAt,
     history: localLedgerHistory,

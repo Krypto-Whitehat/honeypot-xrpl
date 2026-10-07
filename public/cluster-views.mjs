@@ -49,6 +49,10 @@ export function serverClustersFromView(view) {
       firstSeen: c?.firstSeen ?? null,
       lastSeen: c?.lastSeen ?? null,
       peelingChains: Array.isArray(c?.peelingChains) ? c.peelingChains : [],
+      // fieldsCapped (Kritik-Runde 3): Server-Signal der Write-Pfad-Feldkappe
+      // (projectFlowStateView, lib/flow-state.mjs) — nur gesetzt wenn gekappt;
+      // die Karte kennzeichnet damit 'distinctAccounts je gesehen' ehrlich.
+      ...(c?.fieldsCapped === true ? { fieldsCapped: true } : {}),
     };
   });
 }
@@ -126,6 +130,9 @@ export function unionClusterWith(windowCluster, persistedCluster) {
       ...(Array.isArray(w.peelingChains) ? w.peelingChains : []),
       ...(Array.isArray(p.peelingChains) ? p.peelingChains : []),
     ],
+    // Kap-Signal erhält sich in der Union (persistierter Zwilling gekappt ODER
+    // Fenster-Cluster gekappt -> Karte kennzeichnet), Muster Zähler-max.
+    ...(w.fieldsCapped === true || p.fieldsCapped === true ? { fieldsCapped: true } : {}),
   };
 }
 

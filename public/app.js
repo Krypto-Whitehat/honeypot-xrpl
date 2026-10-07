@@ -105,6 +105,16 @@ import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
  * als Karte verschwinden — Live-Befund 2026-10-06); SEV_RANK single source
  * aus dem Modul (Sortierung + Severity-Union). */
 import { SEV_RANK, serverClustersFromView, mergeClusterViews } from './cluster-views.mjs';
+/* Knoten-Deckel der Live-Bühne + Zeitfenster-Filter (Kritik-Runde 3 2026-10-07,
+ * Archiv-Graph-Parität): DOM-freier Shared-Helfer (Muster cluster-views.mjs) —
+ * dreiphasiger Budget-Satz (Evidenz-Floor → Top-Kanten-Endpunkte → Auffüllung)
+ * statt lexikografischem Ausschnitt, Kanten-Totalordnung als Spiegel von
+ * topKEdges, Fensterfilter/Bestandstiefe für die ehrliche truncated-
+ * Kennzeichnung der Fenster 24h/3d/7d/30d/90d. */
+import {
+  FEED_RANGES, FEED_RANGE_MS, BLOCK_WINDOW_MAX_RANGE,
+  selectCappedNodes, edgesInWindow, oldestEdgeMs,
+} from './graph-budget.mjs';
 /* Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07): DOM-freie Aggregation
  * über die BESTEHENDE /api/flow-state-View (7 d + 30 d in einem Durchlauf,
  * +0 Requests/+0 Functions) plus Zeilen-Markup über injizierte Host-Gates
@@ -1233,24 +1243,22 @@ function initGraph() {
  * aggregiert genau diese nodesDS — ein Cap dort würde Cluster-Bubbles auf
  * die Top-N-Teilmenge verzerren. Deshalb uncapped aus applyClustering,
  * capped nur an den Live-Aufrufstellen (renderLiveGraph/setGraphTab).
- * Auswahl nach Schwere (malicious > suspect > info), dann Drops-Summe. */
+ * Auswahl: dreiphasiger Budget-Satz in ./graph-budget.mjs (Kritik-Runde 3 —
+ * Archiv-Parität): Phase A Evidenz-Floor (Rolle source/collector/drainer ODER
+ * severity malicious, Rang severity desc → roleRank desc → id asc, Deckel
+ * 120), Phase B Endpunkte der volumen-stärksten Kanten in topKEdges-
+ * Totalordnung, Phase C Auffüllung nach Schwere → Drops-Summe → Adresse.
+ * Der alte reine Schwere/Drops-Sort degenerierte im Archiv-Pfad (alle
+ * malicious, keine Drops) zum lexikografischen Ausschnitt: 1/975 Kanten,
+ * 596/600 Knoten 'unknown'. */
 const LIVE_GRAPH_MAX_NODES = 600;
-const SEV_CAP_RANK = { malicious: 2, suspect: 1, info: 0 };
 function updateRawGraph(cg, maxNodes = null) {
   if (!network) return;
   let rawNodes = Array.isArray(cg.nodes) ? cg.nodes : [];
   const rawEdgesAll = Array.isArray(cg.edges) ? cg.edges : [];
   let cappedNodeIds = null;
   if (Number.isInteger(maxNodes) && maxNodes > 0 && rawNodes.length > maxNodes) {
-    rawNodes = [...rawNodes].sort((a, b) => {
-      const sa = SEV_CAP_RANK[String(a?.severity ?? 'info')] ?? 0;
-      const sb = SEV_CAP_RANK[String(b?.severity ?? 'info')] ?? 0;
-      if (sa !== sb) return sb - sa;
-      const da = Math.max(0, Number(a?.inDrops ?? 0)) + Math.max(0, Number(a?.outDrops ?? 0));
-      const db = Math.max(0, Number(b?.inDrops ?? 0)) + Math.max(0, Number(b?.outDrops ?? 0));
-      if (da !== db) return db - da;
-      return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
-    }).slice(0, maxNodes);
+    rawNodes = selectCappedNodes(rawNodes, rawEdgesAll, maxNodes);
     // Kanten hängen an Knoten: ohne Filter würden Kanten auf gekappte
     // Knoten im DataSet schweben (vis-Warnung, Phantom-Kanten).
     cappedNodeIds = new Set(rawNodes.map((n) => String(n.id)));
@@ -1424,14 +1432,66 @@ function openAllClusters() {
   }
 }
 
+/* Zeitfenster der Bühne (Kritik-Runde 3, Ask-Punkt 2): im Archiv-Modus greift
+ * der gewählte Fensterwert (24h/3d/7d/30d/90d) auf die Kanten zu — nur die
+ * vis-Bühne, nie lastClusterGraph selbst (Drilldown, Karten und Export halten
+ * bewusst den vollen Bestand). Kanten ohne parsebares closeTime bleiben
+ * (kein Zeitanspruch, Cluster-Evidenz — graph-budget.mjs). Der Cluster-Tab
+ * bleibt ungefiltert: clustering.cluster aggregiert die volle Knotenmenge. */
+function stageGraph(cg) {
+  if (!cg || feedMode !== 'history') return cg;
+  const windowMs = FEED_RANGE_MS[feedRange];
+  if (windowMs == null) return cg;
+  const kept = edgesInWindow(cg.edges, windowMs, Date.now());
+  if (kept.length === (Array.isArray(cg.edges) ? cg.edges.length : 0)) return cg;
+  return { ...cg, edges: kept };
+}
+
+/* Ehrliche truncated-Kennzeichnung des Bühnenfensters: greift der gewählte
+ * Wert über den vorhandenen Bestand hinaus (älteste Kantenzeit jünger als das
+ * Fenster), sagt die Notiz es — ohne Bestand/Zeitstempel wird nichts
+ * behauptet (still ausgeblendet, kein Pauschal-Verdacht). */
+function renderGraphWindowNote() {
+  const el = document.getElementById('graph-window-note');
+  if (!el) return;
+  if (feedMode !== 'history' || !lastClusterGraph || !Array.isArray(lastClusterGraph.edges)) {
+    el.hidden = true;
+    return;
+  }
+  const windowMs = FEED_RANGE_MS[feedRange];
+  const oldest = oldestEdgeMs(lastClusterGraph.edges);
+  if (windowMs == null || oldest == null || Date.now() - oldest >= windowMs) {
+    el.hidden = true;
+    return;
+  }
+  el.textContent = t('graph.windowTruncated', {
+    range: t('range.' + feedRange),
+    depth: fmtDateTime(oldest),
+  });
+  el.hidden = false;
+}
+
+/* Archiv-Notiz mit den ehrlichen Fenstern (Kritik-Runde 3, T2.1): im
+ * Archiv-Modus sichtbar — Retention und Kanten-/Rollen-Semantik des
+ * persistierten Bestands; im Live-Modus ausgeblendet. */
+function renderGraphArchiveNote() {
+  const el = document.getElementById('graph-archive-note');
+  if (!el) return;
+  if (feedMode !== 'history') { el.hidden = true; return; }
+  el.textContent = t('graph.noteArchive');
+  el.hidden = false;
+}
+
 function renderLiveGraph(cg) {
   if (!cg) return;
+  renderGraphWindowNote(); // Fenster-Notiz bei jedem Daten-Tick (auch ohne vis-Netz)
+  renderGraphArchiveNote();
   if (!network) { ensureVisGraph(); return; } // eintreffende Daten: lazy-Laden anstoßen; ensureVisGraph rendert lastClusterGraph nach dem Init selbst
   if (activeGraphTab === 'cluster') {
     applyClustering(cg); // Cluster-Pfad bleibt uncapped: clustering.cluster aggregiert genau diese nodesDS
     return;
   }
-  updateRawGraph(cg, LIVE_GRAPH_MAX_NODES); // Live-Bühne: Knoten-Deckel (Physik-Einbruch-Schutz)
+  updateRawGraph(stageGraph(cg), LIVE_GRAPH_MAX_NODES); // Live-Bühne: Fensterfilter + Knoten-Deckel (Physik-Einbruch-Schutz)
 }
 
 function setGraphTab(tab) {
@@ -1485,7 +1545,7 @@ function setGraphTab(tab) {
     emptyEl.hidden = true;
     openAllClusters();
     network.setOptions({ physics: PHYSICS_LIVE });
-    if (lastClusterGraph) updateRawGraph(lastClusterGraph, LIVE_GRAPH_MAX_NODES); // Live-Bühne: capped
+    if (lastClusterGraph) updateRawGraph(stageGraph(lastClusterGraph), LIVE_GRAPH_MAX_NODES); // Live-Bühne: Fensterfilter + capped
   }
 }
 
@@ -1746,6 +1806,16 @@ function clusterCardHtml(c, index) {
     ? `<div class="cluster-transit-note">${esc(t('cluster.transitNote'))}</div>`
     : '';
 
+  // Kap-Kennzeichnung (Kritik-Runde 3): die Write-Pfad-Feldkappe des Servers
+  // (FLOW_STATE_MEMBER_CAP 300, lib/flow-state.mjs) hat memberAddresses/
+  // rolesByAddress komprimiert — distinctAccounts ist dann der je gesehene
+  // Bestand (Monotonie-Fix lib/ledger-walk.mjs), nicht die aktuelle
+  // Mitgliederliste. Ehrliche Fußnote, NUR bei belegter Kappung
+  // (fieldsCapped-Signal aus projectFlowStateView).
+  const cappedHtml = c.fieldsCapped === true
+    ? `<div class="cluster-capped-note">${esc(t('cluster.membersCapped', { n: fmtNum(c.distinctAccounts ?? 0) }))}</div>`
+    : '';
+
   // Schaltflächen-Semantik für Screenreader: die Karte öffnet das Drilldown-
   // Modal (Klick + Enter/Leertaste) — deshalb role="button" plus sprechendes
   // aria-label (Befund 2026-09-29).
@@ -1779,6 +1849,7 @@ function clusterCardHtml(c, index) {
       ${transitHtml}
       <div class="cluster-roles">${chips}</div>
       ${metricsHtml}
+      ${cappedHtml}
       ${chainHtml}
       <div class="cluster-times">
         <span>${esc(t('cluster.firstSeen'))}${esc(fmtClock(c.firstSeen))}</span>
@@ -2214,7 +2285,7 @@ async function rebuildClusterGraph() {
 let lastLedgerAt = 0;
 let feedMode = 'history';           // Startwert bleibt 'history' (Serverdaten als Fail-closed-Fallback);
                                     // der Live-Tilt erfolgt in der Rate-Gate-Importkette (Zeile ~66)
-let feedRange = '24h';              // Fenster des Server-Modus (24h|3d|7d)
+let feedRange = '24h';              // Fenster des Server-Modus (24h|3d|7d|30d|90d)
 let liveMode = 'init';              // Live-Modus intern: 'init' | 'wss'
 // honeycluster drosselt JSON-Kommandos (Nutzer-Angabe: 10 req/s steady,
 // Burst 50/5 s, 20 Start-Tokens). Bei tooBusy/slowDown pausiert die
@@ -2606,7 +2677,17 @@ function windowTotals(buckets) {
 
 function renderWindowNote() {
   const el = document.getElementById('feed-note');
-  if (feedMode !== 'history' || !windowData) { el.hidden = true; return; }
+  if (feedMode !== 'history' || !windowData) {
+    // 30d/90d: kein Fenster-Fetch (Retention 7 d) — die ehrliche Notiz steht
+    // trotzdem, auch ohne windowData (sonst fiele sie im Leerzustand weg).
+    if (feedMode === 'history' && !FEED_RANGES.slice(0, 3).includes(feedRange)) {
+      el.textContent = t('feed.windowBeyondBlockRetention');
+      el.hidden = false;
+      return;
+    }
+    el.hidden = true;
+    return;
+  }
   if (windowData.reason === 'Persistenz nicht konfiguriert') {
     el.textContent = t('feed.persistOff');
     el.hidden = false;
@@ -2687,10 +2768,14 @@ function renderWindowFeed() {
   const flagged = windowData && Array.isArray(windowData.flagged) ? windowData.flagged : [];
   feed.innerHTML = '';
   // Leer-Text des Feeds folgt dem Modus (data-i18n wird mitgeschrieben, damit
-  // applyStatic bei Sprachwechsel den passenden Key erwischt).
+  // applyStatic bei Sprachwechsel den passenden Key erwischt). 30d/90d: das
+  // Block-Fenster endet bei 7 d — der Leer-Text sagt das ehrlich statt auf
+  // Füllung zu verweisen.
   const emptyEl = document.getElementById('feed-empty');
-  const emptyKey = windowData && windowData.reason === 'Persistenz nicht konfiguriert'
-    ? 'feed.persistOff' : 'feed.serverEmpty';
+  const emptyKey = !FEED_RANGES.slice(0, 3).includes(feedRange)
+    ? 'feed.windowBeyondBlockRetention'
+    : (windowData && windowData.reason === 'Persistenz nicht konfiguriert'
+      ? 'feed.persistOff' : 'feed.serverEmpty');
   emptyEl.setAttribute('data-i18n', emptyKey);
   emptyEl.textContent = t(emptyKey);
   // textContent räumt die Leerzustands-Illustration ab — idempotent neu mounten.
@@ -2730,11 +2815,47 @@ async function applyFlowStateView(view) {
   const nodes = [];
   for (const c of clusters) {
     const sevByAddr = c?.severityByAddress && typeof c.severityByAddress === 'object' ? c.severityByAddress : {};
+    // Knoten-Volumen aus den Cluster-Kanten (Kritik-Runde 3, Archiv-Parität):
+    // der Bühnen-Deckel rankt sonst gegen null-Drops und wählt lexikografisch.
+    // Dieselbe Summenregel wie der Live-Pfad (lib/cluster.mjs buildClusterGraph:
+    // outDrops je Kanten-Start, inDrops je Kanten-Ziel; Null/IOU zählt 0).
+    const inDrops = new Map();
+    const outDrops = new Map();
+    for (const e of c.edges) {
+      if (!e || !e.from || !e.to) continue;
+      const amt = Number.isFinite(Number(e.amountDrops)) ? Math.max(0, Number(e.amountDrops)) : 0;
+      if (amt > 0) {
+        outDrops.set(String(e.from), (outDrops.get(String(e.from)) ?? 0) + amt);
+        inDrops.set(String(e.to), (inDrops.get(String(e.to)) ?? 0) + amt);
+      }
+    }
+    const nodeIds = new Set();
     for (const [addr, role] of Object.entries(c.rolesByAddress)) {
       // Polling-Pfad: severity aus der serverseitig berechneten
       // severityByAddress (Malicious/Suspect/Info stimmen zwischen Polling-
       // und WSS-Pfad überein) statt hart 'info'.
-      nodes.push({ id: addr, role: ROLE_COLORS[role] ? role : 'unknown', clusterId: c.id, severity: sevByAddr[addr] ?? 'info' });
+      nodes.push({
+        id: addr, role: ROLE_COLORS[role] ? role : 'unknown', clusterId: c.id,
+        severity: sevByAddr[addr] ?? 'info',
+        inDrops: inDrops.get(String(addr)) ?? 0, outDrops: outDrops.get(String(addr)) ?? 0,
+      });
+      nodeIds.add(String(addr));
+    }
+    // Kanten-Endpunkte ohne Rollen-Eintrag (capClusterFields kappt Rollen auf
+    // 300 Adressen, Kanten bleiben unangetastet — lib/flow-state.mjs:345):
+    // ohne diese Knoten fielen ihre Kanten im vis-Netz und im Drilldown
+    // (beide Enden müssen Knoten sein). Rolle 'unknown' ist ehrlich — sie
+    // erfindet keine Rolle, der Knoten bleibt als Evidenz-Endpunkt sichtbar.
+    for (const e of c.edges) {
+      if (!e || !e.from || !e.to) continue;
+      for (const addr of [String(e.from), String(e.to)]) {
+        if (nodeIds.has(addr)) continue;
+        nodeIds.add(addr);
+        nodes.push({
+          id: addr, role: 'unknown', clusterId: c.id, severity: sevByAddr[addr] ?? 'info',
+          inDrops: inDrops.get(addr) ?? 0, outDrops: outDrops.get(addr) ?? 0,
+        });
+      }
     }
   }
   const edges = [];
@@ -2744,6 +2865,13 @@ async function applyFlowStateView(view) {
       edges.push({
         from: String(e.from), to: String(e.to), type: String(e.type || 'Sonstige'),
         txHash: e.txHash ? String(e.txHash) : undefined,
+        // Zeit-/Volumenfelder der Server-View durchreichen (Kritik-Runde 3):
+        // closeTime speist den Zeitfenster-Filter (24h/3d/7d/30d/90d),
+        // amountDrops/ledgerSeq die Kanten-Totalordnung des Bühnen-Deckels
+        // (Spiegel von topKEdges, lib/ledger-walk.mjs).
+        ...(Number.isFinite(Number(e.amountDrops)) ? { amountDrops: Number(e.amountDrops) } : {}),
+        ...(Number.isFinite(Number(e.ledgerSeq)) ? { ledgerSeq: Number(e.ledgerSeq) } : {}),
+        ...(typeof e.closeTime === 'string' && e.closeTime ? { closeTime: e.closeTime } : {}),
         // Tag-Felder der Server-View (viewEdge, lib/flow-state.mjs) durchreichen —
         // Kanten-Tooltip und Ketten-Chips lesen sie; ohne Feld: unverändert.
         ...(e.toTag != null ? { toTag: e.toTag } : {}),
@@ -2918,6 +3046,18 @@ function bindExchangeOutflows() {
 }
 
 async function pollBlockWindow() {
+  // 30d/90d werden NICHT gegen das Block-Fenster abgefragt: dessen Retention
+  // endet bei 7 d (lib/block-window.mjs:79; api/flow-state.js lehnt 30d/90d
+  // dort mit 400 ab — ein Fetch wäre ein Fenster-Versprechen auf nicht mehr
+  // existierende Daten). Der Feed geht in den ehrlichen Leerzustand mit
+  // Retention-Notiz; der persistierte Fraud-Bestand bleibt über Graph,
+  // Karten und Drilldown sichtbar (60-s-flow-state-Poll).
+  if (!FEED_RANGES.slice(0, 3).includes(feedRange)) {
+    windowData = null;
+    windowRenderSig = null;
+    renderWindowFeed();
+    return;
+  }
   const res = await fetch('/api/block-window?range=' + encodeURIComponent(feedRange), { cache: 'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   const body = await res.json();
@@ -2997,6 +3137,12 @@ function buildPersistedClusterView(c, at) {
     .map((e) => ({
       from: String(e.from), to: String(e.to), type: String(e.type || 'Sonstige'),
       txHash: e.txHash ? String(e.txHash) : undefined,
+      // Zeit-/Volumenfelder wie in applyFlowStateView durchreichen (Kritik-
+      // Runde 3: Kanten-Totalordnung und Fensterfilter lesen sie); ohne Feld:
+      // unverändert.
+      ...(Number.isFinite(Number(e.amountDrops)) ? { amountDrops: Number(e.amountDrops) } : {}),
+      ...(Number.isFinite(Number(e.ledgerSeq)) ? { ledgerSeq: Number(e.ledgerSeq) } : {}),
+      ...(typeof e.closeTime === 'string' && e.closeTime ? { closeTime: e.closeTime } : {}),
       // Tag-Felder wie in applyFlowStateView durchreichen (Kanten-Tooltip/
       // Ketten-Chips/Export lesen sie); ohne Feld: unverändert.
       ...(e.toTag != null ? { toTag: e.toTag } : {}),
@@ -3557,9 +3703,18 @@ function bindFeed() {
   });
   document.getElementById('feed-range').addEventListener('change', (e) => {
     const v = String(e.target.value ?? '24h');
-    feedRange = ['24h', '3d', '7d'].includes(v) ? v : '24h';
+    // Fünf Fenster (Kritik-Runde 3, Ask-Punkt 2): 24h/3d/7d speisen den
+    // Block-Feed (Retention 7 d, lib/block-window.mjs), 30d/90d den
+    // persistierten Fraud-Bestand (Flow-State 30 d malicious / Archiv
+    // 180 d registry-verknüpft, Abfragbarkeit Default 62 d) — über die
+    // Bühnen-Fensterfilter und die truncated-Notizen ehrlich gekennzeichnet.
+    feedRange = FEED_RANGES.includes(v) ? v : '24h';
     windowRenderSig = null; // Range-Wechsel: immer neu rendern
-    if (feedMode === 'history') void serverPollTick();
+    if (feedMode === 'history') {
+      renderGraphWindowNote();
+      if (lastClusterGraph) renderLiveGraph(lastClusterGraph); // Bühne neu gefiltert
+      void serverPollTick();
+    }
   });
   document.getElementById('feed-more').addEventListener('click', () => {
     feedVisibleCount += FEED_STEP;

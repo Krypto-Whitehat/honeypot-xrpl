@@ -94,7 +94,7 @@
        Glow auf jeder Karte). -->
   <section class="hx-stage" aria-labelledby="hx-title">
     <div class="hx-stage-copy">
-      <h2 class="hx-title" id="hx-title" data-i18n="hero.title">Live threat radar for the XRP Ledger</h2>
+      <h2 class="hx-title hx-shine-word" id="hx-title" data-i18n="hero.title">Live threat radar for the XRP Ledger</h2>
       <p class="hx-lead" data-i18n="hero.lead">Every validated ledger block is analyzed in real time — findings and clusters, live from the public ledger.</p>
     </div>
     <div class="hx-kpis" data-i18n-aria="hero.kpisAria">
@@ -102,6 +102,39 @@
       <span class="hx-kpi hx-kpi-suspect"><span class="hx-kpi-value" id="hx-kpi-suspect">0</span><span class="hx-kpi-label" data-i18n="hero.kpiSuspect">suspect</span></span>
       <span class="hx-kpi hx-kpi-txs"><span class="hx-kpi-value" id="hx-kpi-txs">0</span><span class="hx-kpi-label" data-i18n="hero.kpiTxs">checked txs</span></span>
     </div>
+  </section>
+
+  <!-- Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07): Client-
+       Aggregation aus der bestehenden /api/flow-state-View (60-s-Poll,
+       public/exchange-outflows.mjs + app.js renderExchangeOutflows) —
+       bewusst KEIN neuer api/*-Endpoint (Vercel-Hobby-Limit 12 Functions).
+       Platzierung direkt unter der hx-stage-Bühne, VOR der view-nav
+       (Kritik-Runde 3, Ask-Punkt 3): die Box liegt damit über der Fold und
+       ist in allen Views sichtbar (setView blendet nur die view-*Panels;
+       die Render-Logik ist positionsfrei — nur getElementById). Grenzen
+       stehen ehrlich in der Fußnote (#exout-note via data-i18n), der reale
+       Abdeckungszeitraum wird dynamisch gerendert (#exout-coverage), der
+       Cap-Hinweis nur bei belegter Kappung (#exout-capped). Umschalter
+       7/30 Tage im aria-pressed-Muster der Cluster-Dichte. Optik (Design-
+       Tranche): die Box ist die einzige Frost-/Glas-Schicht der Console
+       (style.css #exchange-outflows-panel — Frost-Füllung + Blur über der
+       Bühne, Hairline-Verlauf oben, minimales Sheen-Band; alle Werte als
+       --a6-*-Token-Paare für beide Themes), ihr Titel trägt den dezenten
+       Shining-Word (reduced-motion- und forced-colors-fest). -->
+  <section class="panel" id="exchange-outflows-panel" aria-labelledby="exout-title">
+    <div class="panel-head">
+      <h2 class="hx-shine-word" id="exout-title" data-i18n="exout.title">Top exchanges receiving drained funds</h2>
+      <div class="graph-tabs exout-window-tabs" role="group" id="exout-window" data-i18n-aria="exout.windowAria" aria-label="Coverage window of the exchange inflows">
+        <button type="button" class="graph-tab exout-window-btn" id="exout-window-7d" aria-pressed="true" data-i18n="exout.window7">7 days</button>
+        <button type="button" class="graph-tab exout-window-btn" id="exout-window-30d" aria-pressed="false" data-i18n="exout.window30">30 days</button>
+      </div>
+    </div>
+    <p class="graph-disclaimer" data-i18n="exout.subtitle">Where the most drained funds land — the exchanges themselves are not the perpetrators.</p>
+    <ol class="exchange-outflow-list" id="exchange-outflow-list" data-i18n-aria="exout.aria" aria-label="Top 10 exchanges by incoming drops from drainer context" hidden></ol>
+    <p class="empty" id="exout-empty" data-i18n="exout.empty" hidden>No inflows from drainer context to registry exchanges in the selected window yet.</p>
+    <p class="graph-note" id="exout-capped" hidden></p>
+    <p class="graph-note" id="exout-coverage" hidden></p>
+    <p class="graph-note" data-i18n="exout.note">Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.</p>
   </section>
 
   <nav class="view-nav graph-tabs" role="tablist" data-i18n-aria="nav.aria">
@@ -151,7 +184,7 @@
                Archiv-Hinweis darunter (#feed-archive-hint, key mode.archiveHint)
                — title/aria der Buttons werden damit um die Modus-Erklärung
                ergänzt (Persistenz-Scout 2026-10-06: „Archiv leer“-Verwirrung). -->
-          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-history" aria-selected="false" aria-describedby="feed-archive-hint" data-i18n="mode.archive" data-i18n-title="mode.archiveAria" title="Show the persisted block window (24 h / 3 d / 7 d) from the server">Archive</button>
+          <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-history" aria-selected="false" aria-describedby="feed-archive-hint" data-i18n="mode.archive" data-i18n-title="mode.archiveAria" title="Show the persisted block window (24 h / 3 d / 7 d) from the server, or the fraud-state windows 30 d / 90 d">Archive</button>
           <button type="button" class="graph-tab feed-mode-tab" role="tab" id="feed-mode-live" aria-selected="true" aria-describedby="feed-archive-hint" data-i18n="mode.live" data-i18n-title="mode.liveAria" title="Opt-in: direct WSS to honeycluster.io – one ledger command per block, no sampling">Live</button>
         </div>
         <label class="filter-label" for="feed-range" data-i18n="range.label">Window</label>
@@ -159,9 +192,11 @@
           <option value="24h" data-i18n="range.24h">24 h</option>
           <option value="3d" data-i18n="range.3d">3 d</option>
           <option value="7d" data-i18n="range.7d">7 d</option>
+          <option value="30d" data-i18n="range.30d">30 d</option>
+          <option value="90d" data-i18n="range.90d">90 d</option>
         </select>
       </div>
-      <p class="graph-note" id="feed-archive-hint" data-i18n="mode.archiveHint">Archive mode: persisted block window (24 h / 3 d / 7 d) from the server — also available when no live feed is connected.</p>
+      <p class="graph-note" id="feed-archive-hint" data-i18n="mode.archiveHint">Archive mode: persisted block window (24 h / 3 d / 7 d) from the server — the 30 d / 90 d windows show the persisted fraud state instead. Also available when no live feed is connected.</p>
 
       <ol class="block-feed" id="block-feed" data-i18n-aria="feed.aria"></ol>
       <p class="empty" id="feed-empty" data-i18n="feed.empty">Waiting for the first validated ledger …</p>
@@ -197,7 +232,7 @@
         <div class="console-col">
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
-        <h2 id="graph-title" data-i18n="graph.title">Activity Graph</h2>
+        <h2 class="hx-shine-word" id="graph-title" data-i18n="graph.title">Activity Graph</h2>
         <!-- Export-Buttons (A6/C1): bewusst innerhalb des panel-head, aber
              AUSSERHALB von div.graph-tabs role="tablist" unten — die
              Tablist-Aria-Struktur (#tab-live/#tab-cluster/#tab-globe) bleibt
@@ -244,6 +279,16 @@
       </div>
       <p class="graph-disclaimer" data-i18n="graph.disclaimer">Roles (source, drainer, collector, relay) are heuristics based on in/out degree and money flow – not proof of guilt.</p>
 
+      <!-- Ehrliche Fenster-Notiz (Kritik-Runde 3): greift das gewählte Zeit-
+           fenster (24h/3d/7d/30d/90d) über den vorhandenen Bestand hinaus,
+           sagt dieser Status es mit der ältesten Evidenz-Zeit — nie ein
+           stiller Ausschnitt. app.js renderGraphWindowNote füllt/versteckt. -->
+      <p class="graph-note" id="graph-window-note" role="status" aria-live="polite" hidden></p>
+      <!-- Archiv-Notiz (Kritik-Runde 3): ehrliche Fenster/Retention des
+           persistierten Bestands, nur im Archiv-Modus sichtbar
+           (app.js renderGraphArchiveNote). -->
+      <p class="graph-note" id="graph-archive-note" hidden></p>
+
       <div id="graph" data-i18n-aria="graph.aria"></div>
       <div id="globe" data-i18n-aria="globe.aria" hidden></div>
 
@@ -256,33 +301,6 @@
     </section>
         </div>
       </div>
-
-      <!-- Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07): Client-
-           Aggregation aus der bestehenden /api/flow-state-View (60-s-Poll,
-           public/exchange-outflows.mjs + app.js renderExchangeOutflows) —
-           bewusst KEIN neuer api/*-Endpoint (Vercel-Hobby-Limit 12 Functions).
-           Platzierung NACH dem console-grid, VOR view-history: die Box ist
-           damit tab-unabhängig sichtbar (die cluster-list ist tab-abhängig
-           hidden). Grenzen stehen ehrlich in der Fußnote (#exout-note via
-           data-i18n), der reale Abdeckungszeitraum wird dynamisch gerendert
-           (#exout-coverage), der Cap-Hinweis nur bei belegter Kappung
-           (#exout-capped). Umschalter 7/30 Tage im aria-pressed-Muster der
-           Cluster-Dichte. -->
-      <section class="panel" id="exchange-outflows-panel" aria-labelledby="exout-title">
-        <div class="panel-head">
-          <h2 id="exout-title" data-i18n="exout.title">Top exchanges receiving drained funds</h2>
-          <div class="graph-tabs exout-window-tabs" role="group" id="exout-window" data-i18n-aria="exout.windowAria" aria-label="Coverage window of the exchange inflows">
-            <button type="button" class="graph-tab exout-window-btn" id="exout-window-7d" aria-pressed="true" data-i18n="exout.window7">7 days</button>
-            <button type="button" class="graph-tab exout-window-btn" id="exout-window-30d" aria-pressed="false" data-i18n="exout.window30">30 days</button>
-          </div>
-        </div>
-        <p class="graph-disclaimer" data-i18n="exout.subtitle">Where the most drained funds land — the exchanges themselves are not the perpetrators.</p>
-        <ol class="exchange-outflow-list" id="exchange-outflow-list" data-i18n-aria="exout.aria" aria-label="Top 10 exchanges by incoming drops from drainer context" hidden></ol>
-        <p class="empty" id="exout-empty" data-i18n="exout.empty" hidden>No inflows from drainer context to registry exchanges in the selected window yet.</p>
-        <p class="graph-note" id="exout-capped" hidden></p>
-        <p class="graph-note" id="exout-coverage" hidden></p>
-        <p class="graph-note" data-i18n="exout.note">Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.</p>
-      </section>
     </div>
 
     <section id="view-history" class="panel" role="tabpanel" aria-labelledby="view-tab-history" hidden>

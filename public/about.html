@@ -71,13 +71,13 @@
       <div class="about-subsection">
         <h3 data-i18n="about.rolesTitle">Roles in the cluster graph</h3>
         <dl class="about-defs">
-          <dt data-i18n="about.roleDrainerT">Drainer</dt>
+          <dt class="hx-shine-word" data-i18n="about.roleDrainerT">Drainer</dt>
           <dd data-i18n="about.roleDrainerD">An account funded by at least two different senders that forwards at least 90 % of its inflow to a single target in one payment — the typical pattern of a victim account being swept.</dd>
-          <dt data-i18n="about.roleCollectorT">Collector</dt>
+          <dt class="hx-shine-word" data-i18n="about.roleCollectorT">Collector</dt>
           <dd data-i18n="about.roleCollectorD">A collection account with at least three inflows from different senders (at least one of them flagged), at most two outflows and clear accumulation — where the money gets bundled.</dd>
-          <dt data-i18n="about.roleSourceT">Source</dt>
+          <dt class="hx-shine-word" data-i18n="about.roleSourceT">Source</dt>
           <dd data-i18n="about.roleSourceD">An account with at least three small outgoing payments (at most 0.1 XRP each) to flagged targets — a typical sender of dust and lure payments.</dd>
-          <dt data-i18n="about.roleRelayT">Relay</dt>
+          <dt class="hx-shine-word" data-i18n="about.roleRelayT">Relay</dt>
           <dd data-i18n="about.roleRelayD">A pass-through account with balanced inflow and outflow (difference at most 50 % of the larger value) — a waypoint for the money, not an offender by itself.</dd>
         </dl>
       </div>
@@ -104,8 +104,8 @@
           <dd data-i18n="about.patKnownBadD">When a transaction touches an address from the threat list (curated and derived from the honeypot history), this is reported as a hit — direct account or payment contact as malicious, mere trustline or NFT positions only as suspect.</dd>
         </dl>
       </div>
-      <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds twelve rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts and offer spam. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
-      <p class="graph-note" data-i18n="about.detectApi">Every threshold of the twelve rules is machine-readable in the dashboard's rules catalog (thresholds per rule), and the deployed commit is reported in the x-deploy-commit response header of the same endpoint.</p>
+      <p class="graph-note" data-i18n="about.detectNote">The engine rule catalog holds fifteen rules — besides the ones above, among others memo phishing (URLs and seed patterns in payment memos), dusting (mini XRP to fresh accounts), fake NFT fraud, airdrop TrustSet spam, payment bursts, offer spam, AMM washing, thin-pool exploits and spoof offer cycles. Every rule carries a severity; all assignments are heuristics, not proof of guilt.</p>
+      <p class="graph-note" data-i18n="about.detectApi">Every threshold of the rules with numeric thresholds is machine-readable in the dashboard's rules catalog (thresholds per rule), and the deployed commit is reported in the x-deploy-commit response header of the same endpoint.</p>
     </section>
 
     <section class="panel" aria-labelledby="about-glossary-title">

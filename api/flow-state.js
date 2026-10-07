@@ -143,12 +143,24 @@ const baitLabels = new Map();
 // 180 d archiviert, jenseits von ARCHIVE_MAX_DAY_BLOCKS * ARCHIVE_QUERY_DAYS
 // (Default 62 d) sind sie über diese Route nicht erreichbar — die
 // Retention übersteigt die Abfragbarkeit.
+//
+// RANGE-Parameter (Kritik-Runde 3, Ask-Punkt 4): ?range=30d|90d steuert die
+// Lese-Tiefe DIESER Route in Tagen (Default: bisheriges Verhalten — lesen bis
+// Fensterabdeckung oder Tages-Kappe). 30 d = 1 Block à 31 Tagen (bei Default-
+// Kappe immer lesbar — die 30-Tage-malicious-Archiv-Retention ist damit voll
+// abfragbar). 90 d = 3 Blöcke; bei Default ARCHIVE_MAX_DAY_BLOCKS=2 werden
+// ehrlich nur 62 d gelesen und truncated=true gemeldet (queryDays = real
+// gelesene Tage) — die 90 d sind erst mit ENV ARCHIVE_MAX_DAY_BLOCKS>=3 voll
+// abfragbar. EHRLICHE OBERGRENZE der block-window-Route: dort bleiben nur
+// 24h|3d|7d (Block-Fenster-Retention 7 d, lib/block-window.mjs) — 30d/90d
+// wären dort ein Fenster-Versprechen auf Daten, die es nicht mehr gibt.
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
 const ARCHIVE_QUERY_DAYS = 31;
 const ARCHIVE_MAX_DAY_BLOCKS = (() => {
   const n = Number(process.env.ARCHIVE_MAX_DAY_BLOCKS);
   return Number.isFinite(n) && n >= 1 ? Math.min(6, Math.floor(n)) : 2;
 })();
+const ARCHIVE_RANGES = { "30d": 30, "90d": 90 }; // Tage (route=archive)
 const ARCHIVE_CACHE_MS = 60000;
 const archiveCache = new Map(); // key -> { time, body }
 
@@ -181,7 +193,18 @@ async function handleArchive(req, res) {
       reason: "Persistenz nicht konfiguriert",
     });
   }
-  const cacheKey = `${address}|${from}|${to}`;
+  // range (Kritik-Runde 3): 30d/90d steuert die Lese-Tiefe; ungültiger Wert
+  // -> 400 (Muster block-window-Zweig :258-261). Ohne range bisheriges
+  // Verhalten (bitgleich, Default-Kappe ARCHIVE_MAX_DAY_BLOCKS).
+  const rawRange = String(req?.query?.range ?? "").trim();
+  let rangeDays = null;
+  if (rawRange) {
+    rangeDays = ARCHIVE_RANGES[rawRange];
+    if (rangeDays == null) {
+      return res.status(400).json({ error: "Ungültiger range (30d|90d)." });
+    }
+  }
+  const cacheKey = `${address}|${from}|${to}|${rawRange}`;
   const now = Date.now();
   const cached = archiveCache.get(cacheKey);
   if (cached && now - cached.time < ARCHIVE_CACHE_MS) {
@@ -191,11 +214,16 @@ async function handleArchive(req, res) {
     // Rückwärts-Lesen in Blöcken à ARCHIVE_QUERY_DAYS Tagen, harte Kappe
     // ARCHIVE_MAX_DAY_BLOCKS Blöcke. Early-Stop: ein gelesener Archiv-Cluster
     // mit ledgerRange.from <= fromLedger deckt die Fensteruntergrenze ab.
+    // Mit range: benötigte Blöcke = ceil(rangeTage / ARCHIVE_QUERY_DAYS),
+    // nie über die harte Kappe (Read-Budget unverändert gedeckelt).
     const allDocs = [];
     let covered = false;
     let minLedgerFrom = null; // Minimum der ledgerRange.from aller gelesenen Cluster
     let blocksRead = 0;
-    for (let block = 0; block < ARCHIVE_MAX_DAY_BLOCKS && !covered; block++) {
+    const blockLimit = rangeDays == null
+      ? ARCHIVE_MAX_DAY_BLOCKS
+      : Math.min(ARCHIVE_MAX_DAY_BLOCKS, Math.ceil(rangeDays / ARCHIVE_QUERY_DAYS));
+    for (let block = 0; block < blockLimit && !covered; block++) {
       const days = [];
       for (let back = block * ARCHIVE_QUERY_DAYS; back < (block + 1) * ARCHIVE_QUERY_DAYS; back++) {
         const d = dayOf(now - back * 24 * 60 * 60 * 1000);
@@ -222,6 +250,10 @@ async function handleArchive(req, res) {
     // Tages-Kappe ohne Fensterabdeckung -> truncated (dokumentierte Grenze;
     // kein Archiv-Dokument erreicht fromLedger, Lesebudget ist erschöpft).
     const dayCapTruncated = !covered;
+    // Ehrliches truncated-Flag gemäß Retention (Ask-Punkt 4): range=90d wird
+    // bei Default-Kappe 2 (62 d) nicht voll gelesen -> rangeTruncated,
+    // queryDays bleibt die REAL gelesene Tiefe (kein Fenster-Versprechen).
+    const rangeTruncated = rangeDays != null && blocksRead * ARCHIVE_QUERY_DAYS < rangeDays;
     // Bait-Filter (B2, STILL): Hop mit Köder-Endpunkt fällt raus.
     const cleanHops = hops.filter((h) => !baitLabels.has(h.from) && !baitLabels.has(h.to));
     const body = {
@@ -229,8 +261,10 @@ async function handleArchive(req, res) {
       from,
       to,
       hops: cleanHops,
-      truncated: truncated || dayCapTruncated,
+      truncated: truncated || dayCapTruncated || rangeTruncated,
       queryDays: blocksRead * ARCHIVE_QUERY_DAYS,
+      // Nur bei explizitem range (Byte-Neutralität zum bisherigen Vertrag).
+      ...(rawRange ? { range: rawRange } : {}),
     };
     archiveCache.set(cacheKey, { time: now, body });
     return res.status(200).json(body);

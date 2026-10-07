@@ -501,6 +501,13 @@ export async function buildCtx(doc, entityDoc) {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
     benignAccounts: new Set(config.benign_accounts || []),
+    // marketExcludes (Kritik-Runde 3, T1.6): derselbe Börsen-/Köder-FP-Guard
+    // wie excludeFresh oben — die Market-Regeln (amm-wash-swap/
+    // thin-pool-exploit/spoof-offer-cycle, lib/detector.mjs) zählen
+    // Market-Maker-Aktivität; ohne Guard feuern sie auf legitimen Börsen-
+    // Konten. Dasselbe Set (Börsen-Registry ∪ multiUser ∪ config-benign ∪
+    // Köder), keine neuen Requests (beide Maps treffen den Tick-Cache).
+    marketExcludes: excludeFresh,
     threats: new Map(),
     firstSeenAt,
     history,
@@ -603,6 +610,52 @@ async function seedCursorIfFresh(cursor) {
   const led = await rpc("ledger", { ledger_index: "validated" });
   const seed = seedCursor(Number(led?.ledger_index), lookbackBlocks());
   return seed != null ? seed : cursor;
+}
+
+// (iv.5) History-Regel-Mapping (Kritik-Runde 4, Befund 1+2): rules[]
+// etikettiert die EVIDENZ DES CLUSTERS SELBST — es wird keine Regel-ID
+// erfunden.
+//  - mainDrainers -> drainer-sweep, peelingChains -> peeling-chain
+//    (strukturelle Evidenz, unverändert),
+//  - motifs.washCycles -> 'wash-cycle' (echte Katalog-ID, lib/detector.mjs
+//    :109): der Wash-Zyklus ist hasFraudEvidence-Träger
+//    (lib/flow-state.mjs:256, 30-Tage-maliziös-Retention + Archiv) und
+//    erhält damit seine Kappungs-Priorität — HISTORY_FRAUD_RULES
+//    (lib/history.mjs:116) wächst um genau diese eine ehrliche ID; die
+//    drei Tx-Ebenen-Market-Regeln bleiben bewusst draußen (sie sind keine
+//    hasFraudEvidence-Träger, lib/detector.mjs:114-117),
+//  - severity 'malicious' -> known-bad-hit (einzige registry-abgeleitete
+//    Fundquelle im Advance-Pfad, :210-212-Kommentar mergeCluster),
+//  - severity 'suspect' -> KEINE Regel-ID: die Ursprungsregel
+//    (amm-wash-swap/thin-pool-exploit/spoof-offer-cycle/payment-burst/
+//    airdrop-trustset-spam ...) ist im persistierten Cluster nicht
+//    hinterlegt; die „breiteste suspect-Fundquelle" zu benennen, schrieb
+//    eine nachweislich falsche Regel-ID als dauerhafte
+//    Evidenz-Etikettierung (Kritik-Runde 4, Befund 2),
+//  - gar kein Evidenz-Etikett -> known-bad-hit-Fallback (collector-Rolle
+//    o. Ä., unveränderter Kontext): er hält die Kappungs-Priorität, die
+//    solche Cluster vor der Severity-Mapping bereits hatten — die Zuordnung,
+//    wer die 200er-Kappung überlebt, verschiebt sich nicht
+//    (Kritik-Runde 4, Befund 1).
+export function historyRulesFromCluster(c, baitLabels) {
+  const rules = new Set();
+  if (!c || typeof c !== "object") return rules;
+  for (const d of Array.isArray(c.mainDrainers) ? c.mainDrainers : []) rules.add("drainer-sweep");
+  for (const ch of Array.isArray(c.peelingChains) ? c.peelingChains : []) {
+    if (Array.isArray(ch?.addresses) && ch.addresses.length) rules.add("peeling-chain");
+  }
+  const motifs = c.motifs && typeof c.motifs === "object" && !Array.isArray(c.motifs) ? c.motifs : null;
+  if (motifs && Array.isArray(motifs.washCycles) && motifs.washCycles.length) rules.add("wash-cycle");
+  const sevByAddr =
+    c.severityByAddress && typeof c.severityByAddress === "object" && !Array.isArray(c.severityByAddress)
+      ? c.severityByAddress
+      : {};
+  for (const [addr, sev] of Object.entries(sevByAddr)) {
+    if (typeof addr !== "string" || !XRPL_ADDR_RE.test(addr) || baitLabels.has(addr)) continue;
+    if (sev === "malicious") rules.add("known-bad-hit");
+  }
+  if (!rules.size) rules.add("known-bad-hit"); // collector-Rolle o. Ä.
+  return rules;
 }
 
 export default async function handler(req, res) {
@@ -891,12 +944,12 @@ export default async function handler(req, res) {
         const members = (Array.isArray(c.memberAddresses) ? c.memberAddresses : [])
           .filter((m) => typeof m === "string" && XRPL_ADDR_RE.test(m) && !baitLabels.has(m));
         if (!members.length) continue;
-        const rules = new Set();
-        for (const d of Array.isArray(c.mainDrainers) ? c.mainDrainers : []) rules.add("drainer-sweep");
-        for (const ch of Array.isArray(c.peelingChains) ? c.peelingChains : []) {
-          if (Array.isArray(ch?.addresses) && ch.addresses.length) rules.add("peeling-chain");
-        }
-        if (!rules.size) rules.add("known-bad-hit"); // collector-Rolle o. Ä.
+        // Fundtypen aus der Cluster-Evidenz selbst (exportierter Helper,
+        // Kritik-Runde 4 Befund 1+2): suspect-Schwere erhält KEINE erfundene
+        // Regel-ID mehr; wash-cycle-Cluster tragen ihre echte Katalog-ID und
+        // überleben die Kappung wie vor der Mapping; collector-only-Cluster
+        // bleiben beim known-bad-hit-Fallback (unveränderte Kappungsfolge).
+        const rules = historyRulesFromCluster(c, baitLabels);
         const fsMs = Date.parse(String(c.firstSeen ?? ""));
         const lsMs = Date.parse(String(c.lastSeen ?? ""));
         fraudClusters.push({
