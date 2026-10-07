@@ -747,6 +747,46 @@ main {
   to { transform: translateX(12%); }
 }
 
+/* ---------------- Top-10-Duo-Grid (Drainer-Tranche 2026-10-07) ----------------
+   Zwei Top-10-Boxen nebeneinander: links Börsen-Zuflüsse (Frost-Panel oben),
+   rechts Drainer-Rangliste (matte .panel-Fläche). Die frühere Einspaltig-
+   Regel (style.css:634-641) gilt dem Console-Raster IN main — dieses Duo ist
+   die begründete Ausnahme direkt unter der Bühne: zwei kompakte Ranglisten
+   teilen sich die Breite, ohne dass der Graph (full-width in main) betroffen
+   wäre. 22 px gap = der vierfach hartcodierte Panel-Rhythmus (647/653/660/
+   710); die vertikalen 22 px bleiben bei den Panel-Margins (die Panel-Regeln
+   selbst sind unverändert — Selektoren, Frost-Schicht und shine-spacing-
+   Invarianten greifen weiter). minmax(0, 1fr) zwingend: ohne 0-Minimum
+   sprengt eine 35-Zeichen-Adresse die Spalte (Hausmuster min-inline-size: 0,
+   654/1605/1622/1649). Mobiler Stapel: ab 760 px einspaltig (Hausmuster
+   .cluster-list), im 560-px-Block gap 0 — die Panel-Margins (22/14 px)
+   liefern den Stapel-Abstand allein, ein zusätzlicher Gap würde ihn
+   verdoppeln. */
+.top-duo-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+  width: min(var(--a6-container), 100% - 2 * var(--a6-gutter)); /* Bühnen-Achsmaß (.hx-stage) */
+  margin: 0 auto;
+}
+
+/* Listen-Rahmen BEIDER Duo-Boxen (Hausmuster .cluster-list :1421-1427):
+   list-style none — der Rang steht schon in .exout-rank/.drout-rank, die
+   decimal-Ziffern des <ol> wären eine Doppel-Zählung; padding 0 — ohne ihn
+   ziehen die Browser-Defaults jede Zeile 40 px hinter panel-head/disclaimer
+   ein; display grid + gap 16px — ohne Abstand klebten die 1-px-Borders
+   zweier Zeilen zu einer 2px-Doppellinie (lab_graphite-Grundsatz
+   style.css:636-638: Borders dürfen nicht verschmelzen). Der
+   14-px-Oberabstand entspricht .cluster-list. */
+.exchange-outflow-list,
+.drainer-outflow-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
 .hint {
   color: var(--a6-muted);
   font-size: 12px;
@@ -1305,6 +1345,22 @@ main {
   .exout-window-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
 }
 
+/* Fenster-Umschalter der Drainer-Box (Drainer-Tranche 2026-10-07): identisches
+   aria-pressed-Muster wie die Börsen-Box — dieselben Tokens, keine neuen Werte. */
+.drout-window-btn {
+  padding: 8px 14px;
+}
+
+.drout-window-btn[aria-pressed="true"] {
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
+  color: var(--a6-on-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .drout-window-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
+}
+
 .graph-disclaimer {
   margin: 0 0 12px;
   color: var(--a6-muted);
@@ -1687,6 +1743,118 @@ main {
 .exout-badge-wellknown { color: var(--a6-brand-blue); }
 
 /* ------------------- /Top-10 Börsen-Zuflüsse ---------------------------- */
+
+/* ------------------ Top-10 Drainer-Rangliste (2026-10-07) -----------------
+   Rechte Duo-Box: Vollrahmen-Muster der .exout-Zeilen (1 px control-line,
+   r-md), beide Themes laufen allein über die a6-Tokens (keine hartcodierten
+   Hex außerhalb des Token-Blocks). Drainer-Signal NUR in Rang/Betrag über die
+   bestehenden Rollen-Ton-Paare (--a6-role-drainer / --a6-role-drainer-border,
+   style.css:202-203/324-325 — dieselbe Behandlung wie .role-chip.role-drainer);
+   die Panel-Fläche selbst bleibt matte .panel (lab_graphite.avoid: kein Glow
+   auf jeder Karte — die Frost-Schicht bleibt ausschließlich der Börsen-Box).
+   Tag-Chips nutzen die bestehende .tag-chip-Klasse (Look der .name-chip).
+   Panel-Rhythmus: dieselben Margins wie die Börsen-Box (22 px Sektions-
+   Rhythmus, mobil 14 px) — im Stapel (unter 760 px) trägt NUR die linke
+   Box die obere Margin (margin-top 0 der rechten Box + gap 0), sonst
+   verdoppelten sich die Panel-Margins zum 44-/28-px-Abstand. */
+#drainer-outflows-panel {
+  margin: 22px auto;
+}
+
+.drout-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 2px 14px;
+  align-items: baseline;
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-md);
+  padding: 10px 14px;
+  background: var(--a6-surface);
+  box-shadow: var(--a6-e1);
+  min-inline-size: 0;
+}
+
+.drout-rank {
+  font-family: var(--a6-mono);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-role-drainer);
+  min-inline-size: 2ch;
+  text-align: right;
+}
+
+.drout-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0; /* Grid-Kind darf schrumpfen — Umbruch vor Overflow */
+}
+
+.drout-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--a6-mono);
+  font-weight: 700;
+  color: var(--a6-ink);
+  overflow-wrap: anywhere;
+  min-inline-size: 0;
+}
+
+.drout-amount {
+  font-family: var(--a6-mono);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-role-drainer);
+  text-align: right;
+}
+
+.drout-meta {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.drout-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  background: var(--a6-surface);
+  color: var(--a6-brand-teal);
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* Forwarded-Badge im Ton der Drainer-Rollen-Signalfläche (dieselbe
+   Token-Kombination wie .role-chip.role-drainer / .chain-node.chain-drainer). */
+.drout-badge-forwarded {
+  border-color: var(--a6-role-drainer-border);
+  background: var(--a6-error-soft);
+  color: var(--a6-role-drainer);
+}
+
+/* '+'-Hinweis nach dem Tag-Chip-Cap 3 (Muster .cluster-addr-more, 1563). */
+.drout-tag-more {
+  align-self: center;
+  color: var(--a6-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------- /Top-10 Drainer-Rangliste ---------------------------- */
 
 .cluster-txs,
 .cluster-accounts {
@@ -2288,6 +2456,12 @@ main {
 
 @media (max-width: 760px) {
   .cluster-list { grid-template-columns: 1fr; }
+  /* Top-10-Duo: mobiler Stapel unterhalb des bestehenden Breakpoints
+     (Hausmuster .cluster-list) — Börsen-Box oben, Drainer-Box darunter.
+     gap 0 + margin-top 0 der rechten Box: die Panel-Margins allein liefern
+     den Rhythmus (22 px), ohne Verdopplung. */
+  .top-duo-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  #drainer-outflows-panel { margin: 0 auto 22px; }
 }
 
 @media (max-width: 560px) {
@@ -2296,6 +2470,7 @@ main {
   .panel { padding: 14px; }
   .hx-stage { margin-top: 14px; }
   #exchange-outflows-panel { margin: 14px auto; } /* mobiler Rhythmus wie .hx-stage */
+  #drainer-outflows-panel { margin: 0 auto 14px; } /* Stapel: obere Margin trägt die Börsen-Box allein */
   [data-a6] { --a6-stage-height: 480px; } /* Leiter-Endstufe: 720 → 640 → 560 → 480 */
   .filter-select { flex: 1 1 140px; }
   .download-btn { flex: 1 1 100%; }

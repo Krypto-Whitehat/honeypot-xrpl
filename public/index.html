@@ -104,38 +104,63 @@
     </div>
   </section>
 
-  <!-- Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07): Client-
-       Aggregation aus der bestehenden /api/flow-state-View (60-s-Poll,
-       public/exchange-outflows.mjs + app.js renderExchangeOutflows) —
-       bewusst KEIN neuer api/*-Endpoint (Vercel-Hobby-Limit 12 Functions).
-       Platzierung direkt unter der hx-stage-Bühne, VOR der view-nav
-       (Kritik-Runde 3, Ask-Punkt 3): die Box liegt damit über der Fold und
-       ist in allen Views sichtbar (setView blendet nur die view-*Panels;
-       die Render-Logik ist positionsfrei — nur getElementById). Grenzen
-       stehen ehrlich in der Fußnote (#exout-note via data-i18n), der reale
-       Abdeckungszeitraum wird dynamisch gerendert (#exout-coverage), der
-       Cap-Hinweis nur bei belegter Kappung (#exout-capped). Umschalter
-       7/30 Tage im aria-pressed-Muster der Cluster-Dichte. Optik (Design-
-       Tranche): die Box ist die einzige Frost-/Glas-Schicht der Console
-       (style.css #exchange-outflows-panel — Frost-Füllung + Blur über der
-       Bühne, Hairline-Verlauf oben, minimales Sheen-Band; alle Werte als
-       --a6-*-Token-Paare für beide Themes), ihr Titel trägt den dezenten
-       Shining-Word (reduced-motion- und forced-colors-fest). -->
-  <section class="panel" id="exchange-outflows-panel" aria-labelledby="exout-title">
-    <div class="panel-head">
-      <h2 class="hx-shine-word" id="exout-title" data-i18n="exout.title">Top exchanges receiving drained funds</h2>
-      <div class="graph-tabs exout-window-tabs" role="group" id="exout-window" data-i18n-aria="exout.windowAria" aria-label="Coverage window of the exchange inflows">
-        <button type="button" class="graph-tab exout-window-btn" id="exout-window-7d" aria-pressed="true" data-i18n="exout.window7">7 days</button>
-        <button type="button" class="graph-tab exout-window-btn" id="exout-window-30d" aria-pressed="false" data-i18n="exout.window30">30 days</button>
+  <!-- Top-10-Duo (Daten-Forensik 2026-10-07 + Drainer-Tranche 2026-10-07):
+       Zwei Boxen im 2er-Grid .top-duo-grid direkt unter der hx-stage-Bühne,
+       VOR der view-nav (Kritik-Runde 3, Ask-Punkt 3: über der Fold, in allen
+       Views sichtbar — setView blendet nur die view-*Panels; die Render-Logik
+       beider Boxen ist positionsfrei, nur getElementById). Links die Börsen-
+       Zuflüsse (public/exchange-outflows.mjs + app.js renderExchangeOutflows),
+       rechts die Drainer-Rangliste (public/drainer-top10.mjs + app.js
+       renderDrainerTop10) — beide rechnen clientseitig aus derselben
+       /api/flow-state-60-s-Poll-Antwort (60-s-Poll), bewusst KEIN neuer
+       api/*-Endpoint (Vercel-Hobby-Limit 12 Functions, Budget +0/+0). Der
+       Union-Ausschluss der Drainer-Box verhindert, dass dasselbe Konto links
+       als Börse und rechts als Drainer steht (Fußnote #drout.note). Grenzen
+       stehen ehrlich in den Fußnoten (#exout.note/#drout.note), die realen
+       Abdeckungszeiträume dynamisch (#exout-coverage/#drout-coverage), die
+       Cap-Hinweise nur bei belegter Kappung (#exout-capped/#drout-capped).
+       Umschalter 7/30 Tage beider Boxen im aria-pressed-Muster der Cluster-
+       Dichte. Optik (Design-Tranche): die Börsen-Box bleibt die einzige
+       Frost-/Glas-Schicht der Console (style.css #exchange-outflows-panel —
+       Frost-Füllung + Blur über der Bühne, Hairline-Verlauf oben, minimales
+       Sheen-Band; alle Werte als --a6-*-Token-Paare für beide Themes), ihr
+       Titel trägt den dezenten Shining-Word (reduced-motion- und forced-
+       colors-fest); die Drainer-Box bleibt matte Console-Panel-Fläche
+       (.panel surface + line-strong) mit Drainer-Rollen-Ton nur im Signal
+       (--a6-role-drainer-* Paare, style.css .drout-rank/.drout-amount). -->
+  <div class="top-duo-grid">
+    <section class="panel" id="exchange-outflows-panel" aria-labelledby="exout-title">
+      <div class="panel-head">
+        <h2 class="hx-shine-word" id="exout-title" data-i18n="exout.title">Top exchanges receiving drained funds</h2>
+        <div class="graph-tabs exout-window-tabs" role="group" id="exout-window" data-i18n-aria="exout.windowAria" aria-label="Coverage window of the exchange inflows">
+          <button type="button" class="graph-tab exout-window-btn" id="exout-window-7d" aria-pressed="true" data-i18n="exout.window7">7 days</button>
+          <button type="button" class="graph-tab exout-window-btn" id="exout-window-30d" aria-pressed="false" data-i18n="exout.window30">30 days</button>
+        </div>
       </div>
-    </div>
-    <p class="graph-disclaimer" data-i18n="exout.subtitle">Where the most drained funds land — the exchanges themselves are not the perpetrators.</p>
-    <ol class="exchange-outflow-list" id="exchange-outflow-list" data-i18n-aria="exout.aria" aria-label="Top 10 exchanges by incoming drops from drainer context" hidden></ol>
-    <p class="empty" id="exout-empty" data-i18n="exout.empty" hidden>No inflows from drainer context to registry exchanges in the selected window yet.</p>
-    <p class="graph-note" id="exout-capped" hidden></p>
-    <p class="graph-note" id="exout-coverage" hidden></p>
-    <p class="graph-note" data-i18n="exout.note">Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.</p>
-  </section>
+      <p class="graph-disclaimer" data-i18n="exout.subtitle">Where the most drained funds land — the exchanges themselves are not the perpetrators.</p>
+      <ol class="exchange-outflow-list" id="exchange-outflow-list" data-i18n-aria="exout.aria" aria-label="Top 10 exchanges by incoming drops from drainer context" hidden></ol>
+      <p class="empty" id="exout-empty" data-i18n="exout.empty" hidden>No inflows from drainer context to registry exchanges in the selected window yet.</p>
+      <p class="graph-note" id="exout-capped" hidden></p>
+      <p class="graph-note" id="exout-coverage" hidden></p>
+      <p class="graph-note" data-i18n="exout.note">Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.</p>
+    </section>
+
+    <section class="panel" id="drainer-outflows-panel" aria-labelledby="drout-title">
+      <div class="panel-head">
+        <h2 id="drout-title" data-i18n="drout.title">Top drainer accounts by received funds</h2>
+        <div class="graph-tabs drout-window-tabs" role="group" id="drout-window" data-i18n-aria="drout.windowAria" aria-label="Coverage window of the drainer inflows">
+          <button type="button" class="graph-tab drout-window-btn" id="drout-window-7d" aria-pressed="true" data-i18n="drout.window7">7 days</button>
+          <button type="button" class="graph-tab drout-window-btn" id="drout-window-30d" aria-pressed="false" data-i18n="drout.window30">30 days</button>
+        </div>
+      </div>
+      <p class="graph-disclaimer" data-i18n="drout.subtitle">The drainer role is a heuristic from in/out degree and money flow — a signal, not a proven verdict.</p>
+      <ol class="drainer-outflow-list" id="drainer-outflow-list" data-i18n-aria="drout.aria" aria-label="Top 10 drainer accounts by received drops" hidden></ol>
+      <p class="empty" id="drout-empty" data-i18n="drout.empty" hidden>No drainer account with received funds in the considered state within the selected window yet.</p>
+      <p class="graph-note" id="drout-capped" hidden></p>
+      <p class="graph-note" id="drout-coverage" hidden></p>
+      <p class="graph-note" data-i18n="drout.note">Only the 50 largest edges by volume per cluster are kept by the state (lower bound); role fields are capped at 300 entries per cluster; accounts of the exchange union rank in the left box and are excluded here; 30 days reflects the fraud retention of the live state, not a complete wallet history.</p>
+    </section>
+  </div>
 
   <nav class="view-nav graph-tabs" role="tablist" data-i18n-aria="nav.aria">
     <button type="button" class="view-tab graph-tab" role="tab" id="view-tab-dashboard" aria-selected="true" aria-controls="view-dashboard" data-i18n="tab.dashboard">Dashboard</button>

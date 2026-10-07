@@ -598,6 +598,33 @@ export const DICT = {
     'exout.note': 'Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.',
     'exout.aria': 'Top 10 exchanges by incoming drops from drainer context',
     'exout.wellKnown': 'well-known',
+
+    /* index.html — Top-10 Drainer-Rangliste (Drainer-Tranche 2026-10-07,
+       public/drainer-top10.mjs): rechte Duo-Box — Qualifikation nur über die
+       Drainer-Rolle (Heuristik, kein Schuldbeweis — im Untertitel), Union-
+       Ausschluss gegen Doppelzählung mit der Börsen-Box (in der Fußnote),
+       Grenzen (50-Kanten-Deckel, 300er-Rollen-Feldkappe, Betrugs-Retention)
+       ehrlich in der Fußnote, Abdeckungszeitraum dynamisch (#drout-coverage),
+       Cap-Hinweis nur bei belegter Kappung (#drout-capped). Eigener
+       Tag-Aria-Schlüssel: 'tag.chipAria' behauptet ein Börse-Hosted-Konto —
+       für ein Drainer-Konto falsch. */
+    'drout.title': 'Top drainer accounts by received funds',
+    'drout.subtitle': 'The drainer role is a heuristic from in/out degree and money flow — a signal, not a proven verdict.',
+    'drout.window7': '7 days',
+    'drout.window30': '30 days',
+    'drout.windowAria': 'Coverage window of the drainer inflows',
+    'drout.rank': 'Rank {n}',
+    'drout.inflows': '{n} inflows',
+    'drout.inflows1': '1 inflow',
+    'drout.clusters': '{n} clusters',
+    'drout.clusters1': '1 cluster',
+    'drout.forwarded': 'Forwarded: {xrp} XRP',
+    'drout.tagAria': 'Destination tag recorded on inflows to this account',
+    'drout.empty': 'No drainer account with received funds in the considered state within the selected window yet.',
+    'drout.capped': '{n} of the considered clusters sit at the 50-edge cap of the state — all sums are a lower bound.',
+    'drout.coverage': 'Covered period: {from} – {to}',
+    'drout.note': 'Only the 50 largest edges by volume per cluster are kept by the state (lower bound); role fields are capped at 300 entries per cluster; accounts of the exchange union rank in the left box and are excluded here; 30 days reflects the fraud retention of the live state, not a complete wallet history.',
+    'drout.aria': 'Top 10 drainer accounts by received drops',
   },
 
   de: {
@@ -1138,6 +1165,33 @@ export const DICT = {
     'exout.note': 'Vom State bleiben nur die 50 nach Volumen größten Kanten je Cluster erhalten (Untergrenze); 30 Tage entspricht der Betrugs-Retention des Live-States, keiner vollständigen Wallet-Historie; Börsen-Erkennung = Registry ∪ verifizierte well-known-Namen.',
     'exout.aria': 'Top 10 Börsen nach eingehenden Drops aus Drainer-Kontext',
     'exout.wellKnown': 'well-known',
+
+    /* index.html — Top-10 Drainer-Rangliste (Drainer-Tranche 2026-10-07,
+       public/drainer-top10.mjs): rechte Duo-Box — Qualifikation nur über die
+       Drainer-Rolle (Heuristik, kein Schuldbeweis — im Untertitel), Union-
+       Ausschluss gegen Doppelzählung mit der Börsen-Box (in der Fußnote),
+       Grenzen (50-Kanten-Deckel, 300er-Rollen-Feldkappe, Betrugs-Retention)
+       ehrlich in der Fußnote, Abdeckungszeitraum dynamisch (#drout-coverage),
+       Cap-Hinweis nur bei belegter Kappung (#drout-capped). Eigener
+       Tag-Aria-Schlüssel: 'tag.chipAria' behauptet ein Börse-Hosted-Konto —
+       für ein Drainer-Konto falsch. */
+    'drout.title': 'Top-Drainer-Konten nach empfangenen Mitteln',
+    'drout.subtitle': 'Die Drainer-Rolle ist eine Heuristik aus Ein-/Ausgangsgrad und Geldfluss — ein Signal, kein Schuldbeweis.',
+    'drout.window7': '7 Tage',
+    'drout.window30': '30 Tage',
+    'drout.windowAria': 'Zeitfenster der Drainer-Zuflüsse',
+    'drout.rank': 'Rang {n}',
+    'drout.inflows': '{n} Zuflüsse',
+    'drout.inflows1': '1 Zufluss',
+    'drout.clusters': '{n} Cluster',
+    'drout.clusters1': '1 Cluster',
+    'drout.forwarded': 'Weitergeleitet: {xrp} XRP',
+    'drout.tagAria': 'Destination-Tag aus den Zuflüssen auf dieses Konto',
+    'drout.empty': 'Kein Drainer-Konto mit empfangenen Mitteln im betrachteten Bestand im gewählten Fenster.',
+    'drout.capped': '{n} der betrachteten Cluster liegen am 50-Kanten-Deckel des States — alle Summen sind eine Untergrenze.',
+    'drout.coverage': 'Abgedeckter Zeitraum: {from} – {to}',
+    'drout.note': 'Vom State bleiben nur die 50 nach Volumen größten Kanten je Cluster erhalten (Untergrenze); Rollen-Felder sind je Cluster auf 300 Einträge gekappt; Konten der Börsen-Union werden in der linken Box geführt und sind hier ausgeschlossen; 30 Tage entspricht der Betrugs-Retention des Live-States, keiner vollständigen Wallet-Historie.',
+    'drout.aria': 'Top 10 Drainer-Konten nach eingehenden Drops',
   },
 };
 

@@ -400,6 +400,16 @@ test("Verdrahtung index.html: Panel-Markup + nur existierende exout-Keys referen
   // die Render-Logik ist positionsfrei (nur getElementById, app.js).
   assert.ok(html.indexOf('id="exchange-outflows-panel"') > html.indexOf('class="hx-stage"'), "Panel liegt NACH der hx-stage-Bühne");
   assert.ok(html.indexOf('id="exchange-outflows-panel"') < html.indexOf("console-grid"), "Panel liegt VOR dem console-grid");
+  // Duo-Grid (Drainer-Tranche 2026-10-07): beide Top-10-Boxen stecken im
+  // Wrapper .top-duo-grid an derselben Stelle — die Börsen-Box ist das ERSTE
+  // Panel im Wrapper (Grid-Spalten folgen der Markup-Reihenfolge: Börse
+  // links, Drainer rechts), und der Wrapper liegt weiterhin zwischen Bühne
+  // und view-nav (die drei Assertions oben sichern, dass nichts in main oder
+  // hinter die Nav wandert).
+  assert.ok(html.includes('class="top-duo-grid"'), "Grid-Wrapper vorhanden");
+  assert.ok(html.indexOf('class="top-duo-grid"') < html.indexOf('id="exchange-outflows-panel"'), "Börsen-Panel liegt INNERHALB des Wrappers");
+  assert.ok(html.indexOf('id="exchange-outflows-panel"') < html.indexOf('id="drainer-outflows-panel"'), "Börsen-Panel ist das erste Panel im Wrapper (links)");
+  assert.ok(html.indexOf('id="drainer-outflows-panel"') < html.indexOf('<nav class="view-nav graph-tabs"'), "Drainer-Panel liegt VOR der view-nav");
   // Jede referenzierte exout-i18n-Key muss in BEIDEN Sprachen existieren.
   const refs = [...html.matchAll(/data-i18n(?:-aria)?="(exout\.[A-Za-z0-9]+)"/g)].map((m) => m[1]);
   assert.ok(refs.length >= 8, `genug statische Keys referenziert (gefunden: ${refs.length})`);

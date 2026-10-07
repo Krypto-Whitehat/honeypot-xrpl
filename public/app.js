@@ -121,6 +121,11 @@ import {
  * (esc/displayFindingAddr — Maskierungs-Pflicht bleibt im Host, Muster
  * cluster-chips.mjs). */
 import { aggregateExchangeOutflows, exchangeOutflowRowHtml } from './exchange-outflows.mjs';
+/* Top-10 Drainer-Rangliste (Drainer-Tranche 2026-10-07): DOM-freie Aggregation
+ * aus derselben /api/flow-state-Antwort wie die Börsen-Box (7 d + 30 d in einem
+ * Durchlauf, +0 Requests/+0 Functions), Zeilen-Markup über dieselben injizierten
+ * Host-Gates; Union-Ausschluss gegen Doppelzählung mit der Börsen-Box. */
+import { aggregateDrainerTop10, drainerTop10RowHtml } from './drainer-top10.mjs';
 // Tx-Typ -> Kanten-Kategorie (DOM-frei, deterministisch; Modul-Vertrag im
 // Kopf von edge-colors.mjs). Farb-WERTE bleiben hier (JS-Spiegel der Tokens).
 import { txCategory } from './edge-colors.mjs';
@@ -3045,6 +3050,144 @@ function bindExchangeOutflows() {
   b30.addEventListener('click', () => setWindow(30));
 }
 
+/* ---------- Top-10 Drainer-Rangliste (Drainer-Tranche 2026-10-07) ----------
+ * Rechte Duo-Box: client-Aggregation aus derselben /api/flow-state-View wie
+ * die Börsen-Box (KEIN neuer api/*-Endpoint): qualifiziert ist das ZIEL einer
+ * Kante, wenn es IM SELBEN Cluster rolesByAddress === 'drainer' trägt (nur die
+ * Rolle, nicht severity — die Severity-Qualifikation ist schon das Kriterium
+ * der Börsen-Box). Börsen-Union-Konten werden ausgeschlossen (sonst stünde
+ * dasselbe Konto links als Börse und rechts als Drainer); ohne geladene Union
+ * bleibt die Box fail-closed leer. Primmetrik: empfangene Drops (e.to),
+ * weitergeleitete nur als Badge. Zeilen-Markup ausschließlich über die
+ * Host-Gates (esc + displayFindingAddr, Pflicht 12); Tags als Chips nur über
+ * esc (Tag 0 ist ein echter Tag, lib/tag-identity.mjs). */
+let droutWindow = 7;             // aktives Fenster des Umschalters (7 | 30)
+let droutUnionRetryDone = false; // Einmal-Guard des Nachzieh-Takts (kein Loop)
+let droutMaskRepairInFlight = false; // Einmal-Guard des Masken-Nachziehs (kein Loop)
+
+function renderDrainerTop10(viewData) {
+  const listEl = document.getElementById('drainer-outflow-list');
+  const emptyEl = document.getElementById('drout-empty');
+  const coverageEl = document.getElementById('drout-coverage');
+  const cappedEl = document.getElementById('drout-capped');
+  if (!listEl || !emptyEl || !viewData) return; // ohne Daten nichts behaupten
+  // Börsen-Union als Ausschluss-Filter (fail-closed): ohne geladene Union
+  // bleibt die Box leer — ohne Union wäre der Doppelzählungs-Schutz nicht
+  // gewährleistet, also keine Rangliste statt möglicher Fehlzählung.
+  const exchangeMap = registryMod && typeof registryMod.multiUserSnapshot === 'function'
+    ? registryMod.multiUserSnapshot()
+    : null;
+  // Nachzieh-Takt (Muster renderExchangeOutflows): lazy Registry-/Bulk-Fetch
+  // GENAU EINMAL nachziehen, Einmal-Guard gegen Microtask-Loop.
+  if ((!exchangeMap || exchangeMap.size === 0) && !droutUnionRetryDone) {
+    droutUnionRetryDone = true;
+    const waiting = [];
+    if (registryMod && typeof registryMod.ensureExchangeRegistry === 'function') {
+      waiting.push(registryMod.ensureExchangeRegistry());
+    }
+    if (nameIndexMod && typeof nameIndexMod.ensureNameIndex === 'function') {
+      waiting.push(nameIndexMod.ensureNameIndex());
+    }
+    Promise.allSettled(waiting)
+      .then(() => { if (flowData) renderDrainerTop10(flowData); })
+      .catch(() => { /* fail-closed: Box bleibt leer */ });
+  }
+  let result = null;
+  if (exchangeMap && exchangeMap.size > 0) {
+    try {
+      result = aggregateDrainerTop10(viewData, exchangeMap, Date.now());
+    } catch {
+      result = null; // Aggregations-Fehler: leer statt erfundener Zahlen
+    }
+  }
+  const bucket = droutWindow === 30 ? result?.thirty : result?.seven;
+  const rows = Array.isArray(bucket?.rows) ? bucket.rows : [];
+  if (rows.length) {
+    // Host-Gates der Zeilen (Pflicht 12): esc auf jeden String,
+    // displayFindingAddr als Anzeige-Maske, fmtXrp/fmtNum aus i18n.mjs.
+    const ui = {
+      esc,
+      displayAddr: displayFindingAddr,
+      fmtXrp,
+      fmtNum,
+      labels: {
+        rankAria: (n) => t('drout.rank', { n }),
+        inflows: (n) => (n === 1 ? t('drout.inflows1') : t('drout.inflows', { n: fmtNum(n) })),
+        clusters: (n) => (n === 1 ? t('drout.clusters1') : t('drout.clusters', { n: fmtNum(n) })),
+        forwarded: (xrp) => t('drout.forwarded', { xrp }),
+        // Eigener Aria-Schlüssel: 'tag.chipAria' behauptet ein Börse-Hosted-
+        // Konto — für ein Drainer-Konto falsch und nicht wiederverwendbar.
+        tagAria: t('drout.tagAria'),
+      },
+    };
+    listEl.innerHTML = rows.map((row, i) => drainerTop10RowHtml(row, i + 1, ui)).join('');
+    listEl.hidden = false;
+    emptyEl.hidden = true;
+    // Masken-Nachzieh (Muster renderExchangeOutflows): synchroner Render über
+    // gecachte Hashes; hat verifyFullShownAsync eine Anzeige-Entscheidung
+    // geändert, GENAU EIN Nachzieh-Render, Guard gegen Microtask-Loop.
+    if (!droutMaskRepairInFlight) {
+      droutMaskRepairInFlight = true;
+      const before = rows.map((row) => isFullShownAddr(row.address));
+      Promise.all(rows.map((row) => verifyFullShownAsync(row.address)))
+        .then(() => {
+          droutMaskRepairInFlight = false;
+          const after = rows.map((row) => isFullShownAddr(row.address));
+          if (after.some((v, i) => v !== before[i]) && flowData) {
+            renderDrainerTop10(flowData);
+          }
+        })
+        .catch(() => { droutMaskRepairInFlight = false; });
+    }
+  } else {
+    listEl.innerHTML = '';
+    listEl.hidden = true;
+    emptyEl.hidden = false;
+  }
+  // Ehrlicher Abdeckungszeitraum (Muster Börsen-Box): min firstSeen der
+  // betrachteten Cluster bis zum Aggregationszeitpunkt.
+  if (coverageEl) {
+    if (result?.coverageFrom) {
+      coverageEl.textContent = t('drout.coverage', {
+        from: fmtDateTime(result.coverageFrom),
+        to: fmtDateTime(result.generatedAt),
+      });
+      coverageEl.hidden = false;
+    } else {
+      coverageEl.textContent = '';
+      coverageEl.hidden = true;
+    }
+  }
+  // Cap-Sichtbarkeit: Cluster am 50-Kanten-Deckel des States — die Summen
+  // sind eine Untergrenze (nur bei belegter Kappung, kein Dauertext).
+  if (cappedEl) {
+    const capped = Number(bucket?.totals?.cappedClusters) || 0;
+    if (capped > 0) {
+      cappedEl.textContent = t('drout.capped', { n: fmtNum(capped) });
+      cappedEl.hidden = false;
+    } else {
+      cappedEl.textContent = '';
+      cappedEl.hidden = true;
+    }
+  }
+}
+
+// Fenster-Umschalter der Drainer-Box (aria-pressed-Muster wie die Börsen-Box,
+// keine Persistenz — Default 7 Tage je Session).
+function bindDrainerTop10() {
+  const b7 = document.getElementById('drout-window-7d');
+  const b30 = document.getElementById('drout-window-30d');
+  if (!b7 || !b30) return;
+  const setWindow = (days) => {
+    droutWindow = days === 30 ? 30 : 7;
+    b7.setAttribute('aria-pressed', String(droutWindow === 7));
+    b30.setAttribute('aria-pressed', String(droutWindow === 30));
+    if (flowData) renderDrainerTop10(flowData);
+  };
+  b7.addEventListener('click', () => setWindow(7));
+  b30.addEventListener('click', () => setWindow(30));
+}
+
 async function pollBlockWindow() {
   // 30d/90d werden NICHT gegen das Block-Fenster abgefragt: dessen Retention
   // endet bei 7 d (lib/block-window.mjs:79; api/flow-state.js lehnt 30d/90d
@@ -3083,6 +3226,8 @@ async function pollFlowState() {
   // (Budget +0 Requests/+0 Functions); deckt auch den initialen Poll ab
   // (Startblock ruft void serverPollTick() sofort nach dem Binden).
   renderExchangeOutflows(body);
+  // Drainer-Rangliste: dieselbe Antwort, zweite Duo-Box (Budget +0/+0).
+  renderDrainerTop10(body);
   if (feedMode === 'history') {
     await applyFlowStateView(body);
   } else {
@@ -3754,6 +3899,7 @@ setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboar
 bindLive();
 bindFeed();
 bindExchangeOutflows();
+bindDrainerTop10();
 bindAddrActions();
 document.getElementById('stat-network').textContent = t('net.mainnet');
 // Standard-Feed ist LIVE (Tilt erfolgt in der Rate-Gate-Importkette,
@@ -3788,9 +3934,11 @@ document.addEventListener('hx:langchange', () => {
   updateLiveStats();
   document.getElementById('stat-network').textContent = t('net.mainnet');
   setConn(true, connLabel());
-  // Top-10-Box: Zeilen tragen t()-Texte (Kanten-/Cluster-Zähler, Badges,
-  // Abdeckungszeitraum) — nach applyStatic in der neuen Sprache neu bauen.
+  // Top-10-Boxen (Börse + Drainer): Zeilen tragen t()-Texte (Kanten-/
+  // Cluster-Zähler, Badges, Tag-Aria, Abdeckungszeitraum) — nach applyStatic
+  // in der neuen Sprache neu bauen.
   renderExchangeOutflows(flowData);
+  renderDrainerTop10(flowData);
   // Fenster-Flächen in der neuen Sprache neu bauen (Notiz/Chart/Fenster-Karten
   // tragen t()-Texte; der ROHE reason-Vergleich bleibt sprachunabhängig).
   if (feedMode === 'history') {
