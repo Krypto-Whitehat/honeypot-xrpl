@@ -717,6 +717,15 @@ main {
   background: var(--a6-frost-fill);
   backdrop-filter: var(--a6-frost-blur);
   border-color: var(--a6-frost-border);
+  /* Sheen-Band clippen (Audit 2026-10-08): der a6-sheen-Sweep (inset:0,
+     translateX ±12 %) ragt bei schmalen Viewports über die Panel-Kante und
+     erzeugte horizontalen Scrollüberschuss (live belegt: 700 px Viewport
+     scrollWidth 728 bei clientWidth 655; am Desktop trägt der breitere
+     Container den Swing unauffällig). Dasselbe Muster wie .download-btn/
+     .graph-tab (1d92459): overflow:hidden beschneidet das Band an der
+     Panel-Grenze; Hairline (::before) und Frost liegen vollständig
+     innerhalb, Box-Shadows der .panel-Basis bleiben unberührt. */
+  overflow: hidden;
 }
 
 #exchange-outflows-panel::before {
@@ -786,6 +795,18 @@ main {
   display: grid;
   gap: 16px;
 }
+
+/* Ausblend-Guard (Audit 2026-10-08): Autor-Styles schlagen die UA-Regel
+   [hidden]{display:none} — mit display:grid allein bleibt eine per
+   hidden-Attribut ausgeblendete Liste laid out. Live belegt: #cluster-list
+   hidden:true, aber 5249 px hoch gerendert, obwohl app.js:1890
+   (listEl.hidden = !inClusterTab) die Karten nur im Cluster-Tab zeigen
+   will; dasselbe gilt für die beiden Duo-Listen (app.js setzt hidden im
+   Leerzustand). Attrib-Spezifität (0,2,0) schlägt die Basisregeln (0,1,0);
+   bewusst nur diese drei Listen — keine globale [hidden]-Regel. */
+.cluster-list[hidden],
+.exchange-outflow-list[hidden],
+.drainer-outflow-list[hidden] { display: none; }
 
 .hint {
   color: var(--a6-muted);

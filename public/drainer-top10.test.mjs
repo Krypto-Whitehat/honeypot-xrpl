@@ -473,6 +473,24 @@ test("CSS-Guard Listen-Rahmen: beide outflow-Listen ohne Browser-Defaults (list-
   assert.match(body, /gap:\s*16px/, "16 px Abstand — 1-px-Borders kleben nicht zu 2 px zusammen");
 });
 
+test("CSS-Guard Ausblend-Invariante: [hidden] schlägt display:grid (Cluster-Liste + beide Duo-Listen)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const styleCss = readFileSync(path.join(here, "style.css"), "utf8");
+  const guard = styleCss.match(/\.cluster-list\[hidden\],\s*\n\.exchange-outflow-list\[hidden\],\s*\n\.drainer-outflow-list\[hidden\]\s*\{[^}]*\}/);
+  assert.ok(guard, "gruppierte [hidden]-Guard-Regel vorhanden (Audit 2026-10-08)");
+  assert.match(stripComments(guard[0]), /display:\s*none/, "hidden-Attribut wirkt wieder: display:none schlägt display:grid");
+  // Die Basisregeln bleiben davon unberührt (sonst wäre die Liste nie sichtbar):
+  assert.match(styleCss, /\.cluster-list\s*\{[^}]*display:\s*grid/, "cluster-list-Basisregel bleibt grid");
+});
+
+test("CSS-Guard Sheen-Clipping: Börsen-Panel clippt den a6-sheen-Sweep (overflow:hidden)", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const styleCss = readFileSync(path.join(here, "style.css"), "utf8");
+  const panelRule = styleCss.match(/#exchange-outflows-panel\s*\{[^}]*\}/);
+  assert.ok(panelRule, "Panel-Basisregel vorhanden");
+  assert.match(stripComments(panelRule[0]), /overflow:\s*hidden/, "Sheen-Band (translateX ±12 %) wird an der Panel-Grenze beschnitten — kein horizontaler Scrollüberschuss bei schmalen Viewports");
+});
+
 /* ---------------- 10) Verdrahtung ---------------- */
 
 test("Verdrahtung index.html: Drainer-Panel-Markup + nur existierende drout-Keys referenziert", () => {
