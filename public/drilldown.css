@@ -438,6 +438,12 @@ body.cluster-modal-open {
 
 .cluster-json-download { flex: 0 1 auto; }
 
+/* PNG-Export des Cluster-Graphen (Fix 2026-10-07): Geschwister-Button des
+   JSON-Buttons, erbt .download-btn aus style.css; dieselbe flex-Regel.
+   Sichtbarkeit gateiert renderGraph (setPngBtnVisible) — nur bei stehendem
+   exportierbarem Canvas, nie im noGraph-Zustand. */
+.cluster-png-download { flex: 0 1 auto; }
+
 .cluster-export-note { margin: 0; }
 
 /* ---------------- Adress-Aktionen (Kopieren + XRPScan-Link) ---------- */

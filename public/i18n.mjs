@@ -320,6 +320,8 @@ export const DICT = {
     'modal.fallback2d': '3D view not available – 2D fallback view (vis-network).',
     'modal.noGraph': 'No graph available – details in role distribution, flow chain and accounts table.',
     'modal.downloadJson': 'Download as JSON',
+    'modal.downloadPng3d': 'Download 3D graph as PNG',
+    'modal.downloadPng2d': 'Download graph as PNG (2D fallback view)',
     'modal.graph3dLegend': 'Ring around a node = drainer account.',
 
     /* globe.js */
@@ -838,6 +840,8 @@ export const DICT = {
     'modal.fallback2d': '3D-Ansicht nicht verfügbar – 2D-Ausweichansicht (vis-network).',
     'modal.noGraph': 'Kein Graph verfügbar – Detaildaten in Rollen-Verteilung, Flusskette und Konten-Tabelle.',
     'modal.downloadJson': 'Als JSON herunterladen',
+    'modal.downloadPng3d': '3D-Graph als PNG herunterladen',
+    'modal.downloadPng2d': 'Graph als PNG herunterladen (2D-Ausweichansicht)',
     'modal.graph3dLegend': 'Ring um einen Knoten = Drainer-Konto.',
 
     /* globe.js */

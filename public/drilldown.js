@@ -590,6 +590,13 @@ export function initClusterDrilldown(ctx) {
                  überspringt ein Retranslate sonst möglicherweise. -->
             <div class="cluster-modal-export">
               <button type="button" class="download-btn cluster-json-download" id="cluster-json-download" data-i18n="modal.downloadJson" hidden>${esc(t('modal.downloadJson'))}</button>
+              <!-- PNG-Export des Cluster-Graphen (Fix 2026-10-07): Geschwister
+                   des JSON-Buttons, gleiches .download-btn-Muster wie
+                   index.html (graph.downloadPng). initial hidden; Sichtbarkeit
+                   steuert renderGraph (setPngBtnVisible) — nur wenn ein
+                   exportierbarer Canvas steht (3D mit preserveDrawingBuffer
+                   oder 2D-vis-Fallback), nie im noGraph-Zustand. -->
+              <button type="button" class="download-btn cluster-png-download" id="cluster-png-download" data-i18n="modal.downloadPng3d" hidden>${esc(t('modal.downloadPng3d'))}</button>
               <p class="graph-note cluster-export-note" data-i18n="export.clusterNote" hidden>${esc(t('export.clusterNote'))}</p>
             </div>
           </aside>
@@ -613,6 +620,8 @@ export function initClusterDrilldown(ctx) {
     overlay.querySelector('.cluster-modal-close').addEventListener('click', close);
     // A2: Klick auf den JSON-Download — Handler ruft den Blob-Export auf.
     overlay.querySelector('#cluster-json-download').addEventListener('click', downloadClusterJson);
+    // PNG-Download des Cluster-Graphen (Fix 2026-10-07): analoge Bindung.
+    overlay.querySelector('#cluster-png-download').addEventListener('click', downloadClusterPng);
     document.addEventListener('keydown', (e) => {
       if (!isOpen) return;
       if (e.key === 'Escape') { e.preventDefault(); close(); return; }
@@ -719,6 +728,17 @@ export function initClusterDrilldown(ctx) {
     frozenLang = null;
     exportPayload = null; // A4: Export-Grundlage gilt nur für den nächsten Vollrender
     exportToken += 1;     // laufende async-Nachprüfung verwerfen
+    // Hidden-Invariante (Fix 2026-10-07, P1-Hygiene): openCluster beginnt —
+    // wie close() und clearToEmptyState — mit verborgenen Export-Buttons.
+    // Vorher nullte nur der Live-Zweig die Grundlage, ohne die Buttons zu
+    // verstecken: ein zuvor live gerenderter Cluster ließ JSON-/PNG-Button
+    // sichtbar, obwohl der Early-Return in downloadClusterJson/
+    // downloadClusterPng den Download verwirft ('sichtbar aber tot').
+    const openDlBtn = overlay.querySelector('#cluster-json-download');
+    if (openDlBtn) openDlBtn.hidden = true;
+    const openDlNote = overlay.querySelector('.cluster-export-note');
+    if (openDlNote) openDlNote.hidden = true;
+    setPngBtnVisible(false);
     tableRowLimit = TABLE_MAX_ROWS; // Tabellen-Deckel pro Cluster neu beginnen
     clearTakeoverNotice();
     const staleNote = overlay.querySelector('.cluster-modal-stale');
@@ -749,6 +769,16 @@ export function initClusterDrilldown(ctx) {
     frozenLang = null;
     exportPayload = null; // A4: kein Export über die Lebensdauer des Modals hinaus
     exportToken += 1;
+    // Hidden-Invariante (Fix 2026-10-07, P1): close() nullt die
+    // Export-Grundlage — also müssen JSON-Button, Export-Hinweis und
+    // PNG-Button ebenfalls verborgen werden (dasselbe Muster wie
+    // clearToEmptyState 874-877). Ohne das bliebe nach einem Live-Render
+    // ein toter, aber sichtbarer Button im Shell stehen.
+    const closeDlBtn = overlay.querySelector('#cluster-json-download');
+    if (closeDlBtn) closeDlBtn.hidden = true;
+    const closeDlNote = overlay.querySelector('.cluster-export-note');
+    if (closeDlNote) closeDlNote.hidden = true;
+    setPngBtnVisible(false);
     clearTakeoverNotice();
     renderToken += 1;
     overlay.hidden = true;
@@ -886,6 +916,7 @@ export function initClusterDrilldown(ctx) {
     els.tableEl.innerHTML = '';
     teardown3D();
     teardown2D();
+    setPngBtnVisible(false); // kein Graph -> kein PNG-Export (Fix 2026-10-07)
     els.graphEl.innerHTML = `<p class="graph-note">${esc(t('modal.gone'))}</p>`;
     els.noteEl.hidden = true;
   }
@@ -994,6 +1025,20 @@ export function initClusterDrilldown(ctx) {
     // sonst bliebe der Anker dauerhaft unbrauchbar.
     if (!originMembers) originMembers = new Set(restoredIds);
     await paintCluster(els, persisted.cluster, restoredNodes, restoredEdges, token, false, true, persisted.at ?? null);
+    if (token !== renderToken || !isOpen) return true; // zwischenzeitlich neu gerendert/geschlossen
+    // EXPORT-AKTIVIERUNG IM NACHLADE-PFAD (Fix 2026-10-07, P1): der
+    // node-lose Restore-Zweig umlief den Aktivierungs-Block des Live-Pfads
+    // (render() 1200-1204) komplett — exportPayload blieb null, der Button
+    // unsichtbar, downloadClusterJson lief in den Early-Return. Derselbe
+    // Block jetzt auch hier: Payload aus dem restaurierten Satz (die
+    // asynchrone Deny-Nachprüfung je Download und der Freeze-Tick-Schnitt
+    // recheckFrozen bleiben unverändert aktiv), Button/Hinweis erst nach
+    // erfolgreichem paintCluster sichtbar.
+    exportPayload = buildExportPayload(persisted.cluster, restoredNodes, restoredEdges);
+    const dlBtnEl = overlay.querySelector('#cluster-json-download');
+    if (dlBtnEl) dlBtnEl.hidden = false;
+    const dlNoteEl = overlay.querySelector('.cluster-export-note');
+    if (dlNoteEl) dlNoteEl.hidden = false;
     return true;
   }
 
@@ -1057,18 +1102,26 @@ export function initClusterDrilldown(ctx) {
     showFrozenNote();
   }
 
+  /* Modal-Elementbündel (render() und der Pre-Export-Re-Paint von
+   * downloadClusterPng): dieselben neun Selektoren — eine Quelle, damit der
+   * Download-Pfad nicht vom Tick-Pfad abdriften kann. */
+  function modalEls() {
+    return {
+      titleEl: overlay.querySelector('#cluster-modal-title'),
+      badgeEl: overlay.querySelector('.cluster-modal-badge'),
+      metricsEl: overlay.querySelector('.cluster-modal-metrics'),
+      rolesEl: overlay.querySelector('.cluster-modal-roles'),
+      timelineEl: overlay.querySelector('.cluster-modal-timeline'),
+      chainEl: overlay.querySelector('.cluster-modal-chain'),
+      tableEl: overlay.querySelector('.cluster-modal-table'),
+      graphEl: overlay.querySelector('.cluster-3d'),
+      noteEl: overlay.querySelector('.cluster-graph-note'),
+    };
+  }
+
   async function render() {
     const token = ++renderToken;
-    const titleEl = overlay.querySelector('#cluster-modal-title');
-    const badgeEl = overlay.querySelector('.cluster-modal-badge');
-    const metricsEl = overlay.querySelector('.cluster-modal-metrics');
-    const rolesEl = overlay.querySelector('.cluster-modal-roles');
-    const timelineEl = overlay.querySelector('.cluster-modal-timeline');
-    const chainEl = overlay.querySelector('.cluster-modal-chain');
-    const tableEl = overlay.querySelector('.cluster-modal-table');
-    const graphEl = overlay.querySelector('.cluster-3d');
-    const noteEl = overlay.querySelector('.cluster-graph-note');
-    const els = { titleEl, badgeEl, metricsEl, rolesEl, timelineEl, chainEl, tableEl, graphEl, noteEl };
+    const els = modalEls();
 
     // FREEZE-BRANCHE (Plan 2026-10-05): nach dem ersten erfolgreichen
     // Vollrender läuft jeder Tick ausschließlich über recheckFrozen — der
@@ -1394,6 +1447,131 @@ export function initClusterDrilldown(ctx) {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
+  /* PNG-Export des Cluster-Graphen (Fix 2026-10-07): Der 3D-Renderer läuft
+   * jetzt mit rendererConfig.preserveDrawingBuffer (build3D) — ohne diese
+   * Option wäre der WebGL-Canvas nach dem Frame-Clear schwarz (app.js
+   * 1911-1913 schloss WebGL-Exporte deshalb aus). Fallback-Pfad: der
+   * vis-Canvas des 2D-Fallbacks (build2D) ist ohne Weiteres exportierbar.
+   * Der Blob-/Anchor-/Revoke-Pfad folgt exakt exportGraphPng (app.js) und
+   * downloadClusterJson oben. Der 3D-Canvas ist transparent
+   * (backgroundColor 'rgba(0,0,0,0)'), deshalb wird wie im Haupt-Pfad auf
+   * die Bühnenfarbe (--a6-graph-canvas, Noir: dunkle Bühne) gezeichnet.
+   * Review 2026-10-07: Pre-Export-Deny-Recheck gegen den Freeze-Satz —
+   * Treffer kappen den Satz und malen ihn neu, bevor der Canvas erfasst
+   * wird (Parität zum JSON-Pfad: 'Export-Grundlage je Download
+   * deny-geprüft'). */
+  function setPngBtnVisible(visible) {
+    // PNG-Button-Sichtbarkeit gehört dem Graph-Aufbau (renderGraph), nicht
+    // dem Payload-Gate: exportPayload wird VOR renderGraph gesetzt
+    // (render() 1200 vs. paintCluster-Aufruf von renderGraph) — ein
+    // Payload-Gate gäbe im noGraph-Endzustand einen sichtbaren toten
+    // Button, genau das P1-Muster.
+    if (!overlay) return;
+    const btn = overlay.querySelector('#cluster-png-download');
+    if (btn) btn.hidden = !visible;
+  }
+
+  function setPngBtnLabel(mode) {
+    // Label-Semantik (Review 2026-10-07): Der Button exportiert den
+    // stehenden Canvas — im 3D-Pfad den 3D-Graphen, im vis-Fallback die
+    // 2D-Ausweichansicht. Das Label folgt der tatsächlichen
+    // Export-Grundlage; data-i18n wird mitgeschrieben, damit applyStatic
+    // bei hx:langchange (i18n.mjs) in der neuen Sprache die richtige
+    // Variante setzt (Muster app.js 3123).
+    if (!overlay) return;
+    const btn = overlay.querySelector('#cluster-png-download');
+    if (!btn) return;
+    const key = mode === '2d' ? 'modal.downloadPng2d' : 'modal.downloadPng3d';
+    btn.setAttribute('data-i18n', key);
+    btn.textContent = t(key);
+  }
+
+  async function downloadClusterPng() {
+    if (!overlay) return;
+    // Pre-Export-Deny-Recheck (Review 2026-10-07, Parität zum JSON-Pfad):
+    // Der Canvas wird nur je Freeze-Tick neu gemalt (recheckFrozen →
+    // paintCluster, getrieben vom 60-s-Refresh), die serverseitige
+    // Deny-Liste rotiert alle 5 s — ein nach dem letzten Paint neu
+    // verweigertes Mitglied kann noch auf dem Canvas stehen (2D-Fallback:
+    // graphLabel trägt die Adresse). Bei Treffer: Freeze-Satz kappen und
+    // daraus neu malen, bevor erfasst wird — das PNG basiert dann auf dem
+    // aktuellen Deny-Stand wie der JSON-Export.
+    const token = renderToken;
+    if (frozen && isDeniedAddrAsync) {
+      try {
+        const denied = new Set();
+        for (const n of frozen.nodes) {
+          const a = String(n.id);
+          if (typeof isDeniedAddr === 'function' && isDeniedAddr(a)) { denied.add(a); continue; }
+          if (await isDeniedAddrAsync(a)) denied.add(a);
+        }
+        if (denied.size) {
+          removeFrozenMembers(denied);
+          if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
+          const els = modalEls();
+          if (!frozen || !frozen.nodes.length) {
+            // Kompletttreffer: Köder-Deny schlägt Freeze (Invariante wie in
+            // recheckFrozen) — nichts Exportierbares übrig, ehrliche Leere.
+            clearToEmptyState(els);
+            return;
+          }
+          await paintCluster(els, frozen.cluster, frozen.nodes, frozen.edges, token, false);
+          if (token !== renderToken || !isOpen) return; // zwischenzeitlich neu gerendert/geschlossen
+          if (exportPayload) {
+            // Export-Grundlage aus dem gekappten Satz neu schneiden (Muster
+            // recheckFrozen) — kein nachträglich Verweigertes darf auch im
+            // JSON-Payload stehen bleiben.
+            exportPayload = buildExportPayload(frozen.cluster, frozen.nodes, frozen.edges);
+          }
+        }
+      } catch { /* Nachprüfung fehlgeschlagen: Export auf render-gefilterter Basis (wie JSON-Pfad) */ }
+    }
+    // Canvas-Quelle: 3D-Instanz (preserveDrawingBuffer) oder vis-Canvas des
+    // 2D-Fallbacks im selben .cluster-3d — guardiert wie exportGraphPng.
+    let src = null;
+    try {
+      if (fg3d && typeof fg3d.renderer === 'function') src = fg3d.renderer().domElement;
+    } catch { /* Renderer-API nicht verfügbar: DOM-Fallback unten */ }
+    if (!src || typeof src.toBlob !== 'function') {
+      try {
+        const stage = overlay.querySelector('.cluster-3d');
+        src = stage ? stage.querySelector('canvas') : null;
+      } catch { src = null; }
+    }
+    if (!src || typeof src.toBlob !== 'function') return; // kein exportierbarer Canvas
+    const w = src.width || 0;
+    const h = src.height || 0;
+    if (!w || !h) return;
+    const target = document.createElement('canvas');
+    target.width = w;
+    target.height = h;
+    const ctx2d = target.getContext('2d');
+    if (!ctx2d) return;
+    // Bühnenfarbe live aus dem Token (Muster exportGraphPng, app.js): ohne
+    // Füllung wäre das PNG transparent.
+    let stageColor = '#ffffff';
+    try {
+      stageColor = getComputedStyle(document.body).getPropertyValue('--a6-graph-canvas').trim() || '#ffffff';
+    } catch { /* ohne CSS-Zugang: Hell-Fallback */ }
+    ctx2d.fillStyle = stageColor;
+    ctx2d.fillRect(0, 0, w, h);
+    ctx2d.drawImage(src, 0, 0);
+    // Dateiname: cluster-ID VOR dem async Callback einfangen — close() nullt
+    // currentClusterId (Review 2026-10-07); der JSON-Pfad hält analog das
+    // vorher eingefangene payload.cluster.id.
+    const cid = String(currentClusterId ?? '').replace(/[^A-Za-z0-9_-]/g, '_');
+    target.toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `cluster-${cid}-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16)}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+  }
+
   function clusterSeverity(cluster, clusterNodes) {
     const rank = { info: 0, suspect: 1, malicious: 2 };
     let sev = 'info';
@@ -1667,6 +1845,10 @@ export function initClusterDrilldown(ctx) {
     if (ok3d && webglAvailable()) {
       try {
         build3D(clusterNodes, clusterEdges, graphEl, clusterId);
+        // PNG-Button nur bei stehendem exportierbarem Canvas (Fix 2026-10-07):
+        // 3D-Renderer läuft mit preserveDrawingBuffer (build3D).
+        setPngBtnVisible(true);
+        setPngBtnLabel('3d'); // Label = tatsächliche Export-Grundlage
         return;
       } catch {
         // Konstruktor-Fehler -> Fallback unten
@@ -1678,12 +1860,15 @@ export function initClusterDrilldown(ctx) {
         build2D(clusterNodes, clusterEdges, graphEl);
         noteEl.textContent = t('modal.fallback2d');
         noteEl.hidden = false;
+        setPngBtnVisible(true); // vis-Canvas ist ohne Guard exportierbar
+        setPngBtnLabel('2d'); // exportiert wird der 2D-Canvas — das Label darf keinen 3D-Graphen versprechen
         return;
       } catch {
         // vis-Fehler -> statischer Zustand unten
       }
     }
     teardown2D();
+    setPngBtnVisible(false); // noGraph-Endzustand: kein Canvas -> kein PNG-Export
     graphEl.innerHTML = `<p class="graph-note">${esc(t('modal.noGraph'))}</p>`;
   }
 
@@ -1984,7 +2169,16 @@ export function initClusterDrilldown(ctx) {
     reset3dHover();
     if (!fg3d) {
       graphEl.innerHTML = '';
-      fg3d = window.ForceGraph3D()(graphEl);
+      // preserveDrawingBuffer (Fix 2026-10-07, PNG-Export): das Bundle
+      // (3d-force-graph@1.80.0) reicht rendererConfig per
+      // Object.assign({antialias:!0,alpha:!0}, rendererConfig) direkt an den
+      // THREE.WebGLRenderer durch (Bundle-Nachweis: stateInit liest
+      // e.rendererConfig; Default preserveDrawingBuffer:false). Ohne diese
+      // Option wäre der Canvas nach dem Frame-Clear nicht mehr lesbar —
+      // toBlob/toDataURL lieferten ein schwarzes Bild (app.js 1911-1913
+      // schloss WebGL-Exporte deshalb aus). downloadClusterPng malt damit
+      // über fg3d.renderer().domElement.
+      fg3d = window.ForceGraph3D({ rendererConfig: { preserveDrawingBuffer: true } })(graphEl);
       // Containergröße statt Fenstergröße (Befund 2026-09-29): das Bundle
       // initialisiert width/height mit window.innerWidth/innerHeight — auf
       // der .cluster-3d-Bühne (520 px, overflow:hidden) wurde das Canvas

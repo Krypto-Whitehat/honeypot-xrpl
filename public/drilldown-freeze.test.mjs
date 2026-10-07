@@ -76,6 +76,9 @@ function makeEl(tag) {
     addEventListener(type, fn) { (el.listeners[type] = el.listeners[type] || []).push(fn); },
     removeEventListener() {},
     focus() {},
+    // setPngBtnLabel schreibt data-i18n auf den Button (applyStatic-Parität)
+    setAttribute(k, v) { (el._attrs = el._attrs || {})[k] = String(v); },
+    getAttribute(k) { return el._attrs && k in el._attrs ? el._attrs[k] : null; },
     querySelector(sel) {
       if (!el._q.has(sel)) el._q.set(sel, makeEl("div"));
       return el._q.get(sel);
@@ -514,6 +517,258 @@ test("Stale-Overlay Fallback: Restore scheitert und kein Snapshot → ehrliche m
   assert.equal(q(".cluster-modal-table").innerHTML, "", "ehrliche Leerung (Inhalt existierte nie)");
 });
 
+/* ---------------- Export-Invarianten (Fix 2026-10-07) ----------------
+   P1: Der JSON-Button wurde nur im Live-Zweig von render() aktiviert
+   (Payload-Gate + Unhide); der Persistiert-Nachlade-Zweig node-loser
+   Cluster umging den Block — exportPayload blieb null, downloadClusterJson
+   lief still in den Early-Return. close()/openCluster() nullten die
+   Grundlage, ohne die Buttons zu verstecken ('sichtbar aber tot').
+   P2: PNG-Export des Cluster-Graphen — build3D-Factory-Konfig
+   (rendererConfig.preserveDrawingBuffer) + Handler über
+   fg3d.renderer().domElement; Sichtbarkeit gateiert renderGraph.
+   Ehrliche Stub-Einordnung: hidden-Assertions schlagen vor dem Fix NICHT
+   fehl (makeEl-Default hidden=false, querySelector erfindet Elemente für
+   jeden Selector). Die pinning Assertion jedes Tests ist die jeweilige
+   Nicht-hidden-Assertion: Download-Payload, Factory-Args, toBlob-Typ,
+   close-Re-Hide. */
+
+test("Export-Invariante Restore: node-loser Nachlade-Render aktiviert den JSON-Download (Payload überlebt den Freeze-Tick)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = emptyWindowGraph();
+  const dd = initClusterDrilldown(makeCtx({
+    getPersistedClusterById: async () => makePersistedView(),
+  }));
+  dd.openCluster(CID);
+  await settle();
+
+  // hidden-Assertion: dokumentiert den Vertrag, schlägt im Stub aber NICHT
+  // vor dem Fix fehl (makeEl-Default hidden=false, querySelector erfindet
+  // Elemente). Die pinning Assertion ist der Download:
+  assert.equal(q("#cluster-json-download").hidden, false, "Restore-Render zeigt den JSON-Button");
+  let captured = null;
+  class BlobStub {
+    constructor(parts) { captured = String(parts[0]); }
+  }
+  const prevBlob = globalThis.Blob;
+  const prevURL = globalThis.URL;
+  const prevOverlay = appendedOverlay; // downloadClusterJson -> body.appendChild(<a>) überschreibt den Stub-Pointer
+  globalThis.Blob = BlobStub;
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  try {
+    await q("#cluster-json-download").listeners.click[0]();
+    assert.ok(captured, "Restore-Export erzeugt JSON (vor dem Fix: Early-Return → captured null)");
+    const payload = JSON.parse(captured);
+    assert.equal(payload.cluster.id, CID, "Payload trägt die cluster.id des Bestands");
+    assert.equal(payload.totalDrops, 4400, "Metriken aus dem persistierten Cluster-Kopf");
+    assert.deepEqual(payload.members, [A1, A2, A3], "Mitglieder aus dem restaurierten Knotensatz");
+    assert.equal(payload.edges.length, 2, "persistierte Kanten im Payload");
+    // Freeze-Tick: recheckFrozen schneidert den Payload gegen den Freeze-Satz
+    // neu — der Download bleibt über die Modal-Lebensdauer verfügbar.
+    appendedOverlay = prevOverlay; // Download 1 hat den Pointer auf den <a>-Stub
+    // geschrieben (body.appendChild-Muster) — vor Download 2 zwingend zurück.
+    dd.refresh();
+    await settle();
+    captured = null;
+    await q("#cluster-json-download").listeners.click[0]();
+    assert.ok(captured, "Payload überlebt den Freeze-Tick (recheckFrozen schneidert neu)");
+    const payload2 = JSON.parse(captured);
+    assert.deepEqual(payload2.members, [A1, A2, A3], "Freeze-Schnitt hält die Mitglieder");
+    assert.equal(payload2.totalDrops, 4400, "Freeze-Schnitt hält die Metriken");
+  } finally {
+    appendedOverlay = prevOverlay;
+    if (prevBlob === undefined) delete globalThis.Blob; else globalThis.Blob = prevBlob;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+    liveGraph = makeGraph();
+  }
+});
+
+test("Export-Invariante close(): Escape-close verbirgt den JSON-Button (kein 'sichtbar aber tot')", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph();
+  const dd = initClusterDrilldown(makeCtx());
+  dd.openCluster(CID);
+  await settle();
+  assert.equal(q("#cluster-json-download").hidden, false, "Live-Render zeigt den Button (Payload-Gate)");
+  docListeners.keydown[docListeners.keydown.length - 1]({ key: "Escape", preventDefault() {} });
+  // Pinning-Punkt DIREKT nach close(): vor dem Fix nullte close() zwar
+  // exportPayload, fasste den Button aber nicht an → hidden bleibt false → Fail.
+  assert.equal(q("#cluster-json-download").hidden, true, "close() versteckt den Button (hidden-Invariante zum Early-Return)");
+});
+
+test("PNG-Export: Factory erhält rendererConfig.preserveDrawingBuffer, Handler malt über fg3d.renderer().domElement", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph("PNG-Cluster", 4);
+  const record = makeRecord();
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  const prevCreateElement = documentStub.createElement;
+  const prevURL = globalThis.URL;
+  const prevOverlay = appendedOverlay; // downloadClusterPng -> body.appendChild(<a>) überschreibt appendedOverlay
+  windowStub.ForceGraph3D = (cfg) => { record.factoryArgs = cfg; return () => makeFakeFg3d(record); };
+  documentStub.createElement = (tag) => {
+    const el = makeEl(tag);
+    if (tag === "canvas") {
+      el.width = 0; el.height = 0;
+      el.toBlob = (cb, type) => { record.pngCaptured = type; cb({ fake: true }); };
+      el.getContext = () => ({ fillStyle: "", fillRect() {}, drawImage() {} }); // webglAvailable bejahen + 2D-Ziel
+    }
+    return el;
+  };
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  try {
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+    assert.ok(record.factoryArgs?.rendererConfig?.preserveDrawingBuffer === true,
+      "rendererConfig.preserveDrawingBuffer an die ForceGraph3D-Factory (vor dem Fix: Factory ohne Argument → Fail)");
+    // hidden-Assertion dokumentiert das Gate (pinnt vor dem Fix nicht —
+    // erfundener Button mit hidden=false); pinning sind Factory-Args + pngCaptured.
+    assert.equal(q("#cluster-png-download").hidden, false, "PNG-Button bei stehendem 3D-Canvas sichtbar");
+    assert.equal(q("#cluster-png-download").textContent, t("modal.downloadPng3d"),
+      "Label im 3D-Pfad: 3D-Variante (Export-Grundlage ist der 3D-Canvas)");
+    await q("#cluster-png-download").listeners.click[0]();
+    assert.equal(record.pngCaptured, "image/png", "toBlob über fg3d.renderer().domElement");
+  } finally {
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D; // Muster der build3D-Tests
+    documentStub.createElement = prevCreateElement;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+    appendedOverlay = prevOverlay; // zwingend: ohne Rückbau greifen Folge-Tests auf den <a>-Stub
+    liveGraph = makeGraph();
+  }
+});
+
+test("Export-Invariante noGraph: PNG-Button im noGraph-Endzustand verborgen (Gate gehört renderGraph, nicht dem Payload)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph();
+  const dd = initClusterDrilldown(makeCtx());
+  dd.openCluster(CID);
+  await settle();
+  // Standard-Stub: kein ForceGraph3D/vis, Injektion mit sofortigem onerror
+  // -> ehrlicher noGraph-Pfad. exportPayload IST gesetzt (Payload-Gate läuft
+  // vor renderGraph) — ein Payload-Gate für den PNG-Button gäbe hier einen
+  // sichtbaren toten Button; renderGraph muss ihn verborgen haben.
+  assert.equal(q("#cluster-png-download").hidden, true, "PNG-Button im noGraph-Zustand verborgen (vor dem Fix: erfundener Button hidden=false → Fail)");
+  assert.equal(q("#cluster-json-download").hidden, false, "JSON-Button bleibt sichtbar (Payload vorhanden, Graph-Status irrelevant)");
+});
+
+/* ---------------- PNG-Export: Deny-Gate-Parität und Label-Semantik (Review 2026-10-07) ---------------- */
+
+test("PNG-Export Deny-Gate: vor dem toBlob wird der Freeze-Satz gegen die aktuelle Deny-Liste nachgeprüft (Parität zum JSON-Pfad)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph("PNG-Deny-Cluster", 4);
+  const record = makeRecord();
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  const prevCreateElement = documentStub.createElement;
+  const prevURL = globalThis.URL;
+  const prevOverlay = appendedOverlay; // Download-Pfad überschreibt den Pointer erneut
+  windowStub.ForceGraph3D = (cfg) => { record.factoryArgs = cfg; return () => makeFakeFg3d(record); };
+  documentStub.createElement = (tag) => {
+    const el = makeEl(tag);
+    if (tag === "canvas") {
+      el.width = 0; el.height = 0;
+      el.toBlob = (cb, type) => { record.pngCaptured = type; cb({ fake: true }); };
+      el.getContext = () => ({ fillStyle: "", fillRect() {}, drawImage() {} });
+    }
+    return el;
+  };
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  try {
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+    // Referenzen VOR dem Download sichern (body.appendChild(<a>) schreibt appendedOverlay um):
+    const tableEl = q(".cluster-modal-table");
+    assert.ok(tableEl.innerHTML.includes(A2), "Ausgangslage: A2 steht im Freeze-Satz");
+    // Deny-Rotation NACH dem letzten Paint: A2 wird neu verweigert, während der
+    // Canvas (Fake-Renderer) noch mit A2 steht — genau die vom Review gemeldete
+    // Asymmetrie (JSON-Pfad prüft je Download, PNG-Pfad prüfte nicht).
+    denySet.add(A2);
+    await q("#cluster-png-download").listeners.click[0]();
+    assert.equal(record.pngCaptured, "image/png", "Export läuft nach dem erzwungenen Re-Paint");
+    assert.ok(!tableEl.innerHTML.includes(A2), "neu verweigerte Adresse vor dem Export aus Freeze-Satz und Canvas-Grundlage gekappt (vor dem Fix: kein Recheck → Fail)");
+    assert.ok(tableEl.innerHTML.includes(A1) && tableEl.innerHTML.includes(A3), "übrige Mitglieder bleiben erhalten");
+  } finally {
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    documentStub.createElement = prevCreateElement;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+    appendedOverlay = prevOverlay;
+    denySet.clear();
+    liveGraph = makeGraph();
+  }
+});
+
+test("PNG-Export Deny-Gate: Kompletttreffer exportiert nichts — Köder-Deny schlägt Freeze (ehrliche Leere statt PNG)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph("PNG-Komplett-Deny", 4);
+  const record = makeRecord();
+  const prevForceGraph3D = windowStub.ForceGraph3D;
+  const prevCreateElement = documentStub.createElement;
+  const prevURL = globalThis.URL;
+  const prevOverlay = appendedOverlay;
+  windowStub.ForceGraph3D = (cfg) => { record.factoryArgs = cfg; return () => makeFakeFg3d(record); };
+  documentStub.createElement = (tag) => {
+    const el = makeEl(tag);
+    if (tag === "canvas") {
+      el.width = 0; el.height = 0;
+      el.toBlob = (cb, type) => { record.pngCaptured = type; cb({ fake: true }); };
+      el.getContext = () => ({ fillStyle: "", fillRect() {}, drawImage() {} });
+    }
+    return el;
+  };
+  globalThis.URL = { createObjectURL: () => "blob:stub", revokeObjectURL: () => {} };
+  try {
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+    const graphEl = q(".cluster-3d");
+    const pngBtn = q("#cluster-png-download");
+    denySet.add(A1); denySet.add(A2); denySet.add(A3); // alle Mitglieder neu verweigert
+    await pngBtn.listeners.click[0]();
+    assert.equal(record.pngCaptured, null, "kein toBlob bei Kompletttreffer (Export-Grundlage existiert nicht mehr)");
+    assert.ok(graphEl.innerHTML.includes(t("modal.gone")), "Total-Leerung als Terminalzustand (Muster recheckFrozen)");
+    assert.equal(pngBtn.hidden, true, "PNG-Button bei leerem Graph verborgen");
+  } finally {
+    if (prevForceGraph3D === undefined) delete windowStub.ForceGraph3D; else windowStub.ForceGraph3D = prevForceGraph3D;
+    documentStub.createElement = prevCreateElement;
+    if (prevURL === undefined) delete globalThis.URL; else globalThis.URL = prevURL;
+    appendedOverlay = prevOverlay;
+    denySet.clear();
+    liveGraph = makeGraph();
+  }
+});
+
+test("PNG-Export Label: im 2D-vis-Fallback heißt der Button nach der echten Export-Grundlage, nicht '3D-Graph' (Review-Befund)", async () => {
+  lang = "de";
+  denySet.clear();
+  liveGraph = makeGraph("2D-Label-Cluster", 4);
+  const prevVis = windowStub.vis;
+  // Minimal-Stub des vis-Netzwerks: DataSet/Network-Konstruktor reichen dem
+  // build2D-Pfad (reducedMotion false -> kein once/setOptions-Zweig).
+  windowStub.vis = {
+    DataSet: class { constructor(items) { this.items = items; } },
+    Network: class { constructor() {} once() {} setOptions() {} },
+  };
+  try {
+    const dd = initClusterDrilldown(makeCtx());
+    dd.openCluster(CID);
+    await settle();
+    const btn = q("#cluster-png-download");
+    assert.equal(btn.hidden, false, "PNG-Button bei stehendem vis-Canvas sichtbar");
+    assert.equal(btn.textContent, t("modal.downloadPng2d"),
+      "Label im 2D-Fallback: 2D-Variante (vor dem Fix: '3D-Graph als PNG' → Fail)");
+    assert.equal(btn.getAttribute("data-i18n"), "modal.downloadPng2d",
+      "data-i18n auf die 2D-Variante geschrieben (applyStatic-Parität bei Sprachwechsel)");
+  } finally {
+    if (prevVis === undefined) delete windowStub.vis; else windowStub.vis = prevVis;
+    liveGraph = makeGraph();
+  }
+});
+
 test("Stale-Overlay: node-lose Öffnung korrumpiert den Fallback-Anker nicht (kein Fremd-Adopt, kein toter Zustand)", async () => {
   lang = "de";
   liveGraph = emptyWindowGraph();
@@ -876,6 +1131,10 @@ function makeRecord() {
     linkWidthFns: [], linkColorFns: [], nodeColorFns: [], nodeThreeObjectFns: [],
     nodeThreeObjectExtend: null, onNodeHover: null, linkOpacity: null, backgroundColor: null,
     sceneNodes: [],
+    // PNG-Export-Tests (Fix 2026-10-07): Factory-Konfig der build3D-Injektion
+    // (rendererConfig.preserveDrawingBuffer) und der toBlob-Typ des
+    // Renderer-Canvas (downloadClusterPng malt über fg3d.renderer().domElement).
+    factoryArgs: null, pngCaptured: null,
   };
 }
 
@@ -920,6 +1179,16 @@ function makeFakeFg3d(record) {
         strength(v) { record.chargeStrength = v; return this; },
         distanceMax(v) { record.chargeDistanceMax = v; return this; },
         distance(v) { record.linkDistance = v; return this; },
+      };
+    },
+    // Muster des echten Bundles: fg3d.renderer() gibt den WebGLRenderer mit
+    // domElement zurück — downloadClusterPng exportiert genau diesen Canvas.
+    renderer() {
+      return {
+        domElement: {
+          width: 800, height: 600,
+          toBlob(cb, type) { record.pngCaptured = type; cb({ fake: true }); },
+        },
       };
     },
   };
