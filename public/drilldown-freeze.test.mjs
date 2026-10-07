@@ -768,7 +768,10 @@ test("3D-Layout: Skalierung nach Knotenanzahl (N=5/64/300) — Radius, Abstoßun
   assert.ok(Math.abs(p5.chargeStrength - (-60 * k5 * k5)) < 1e-9, "N=5: charge -60·cbrt(5)²");
   assert.ok(Math.abs(p64.chargeStrength - (-960)) < 1e-9, "N=64: charge -960 (Bundle-Default -60 · 4²)");
   assert.ok(Math.abs(p300.chargeStrength - (-60 * k300 * k300)) < 1e-9, "N=300: charge -60·cbrt(300)²");
-  assert.ok(Math.abs(p64.chargeDistanceMax - 6 * 12.003998667406913) < 1e-6, "N=64: Abstoßungs-Reichweite 6·maxR (bbox-Deckel gegen Ketten-Streckung)");
+  // maxR = cbrt(max(FLOOR 8, 1 + 2·log1p(1000)))·1.2 (NODE_VAL_FLOOR/
+  // NODE_VAL_LOG_GAIN in drilldown.js) — der alte Linear-Wert cbrt(1001)·1.2
+  // ≈ 12.004 schrumpft auf ≈ 2.948 (Log-Dämpfung, 3D-Forensik 2026-10-07).
+  assert.ok(Math.abs(p64.chargeDistanceMax - 6 * Math.cbrt(Math.max(8, 1 + 2 * Math.log1p(1000))) * 1.2) < 1e-6, "N=64: Abstoßungs-Reichweite 6·maxR (bbox-Deckel gegen Ketten-Streckung)");
   assert.ok(p5.nodeRelSize > 2.3 && p5.nodeRelSize < 2.4, "N=5: nodeRelSize 4/cbrt(5)≈2.34 (kleine Cluster bleiben groß)");
   assert.equal(p64.nodeRelSize, 1.2, "N=64: nodeRelSize am Deckel 1.2");
   assert.equal(p300.nodeRelSize, 1.2, "N=300: nodeRelSize am Deckel 1.2");
@@ -783,9 +786,17 @@ test("3D-Layout: Skalierung nach Knotenanzahl (N=5/64/300) — Radius, Abstoßun
   assert.equal(p5.warmupTicks, 30, "N=5: warmup 30 (Untergrenze)");
   assert.equal(p64.warmupTicks, 120, "N=64: warmup 120 (2N=128 -> Deckel 120)");
   assert.equal(p300.warmupTicks, 120, "N=300: warmup 120 (Deckel)");
-  // valOf/radiusOf entsprechen dem nodeVal-Accessor und der Bundle-Radiusformel.
-  assert.equal(p64.valOf({ inDrops: 1e9, outDrops: 0 }), 1001, "val = 1 + drops/1e6");
-  assert.ok(Math.abs(p64.radiusOf({ inDrops: 1e9, outDrops: 0 }) - Math.cbrt(1001) * 1.2) < 1e-9, "Radius = nodeRelSize·cbrt(val) wie im Bundle");
+  // valOf/radiusOf entsprechen dem nodeVal-Accessor und der Bundle-Radiusformel
+  // (weiche Log-Skalierung mit Floor — EIN Helper computeNodeVal in drilldown.js).
+  assert.equal(p64.valOf({ inDrops: 1e9, outDrops: 0 }), Math.max(8, 1 + 2 * Math.log1p(1000)), "val = max(FLOOR 8, 1 + 2·log1p(drops/1e6)) — ≈14.82 statt Linear 1001");
+  assert.ok(Math.abs(p64.radiusOf({ inDrops: 1e9, outDrops: 0 }) - Math.cbrt(Math.max(8, 1 + 2 * Math.log1p(1000))) * 1.2) < 1e-9, "Radius = nodeRelSize·cbrt(val) wie im Bundle");
+  // Floor-Vertrag (3D-Forensik 2026-10-07): drops-lose Unknown-Knoten liegen
+  // auf val=FLOOR → Mindestradius cbrt(8)·nodeRelSize = 2·nodeRelSize statt
+  // des alten val=1-Fundaments (r = nodeRelSize); ein Drainer bleibt bei
+  // gleichem N größer (die Log-Skalierung dämpft, sie dreht die Ordnung nicht).
+  assert.equal(p64.valOf({ inDrops: 0, outDrops: 0 }), 8, "Floor: valOf ohne Drops = NODE_VAL_FLOOR 8 (Unknown nicht mini)");
+  assert.ok(Math.abs(p64.radiusOf({ inDrops: 0, outDrops: 0 }) - 2 * 1.2) < 1e-9, "Unknown-Mindestradius = 2·nodeRelSize (cbrt(8)·nodeRelSize)");
+  assert.ok(p64.radiusOf({ inDrops: 1e9, outDrops: 0 }) > p64.radiusOf({ inDrops: 0, outDrops: 0 }), "Drainer > Unknown bei gleichem N");
 });
 
 test("3D-Layout: Startpositionen + Collide-Warmup lösen alle Überlappungen (N=5..300, reale Drops)", () => {
@@ -794,6 +805,7 @@ test("3D-Layout: Startpositionen + Collide-Warmup lösen alle Überlappungen (N=
     { name: "64 Knoten × 1000 XRP (Median-Cluster)", drops: Array(64).fill(1e9) },
     { name: "300 Knoten, Hub 100k XRP", drops: [1e11, ...Array(299).fill(1e9)] },
     { name: "300 Knoten, Hub 860k XRP (max realer totalDrops 8.6e11)", drops: [8.6e11, ...Array(299).fill(1e9)] },
+    { name: "300 Knoten ohne Drops (alle Unknown, Floor-Fall — Befund frozen Mega-Cluster)", drops: Array(300).fill(0) },
   ];
   for (const c of cases) {
     const nodes = c.drops.map((d, i) => ({ id: "rTESTc" + i, inDrops: d, outDrops: 0 }));

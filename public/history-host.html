@@ -103,6 +103,10 @@ import {
 import { ensureNameIndex, lookupNameCached } from './name-index.mjs';
 import { ensureExchangeRegistry, multiUserEntryOf } from './exchange-registry.mjs';
 import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
+/* Tx-Typ -> Kanten-Kategorie (DOM-frei, Muster app.js/drilldown.js): der
+ * Flow-Graph färbt Kanten je KATEGORIE über die --a6-edge-* Tokens (dieselbe
+ * Codierung wie Dashboard/Drilldown — kein zweites Farbsystem). */
+import { txCategory, EDGE_CATEGORY_ORDER } from './edge-colors.mjs';
 /* Leerzustands-Illustrationen (Design P0): Unikat-SVGs aus public/icons.mjs —
  * DOM-frei importierbar, textlos (aria-hidden), i18n unberührt. #fh-empty
  * trägt textContent-Überschreibungen (renderView/load) — dort wird nach jedem
@@ -232,9 +236,10 @@ function cssToken(name) {
 }
 
 // Rollenfarbe ausschließlich aus den bestehenden Tokens; unknown/Fallback ->
-// derselbe Teller wie ROLE_COLORS.unknown in public/app.js (#f0f0f2 mit
-// Randton #62626b als Knotenrand) — vorher war der Fallback #62626b und
-// damit von einem echten Relay-Knoten nicht zu unterscheiden. Noir-Theme:
+// derselbe Teller wie ROLE_COLORS.unknown in public/app.js (3D-Farb-Audit
+// 2026-10-07: Stahlblau #4a6478 = --a6-swatch-unknown/--a6-role-unknown,
+// 6.20:1 auf der Hell-Bühne) — vorher war der Fallback #62626b und damit
+// von einem echten Relay-Knoten nicht zu unterscheiden. Noir-Theme:
 // die Tokens sind theme-geführt, der Literale-Fallback bleibt der
 // Hell-Wert (Node-Tests).
 function roleColor(role) {
@@ -243,7 +248,46 @@ function roleColor(role) {
     const v = cssToken(token);
     if (v) return v;
   }
-  return cssToken('--a6-swatch-unknown') || '#f0f0f2';
+  return cssToken('--a6-swatch-unknown') || '#4a6478';
+}
+
+// Kanten-Kategorie-Farbe (Audit 2026-10-07) aus den theme-geführten CSS-
+// Tokens (--a6-edge-*, dieselben Werte wie EDGE_COLORS/THEME_JS_COLORS in
+// app.js) — Fallback der neutrale Kanten-Token, zuletzt das Hell-Literal
+// (Node-Tests). 'fraud' wird NUR über den Severity-Override unten erreicht.
+function edgeCategoryColor(type) {
+  const token = {
+    payment: '--a6-edge-payment',
+    market: '--a6-edge-market',
+    escrow: '--a6-edge-escrow',
+    check: '--a6-edge-check',
+    admin: '--a6-edge-admin',
+    nft: '--a6-edge-nft',
+  }[txCategory(type)];
+  if (token) {
+    const v = cssToken(token);
+    if (v) return v;
+  }
+  return cssToken('--a6-edge-neutral') || '#62626b';
+}
+
+// Fraud-Override-Grundlage (Kritiker-Pflichtkorrektur 4): die Flow-State-
+// Kanten tragen KEIN severity-Feld (viewEdge, lib/flow-state.mjs) — der
+// Override liest die severityByAddress aller Cluster (max je Adresse,
+// Schwere-Rang wie cluster-views.mjs SEV_RANK) und markiert eine Kante als
+// Betrug, wenn ein BEIDER Endpunkte 'malicious' ist (max-Regel identisch zur
+// Kanten-Schreibung lib/cluster.mjs:382-394).
+const FH_SEV_RANK = { malicious: 2, suspect: 1, info: 0 };
+function fraudAddrSetOf(clusters) {
+  const set = new Set();
+  for (const c of Array.isArray(clusters) ? clusters : []) {
+    const sba = c && typeof c.severityByAddress === 'object' ? c.severityByAddress : null;
+    if (!sba) continue;
+    for (const [addr, sev] of Object.entries(sba)) {
+      if (String(sev ?? '') === 'malicious') set.add(String(addr));
+    }
+  }
+  return set;
 }
 
 // Deterministische Kurzform für Labels (volle Adresse im title-Tooltip).
@@ -331,13 +375,14 @@ function buildFlowGraph(clusters) {
   return { nodes, pos, edges: drawn };
 }
 
-function renderFlowGraph(graph) {
+function renderFlowGraph(graph, fraudAddrs) {
   const labelNodes = graph.nodes.length <= NODE_LABEL_MAX;
   const labelEdgeIds = new Set(graph.edges.slice(0, EDGE_LABEL_MAX).map(edgeIdentity));
   // Token-Weg (Noir-Theme): Kanten-/Label-/Kontur-Töne LIVE aus den Tokens
   // (--a6-edge-neutral ist theme-geführt; Noir #8f8da0 statt #62626b);
   // Literale nur als Hell-Fallback.
   const edgeColor = cssToken('--a6-edge-neutral') || '#62626b';
+  const fraudColor = cssToken('--a6-edge-fraud') || cssToken('--a6-sev-malicious') || '#b3261e';
   const inkColor = cssToken('--a6-ink') || '#141416';
   const nodeStroke = cssToken('--a6-cluster-border') || '#17171b';
   const parts = [];
@@ -345,6 +390,13 @@ function renderFlowGraph(graph) {
   for (const e of graph.edges) {
     const a = graph.pos[e.from];
     const b = graph.pos[e.to];
+    // Fraud-Override VOR der Kategorie-Farbe (Kritiker-Pflichtkorrektur 4):
+    // ein malicious-Endpunkt (severityByAddress der Cluster) färbt die Kante
+    // in die Severity-Rot-Familie; gestrichelt als nicht-farblicher
+    // Deutan-Kanal (Kritiker-Pflichtkorrektur 6). Sonst: Tx-KATEGORIE.
+    const fraud = fraudAddrs instanceof Set && (fraudAddrs.has(String(e.from)) || fraudAddrs.has(String(e.to)));
+    const stroke = fraud ? fraudColor : edgeCategoryColor(e.type);
+    const dashes = fraud ? ' stroke-dasharray="6 4"' : '';
     const drops = typeof e.amountDrops === 'number' && Number.isFinite(e.amountDrops) ? e.amountDrops : 0;
     const w = Math.round((1 + Math.min(3, Math.log10(1 + Math.max(0, drops) / 1e6))) * 100) / 100;
     const mx = Math.round(((a[0] + b[0]) / 2) * 100) / 100;
@@ -358,7 +410,7 @@ function renderFlowGraph(graph) {
     if (labelEdgeIds.has(edgeIdentity(e))) {
       label = '<text x="' + mx + '" y="' + (my - 3) + '" font-size="9" fill="' + edgeColor + '" text-anchor="middle">' + esc(fmtXrp(drops)) + '</text>';
     }
-    parts.push('<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + edgeColor + '" stroke-width="' + w + '" opacity="0.5"><title>' + title + '</title></line>' + label);
+    parts.push('<line x1="' + a[0] + '" y1="' + a[1] + '" x2="' + b[0] + '" y2="' + b[1] + '" stroke="' + stroke + '" stroke-width="' + w + '"' + dashes + ' opacity="0.5"><title>' + title + '</title></line>' + label);
   }
   for (const nd of graph.nodes) {
     const p = graph.pos[nd.id];
@@ -380,12 +432,21 @@ function renderFlowGraph(graph) {
   return parts.join('');
 }
 
-// Legende: bestehende Swatch-Klassen + Rollen-Labels (kein zweites Farbsystem).
+// Legende: bestehende Swatch-Klassen + Rollen-Labels (kein zweites
+// Farbsystem), ergänzt um die Kanten-KATEGORIEN (Audit 2026-10-07) — dieselben
+// swatch-* Token-Regeln wie die Dashboard-Legende; Labels über legend.*
+// (DE/EN). 'other' nutzt legend.other, 'fraud' legend.fraud (Betrugskante).
 function flowLegendHtml() {
-  const rows = ROLE_ORDER
+  const roleRows = ROLE_ORDER
     .map((r) => '<span class="role-chip"><span class="swatch swatch-' + r + '"></span>' + esc(roleLabel(r)) + '</span>')
     .join('');
-  return '<div class="cluster-roles">' + rows + '</div>';
+  const edgeRows = EDGE_CATEGORY_ORDER
+    .map((cat) => {
+      const label = t('legend.' + cat) || cat;
+      return '<span class="role-chip"><span class="swatch swatch-' + esc(cat) + '"></span>' + esc(label) + '</span>';
+    })
+    .join('');
+  return '<div class="cluster-roles">' + roleRows + edgeRows + '</div>';
 }
 
 const els = {
@@ -451,7 +512,7 @@ function renderView(data) {
   // Cluster existieren: Flow-Graph aus den retained edges + Rollen rendern.
   const graph = buildFlowGraph(clusters);
   if (graph) {
-    els.graph.innerHTML = renderFlowGraph(graph) + flowLegendHtml();
+    els.graph.innerHTML = renderFlowGraph(graph, fraudAddrSetOf(clusters)) + flowLegendHtml();
     els.graph.hidden = false;
     els.graphEmpty.hidden = true;
   } else {

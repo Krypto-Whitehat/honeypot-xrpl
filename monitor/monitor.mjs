@@ -446,6 +446,18 @@ async function handleTx(event) {
     hpLabel = baitByAddress.get(tx.Destination);
   } else if (tx.LimitAmount?.issuer && isBait(tx.LimitAmount.issuer)) {
     hpLabel = baitByAddress.get(tx.LimitAmount.issuer); // TrustSet gegen Köder-Issuer
+  } else if (tx.Issuer && isBait(tx.Issuer)) {
+    // Fake-Mint im Namen eines Köders: NFTokenMint mit optionalem Issuer-Feld
+    // ("The issuer of the token, if the sender of the account is issuing it
+    // on behalf of another account", https://xrpl.org/docs/references/
+    // protocol/transactions/types/nftokenmint — live verifiziert 2026-10-07).
+    // Spiegel der bestehenden Detector-Regel (lib/detector.mjs:371,
+    // Fund-Adresse = Issuer), die der Touch-Pfad bisher nicht sah — ein
+    // fremd geminteter NFT mit Köder-Issuer ist eine Berührung des Köders.
+    // Budget-neutral: suspect-Pfad OHNE zusätzliche RPC — traceFunding und
+    // checkDrainerSweep laufen ausschließlich auf malicious (Payment/TrustSet);
+    // die Request-Bilanz 189 + 40 + 20 + 1 <= 250 bleibt unverändert.
+    hpLabel = baitByAddress.get(tx.Issuer);
   } else {
     hpLabel = metaFindBait(event); // Offer/NFTokenOffer-Ledger-Objekte des Köders (MEDIUM 9b/9c)
     viaOrderbook = hpLabel !== null;

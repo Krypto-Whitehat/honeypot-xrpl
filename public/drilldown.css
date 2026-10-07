@@ -547,10 +547,4 @@ body.cluster-modal-open {
     border: 1px solid CanvasText;
     box-shadow: none;
   }
-
-  /* Dominantes Rollenband bleibt auch in erzwungenen Farbschemata sichtbar */
-  .cluster-modal-surface {
-    border-left-width: 3px;
-    border-left-color: CanvasText;
-  }
 }

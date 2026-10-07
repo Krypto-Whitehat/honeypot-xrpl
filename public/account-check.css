@@ -98,15 +98,16 @@
   margin: 0 0 12px;
   padding: 12px 14px;
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
-  border-left: 3px solid var(--a6-control-line);
+  /* 1px-Vollrahmen in control-line (3.66 / 3.93:1 ✓) statt des früheren
+     hartcodierten 3px-Linksbändchens; der Fehlerzustand färbt den ganzen
+     Rahmen über border-color (Regel unten). */
+  border: 1px solid var(--a6-control-line);
   border-radius: var(--a6-r-md);
 }
 
 .check-card-error {
   background: var(--a6-error-soft);
   border-color: var(--a6-error); /* Vollton statt Alpha: komponierte Border <3:1 (WCAG 1.4.11) */
-  border-left-color: var(--a6-error);
 }
 
 .check-card-title {
@@ -129,8 +130,7 @@
 
 .check-report {
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
-  border-left: 3px solid var(--a6-line-strong);
+  border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
   padding: 14px 16px;
   box-shadow: var(--a6-e1);
@@ -376,11 +376,5 @@
   .check-eligibility-unknown {
     border: 1px solid CanvasText;
     box-shadow: none;
-  }
-
-  .check-report,
-  .check-card-error {
-    border-left-width: 3px;
-    border-left-color: CanvasText;
   }
 }

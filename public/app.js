@@ -105,6 +105,15 @@ import { collectTagsByAddr, addrChipsRowHtml } from './cluster-chips.mjs';
  * als Karte verschwinden — Live-Befund 2026-10-06); SEV_RANK single source
  * aus dem Modul (Sortierung + Severity-Union). */
 import { SEV_RANK, serverClustersFromView, mergeClusterViews } from './cluster-views.mjs';
+/* Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07): DOM-freie Aggregation
+ * über die BESTEHENDE /api/flow-state-View (7 d + 30 d in einem Durchlauf,
+ * +0 Requests/+0 Functions) plus Zeilen-Markup über injizierte Host-Gates
+ * (esc/displayFindingAddr — Maskierungs-Pflicht bleibt im Host, Muster
+ * cluster-chips.mjs). */
+import { aggregateExchangeOutflows, exchangeOutflowRowHtml } from './exchange-outflows.mjs';
+// Tx-Typ -> Kanten-Kategorie (DOM-frei, deterministisch; Modul-Vertrag im
+// Kopf von edge-colors.mjs). Farb-WERTE bleiben hier (JS-Spiegel der Tokens).
+import { txCategory } from './edge-colors.mjs';
 /* Unikat-SVG-Sprache (Design P0, public/icons.mjs): Leerzustands-
  * illustrationen für Feed/Log/Cluster, Panel-Signet Activity Graph und der
  * Diagramm-Marker geflaggter Stunden — DOM-frei, textlos (aria-hidden),
@@ -157,6 +166,10 @@ import('./drilldown.js')
         // Tabellen-Objekte EDGE_COLORS/ROLE_COLORS wandern by-reference und
         // sind über die In-place-Mutation ohnehin aktuell).
         edgeDefault: () => EDGE_DEFAULT,
+        // Tx-Typ -> Kanten-Kategorie (edge-colors.mjs): EDGE_COLORS ist seit
+        // dem Farb-Audit kategorie-geählt; die Modul-Lookups laufen über
+        // edgeColors[ctx.edgeCategory(type)] || edgeDefaultOf().
+        edgeCategory: txCategory,
         roleLabels: ROLE_LABEL,
         physicsCluster: PHYSICS_CLUSTER,
         addrActionsHtml,
@@ -218,6 +231,8 @@ import('./globe.js')
         // Zugriff lesen, damit der Globe-Neuaufbau (hx:themechange →
         // rebuildGlobe) die Noir-Fallbacks sieht.
         edgeDefault: () => EDGE_DEFAULT,
+        // Tx-Typ -> Kanten-Kategorie (edge-colors.mjs), Muster drilldown-ctx.
+        edgeCategory: txCategory,
         openCluster: openClusterModal,
       });
       // Trifft das Modul erst nach dem Tab-Wechsel ein, wird die Aktivierung
@@ -766,19 +781,46 @@ function bindAddrActions() {
 /* Graph (vis-network 10.1.2)                                          */
 /* ------------------------------------------------------------------ */
 
+// Kanten-Farben je Tx-KATEGORIE (txCategory, public/edge-colors.mjs) statt
+// Einzelltyp-Lookup (Audit 2026-10-07: die 11 Einzeltypen deckten ~11 von
+// ~60 Mainnet-Typen ab, alles andere fiel in neutralem Grau unter). Werte =
+// JS-Spiegel der --a6-edge-* Tokens (style.css, Hell-Initialwerte; Noir über
+// THEME_JS_COLORS.edge — applyThemeColors mutiert dieses Objekt in place).
+// 'fraud' ist der Override VOR der Kategorie (Kritiker-Pflicht 4):
+// severity 'malicious' — direkt auf der Kante (Live-Pfad, lib/cluster.mjs:394)
+// oder an einem BEIDER Endpunkte via severityByAddress (Flow-State-Kanten
+// tragen kein severity-Feld, lib/flow-state.mjs viewEdge) — max-Regel
+// identisch zur Kanten-Schreibung lib/cluster.mjs:382-394.
 const EDGE_COLORS = {
-  Payment: '#b3261e',
-  TrustSet: '#b45309',
-  OfferCreate: '#a16207',
-  OfferCancel: '#a16207',
-  AccountSet: '#1d4ed8',
-  EscrowCreate: '#6d28d9',
-  EscrowFinish: '#6d28d9',
-  CheckCreate: '#0f766e',
-  PaymentChannelCreate: '#0f766e',
-  NFTokenMint: '#a21caf',
-  NFTokenAcceptOffer: '#a21caf',
+  fraud: '#b3261e',   // = --a6-edge-fraud = --a6-sev-malicious (Hell)
+  payment: '#066348', // = --a6-edge-payment = --a6-success (Hell) — bewusste
+                      // 'grün=gut'-Bundlung (Kritiker-Pflicht 6, Option a);
+                      // 1.33:1 Luminanzabstand zum Check/Channel-Teal
+  market: '#b45309',  // = --a6-edge-market — DEX+AMM zusammengelegt (alte
+                      // Einzeltöne lagen 1.02:1 zusammen, Kritiker-Pflicht 5)
+  escrow: '#6d28d9',  // = --a6-edge-escrow
+  check: '#0f766e',   // = --a6-edge-check (Check* + PaymentChannel*)
+  admin: '#1d4ed8',   // = --a6-edge-admin (Konten-/Protokoll-Verwaltung)
+  nft: '#c026d3',     // = --a6-edge-nft — Fuchsia statt Alt-Violett: Abstand
+                      // zu Escrow 1.12:1 -> 1.51:1 (Kritiker-Pflicht 6)
 };
+
+// Kanten-Schwere inkl. Cluster-Kontext (Pflichtkorrektur 4): die rohen
+// Flow-Kanten tragen severity nur im Live-Pfad (lib/cluster.mjs:394, max
+// BEIDER Endpunkte); Flow-State-View-Kanten tragen KEINE (viewEdge). Der
+// Override liest deshalb zusätzlich die severityByAddress des Clusters
+// (beide Endpunkte; Client-Kopie cluster-views.mjs:43/:98-118) mit derselben
+// max-Regel. true NUR für 'malicious' — suspect/info behalten die
+// Kategorie-Farbe.
+const SEV_OVERRIDE_RANK = { malicious: 3, suspect: 2, info: 1 };
+function edgeIsFraud(e, sevByAddr) {
+  const rank = (v) => SEV_OVERRIDE_RANK[String(v ?? '')] ?? 0;
+  return Math.max(
+    rank(e && e.severity),
+    rank(sevByAddr && sevByAddr[String((e && e.from) ?? '')]),
+    rank(sevByAddr && sevByAddr[String((e && e.to) ?? '')]),
+  ) >= SEV_OVERRIDE_RANK.malicious;
+}
 // Neutraler Kanten-Ton — let (nicht const): applyThemeColors() tauscht den
 // Wert beim Theme-Wechsel (Noir #8f8da0 = --a6-edge-neutral, 5.68:1 auf der
 // dunklen Bühne; #62626b wäre dort nur ~2.2:1). Unbekannte Kanten-Typen
@@ -786,8 +828,15 @@ const EDGE_COLORS = {
 // edgeDefault-Thunk.
 let EDGE_DEFAULT = '#62626b';
 
-// Rollen-Farbcodierung (Design-Vorgabe Astra 6): weiße/tonale Fläche,
-// 1px abgedunkelter Tintenrand je Rolle.
+// Rollen-Farbcodierung (Design-Vorgabe Astra 6): tonale Fläche, 1px
+// Tintenrand je Rolle. Unknown seit dem 3D-Farb-Audit 2026-10-07 KEIN
+// Neutralgrau mehr: der bisherige Hell-Wert #f0f0f2 lag mit 1.14:1 unter
+// der weißen Bühne (Noir #262436: 1.21:1 auf #14131f) — die 3D-Kugel ohne
+// Rand-Mesh war unsichtbar. Neu: entsättigtes Stahlblau (Hell) / Eisblau
+// (Noir), beides ≥3:1 gegen beide Bühnen (Werte live per WCAG gerechnet)
+// und gegen alle Rollen-/Kantentöne unterschieden; dieselben Werte wie
+// --a6-swatch-unknown/--a6-role-unknown (style.css) — Legende, 3D-Kugel
+// und Kartenrahmen teilen sich EINE Unknown-Farbe.
 const ROLE_COLORS = {
   source: {
     background: '#16305c', border: '#0f2445',
@@ -810,9 +859,9 @@ const ROLE_COLORS = {
     hover: { background: '#1a8d84', border: '#115e59' },
   },
   unknown: {
-    background: '#f0f0f2', border: '#62626b',
-    highlight: { background: '#e2e2e6', border: '#3f3f46' },
-    hover: { background: '#e2e2e6', border: '#3f3f46' },
+    background: '#4a6478', border: '#dbe6f2',
+    highlight: { background: '#5d788f', border: '#dbe6f2' },
+    hover: { background: '#5d788f', border: '#dbe6f2' },
   },
 };
 
@@ -845,8 +894,12 @@ const CLUSTER_NODE_PROPERTIES = {
  * applyThemeColors(theme) MUTIERT die bestehenden Objekte in place —
  * drilldown.js/globe.js halten Referenzen auf genau diese Objekte (ctx),
  * die Identität bleibt also gültig. Unbekannte Rolle 'unknown' ist aus-
- * drücklich Teil der Tabelle (Noir: Füllung #262436 / Rand #8f8da0 wie
- * --a6-swatch-unknown — derselbe Teller wie die CSS-Seite). */
+ * drücklich Teil der Tabelle (3D-Farb-Audit 2026-10-07: Noir Eisblau
+ * #bfe3ff / Rand #46587e, Hell Stahlblau #4a6478 / Rand #dbe6f2 — wie
+ * --a6-swatch-unknown/--a6-role-unknown, derselbe Teller wie die CSS-Seite;
+ * ≥3:1 gegen beide Bühnen --a6-graph-canvas, vorher 1.21:1 bzw. 1.14:1).
+ * Layer-Regel: Kugeln = Rollenfarbe, Kanten = Tx-Kategorie — Eisblau steht
+ * ausschließlich auf Knoten, Grüns nur auf Kanten (Konfliktvermeidung). */
 const THEME_JS_COLORS = {
   light: {
     canvasInk: '#141416',      // = --a6-ink (Hell)
@@ -854,17 +907,16 @@ const THEME_JS_COLORS = {
     edgeDefault: '#62626b',    // = --a6-edge-neutral
     edgeHighlight: '#141416',
     edge: {
-      Payment: '#b3261e', TrustSet: '#b45309', OfferCreate: '#a16207', OfferCancel: '#a16207',
-      AccountSet: '#1d4ed8', EscrowCreate: '#6d28d9', EscrowFinish: '#6d28d9',
-      CheckCreate: '#0f766e', PaymentChannelCreate: '#0f766e',
-      NFTokenMint: '#a21caf', NFTokenAcceptOffer: '#a21caf',
+      // Kategorie-Schlüssel (txCategory) = --a6-edge-* Tokens (Hell).
+      fraud: '#b3261e', payment: '#066348', market: '#b45309', escrow: '#6d28d9',
+      check: '#0f766e', admin: '#1d4ed8', nft: '#c026d3',
     },
     roles: {
       source: { background: '#16305c', border: '#0f2445', highlight: { background: '#2a4a7c', border: '#0f2445' }, hover: { background: '#2a4a7c', border: '#0f2445' } },
       drainer: { background: '#b3261e', border: '#7f1d1d', highlight: { background: '#d03b33', border: '#7f1d1d' }, hover: { background: '#d03b33', border: '#7f1d1d' } },
       collector: { background: '#b45309', border: '#7c3a06', highlight: { background: '#c96a1f', border: '#7c3a06' }, hover: { background: '#c96a1f', border: '#7c3a06' } },
       relay: { background: '#0f766e', border: '#115e59', highlight: { background: '#1a8d84', border: '#115e59' }, hover: { background: '#1a8d84', border: '#115e59' } },
-      unknown: { background: '#f0f0f2', border: '#62626b', highlight: { background: '#e2e2e6', border: '#3f3f46' }, hover: { background: '#e2e2e6', border: '#3f3f46' } },
+      unknown: { background: '#4a6478', border: '#dbe6f2', highlight: { background: '#5d788f', border: '#dbe6f2' }, hover: { background: '#5d788f', border: '#dbe6f2' } },
     },
     cluster: {
       color: { background: '#ffffff', border: '#17171b', highlight: { background: '#f6f6f7', border: '#141416' }, hover: { background: '#f6f6f7', border: '#141416' } },
@@ -877,17 +929,21 @@ const THEME_JS_COLORS = {
     edgeDefault: '#8f8da0',    // = --a6-edge-neutral 5.68 ✓
     edgeHighlight: '#f2f1f8',  // 16.38 ✓
     edge: {
-      Payment: '#ff7a70', TrustSet: '#ffb45e', OfferCreate: '#f2b872', OfferCancel: '#f2b872',
-      AccountSet: '#8ab4ff', EscrowCreate: '#b79cff', EscrowFinish: '#b79cff',
-      CheckCreate: '#3ecfbb', PaymentChannelCreate: '#3ecfbb',
-      NFTokenMint: '#e879f9', NFTokenAcceptOffer: '#e879f9',
+      // Kategorie-Schlüssel (txCategory) = --a6-edge-* Tokens (Noir-Block).
+      // payment = --a6-success exakt (#4ade80): bewusste 'grün=gut'-Bundlung
+      // (Kritiker-Pflicht 6, Option a) — Luminanzabstand zum Check-Teal
+      // bleibt 1.11:1, dokumentiert; der nicht-farbliche Betrugskanal
+      // (gestrichelte Fraud-Kanten) trägt die Unterscheidung zur Rot-Seite.
+      // nft #d946ef: Abstand zu Escrow 1.08:1 -> 1.52:1, zu Payment 1.98:1.
+      fraud: '#ff7a70', payment: '#4ade80', market: '#ffb45e', escrow: '#b79cff',
+      check: '#3ecfbb', admin: '#8ab4ff', nft: '#d946ef',
     },
     roles: {
       source: { background: '#7d9bff', border: '#5f7ddb', highlight: { background: '#9db5ff', border: '#5f7ddb' }, hover: { background: '#9db5ff', border: '#5f7ddb' } },
       drainer: { background: '#ff7a70', border: '#d95f56', highlight: { background: '#ff9d94', border: '#d95f56' }, hover: { background: '#ff9d94', border: '#d95f56' } },
       collector: { background: '#ffb45e', border: '#c98a45', highlight: { background: '#ffcb8f', border: '#c98a45' }, hover: { background: '#ffcb8f', border: '#c98a45' } },
       relay: { background: '#3ecfbb', border: '#2fa393', highlight: { background: '#74ded0', border: '#2fa393' }, hover: { background: '#74ded0', border: '#2fa393' } },
-      unknown: { background: '#262436', border: '#8f8da0', highlight: { background: '#343149', border: '#8f8da0' }, hover: { background: '#343149', border: '#8f8da0' } },
+      unknown: { background: '#bfe3ff', border: '#46587e', highlight: { background: '#d9efff', border: '#46587e' }, hover: { background: '#d9efff', border: '#46587e' } },
     },
     cluster: {
       color: { background: '#262436', border: '#f2f1f8', highlight: { background: '#322f47', border: '#f2f1f8' }, hover: { background: '#322f47', border: '#f2f1f8' } },
@@ -1166,13 +1222,27 @@ function updateRawGraph(cg, maxNodes = null) {
     };
   });
 
+  // severityByAddress über ALLE Cluster des Graphen unionen (max je Adresse,
+  // SEV_RANK wie cluster-views.mjs) — Basis des Fraud-Overrides für Kanten
+  // ohne eigenes severity-Feld (Kritiker-Pflichtkorrektur 4).
+  const sevByAddr = {};
+  for (const c of Array.isArray(cg.clusters) ? cg.clusters : []) {
+    const sba = c && typeof c.severityByAddress === 'object' ? c.severityByAddress : null;
+    if (!sba) continue;
+    for (const [a, s] of Object.entries(sba)) {
+      const v = String(s ?? '');
+      if ((SEV_RANK[v] ?? 0) > (SEV_RANK[sevByAddr[a]] ?? 0)) sevByAddr[a] = v;
+    }
+  }
   const nextEdges = rawEdges.map((e) => {
     // type bleibt ROH: Edge-Id (`${e.from}->${e.to}::${type}`) und
-    // EDGE_COLORS-Lookup dürfen bei Sprachwechsel nicht wandern (sonst
+    // Kategorien-Lookup dürfen bei Sprachwechsel nicht wandern (sonst
     // stale Kanten im inkrementell gepflegten vis-Netz). Nur das Label
     // wird übersetzt gerendert.
     const type = String(e.type || 'Sonstige');
     const typeLabel = type === 'Sonstige' ? t('edge.other') : type;
+    // Fraud-Override VOR der Kategorie-Farbe (Kritiker-Pflichtkorrektur 4).
+    const fraud = edgeIsFraud(e, sevByAddr);
     return {
       id: String(e.txHash || `${e.from}->${e.to}::${type}`),
       from: String(e.from),
@@ -1185,7 +1255,13 @@ function updateRawGraph(cg, maxNodes = null) {
       // toTag — an der Kurzform nie (fail-closed).
       title: `${displayFindingAddr(e.from)} → ${displayFindingAddr(e.to)} (${typeLabel})`
         + (e.toTag != null && multiUserEntryOf(e.to) ? ` · #${e.toTag}` : ''),
-      color: { color: EDGE_COLORS[type] || EDGE_DEFAULT, highlight: canvasInk, hover: canvasInk },
+      color: { color: fraud ? EDGE_COLORS.fraud : (EDGE_COLORS[txCategory(type)] || EDGE_DEFAULT), highlight: canvasInk, hover: canvasInk },
+      // Deutan-Zweitkanal (Kritiker-Pflichtkorrektur 6): Betrugskanten
+      // GESTRICHELT — Fraud-Rot und Payment-Grün liegen luminanznah (1.11:1
+      // Hell) und sind auf der Rot-Grün-Achse verwechselbar, das Muster
+      // bleibt. Cluster-Verbund-Kanten nutzen dieselbe Dash-Form, aber nur
+      // im Cluster-Tab und in neutralen Farben (applyClustering).
+      ...(fraud ? { dashes: [6, 4] } : {}),
       font: { color: canvasBody, size: 12, face: '"JetBrains Mono", ui-monospace, Consolas, monospace', strokeWidth: 0, align: 'middle' },
     };
   });
@@ -2634,6 +2710,132 @@ async function applyFlowStateView(view) {
   if (globeMod && typeof globeMod.refresh === 'function') globeMod.refresh();
 }
 
+/* ---------- Top-10 Börsen-Zuflüsse (Daten-Forensik 2026-10-07) ----------
+ * Client-Aggregation aus der bestehenden /api/flow-state-View (KEIN neuer
+ * api/*-Endpoint, Vercel-Hobby-Limit 12 Functions): je Börsen-Konto der
+ * Union (multiUserSnapshot = 81er-Registry ∪ verifizierte well-known-Namen,
+ * dieselbe Quelle wie die Tag-Chips) werden die eingehenden Drops aus
+ * Kanten mit Drainer-Kontext aggregiert — Kanten-Prädikat (severityByAddress
+ * ∈ {malicious, suspect} ODER rolesByAddress === 'drainer' der QUELLE im
+ * selben Cluster), Fenster 7 d/30 d über closeTime. Fail-closed: ohne Union
+ * oder ohne Daten bleibt die Box im leeren Zustand — es werden keine Zahlen
+ * erfunden. Zeilen-Markup läuft ausschließlich über die Host-Gates
+ * (esc + displayFindingAddr, Pflicht 12); der Abdeckungszeitraum
+ * (coverageFrom→generatedAt, Pflicht 11) und der 50-Kanten-Cap-Hinweis
+ * machen die Grenzen der Box sichtbar. */
+let exoutWindow = 7;             // aktives Fenster des Umschalters (7 | 30)
+let exoutUnionRetryDone = false; // Einmal-Guard des Nachzieh-Takts (kein Loop)
+
+function renderExchangeOutflows(viewData) {
+  const listEl = document.getElementById('exchange-outflow-list');
+  const emptyEl = document.getElementById('exout-empty');
+  const coverageEl = document.getElementById('exout-coverage');
+  const cappedEl = document.getElementById('exout-capped');
+  if (!listEl || !emptyEl || !viewData) return; // ohne Daten nichts behaupten
+  // Börsen-Union (fail-closed): null ohne Registry-Modul, leere Map ohne
+  // geladenen Stand — beides endet im leeren Zustand der Box.
+  const exchangeMap = registryMod && typeof registryMod.multiUserSnapshot === 'function'
+    ? registryMod.multiUserSnapshot()
+    : null;
+  // Nachzieh-Takt: beim ersten Poll sind der lazy Registry-/Bulk-Fetch oft
+  // noch in der Luft — beide Ensures anstoßen (dieselben Andockstellen wie
+  // rebuildClusterGraph/applyFlowStateView, GENAU EIN Fetch pro Session über
+  // Guard/TTL im Modul) und GENAU EINMAL nachziehen, sobald sie sich
+  // auflösen. Der Einmal-Guard verhindert einen Microtask-Loop; jeder
+  // Später-Fall ist durch den 60-s-Poll abgedeckt.
+  if ((!exchangeMap || exchangeMap.size === 0) && !exoutUnionRetryDone) {
+    exoutUnionRetryDone = true;
+    const waiting = [];
+    if (registryMod && typeof registryMod.ensureExchangeRegistry === 'function') {
+      waiting.push(registryMod.ensureExchangeRegistry());
+    }
+    if (nameIndexMod && typeof nameIndexMod.ensureNameIndex === 'function') {
+      waiting.push(nameIndexMod.ensureNameIndex());
+    }
+    Promise.allSettled(waiting)
+      .then(() => { if (flowData) renderExchangeOutflows(flowData); })
+      .catch(() => { /* fail-closed: Box bleibt leer */ });
+  }
+  let result = null;
+  if (exchangeMap && exchangeMap.size > 0) {
+    try {
+      result = aggregateExchangeOutflows(viewData, exchangeMap, Date.now());
+    } catch {
+      result = null; // Aggregations-Fehler: leer statt erfundener Zahlen
+    }
+  }
+  const bucket = exoutWindow === 30 ? result?.thirty : result?.seven;
+  const rows = Array.isArray(bucket?.rows) ? bucket.rows : [];
+  if (rows.length) {
+    // Host-Gates der Zeilen (Pflicht 12): esc auf jeden Registry-String,
+    // displayFindingAddr als Anzeige-Maske, fmtXrp/fmtNum aus i18n.mjs.
+    const ui = {
+      esc,
+      displayAddr: displayFindingAddr,
+      fmtXrp,
+      fmtNum,
+      labels: {
+        rankAria: (n) => t('exout.rank', { n }),
+        // Singular/Plural nach dem globe.edge1/edgeN-Muster (1 edge / 1 Kante).
+        inflows: (n) => (n === 1 ? t('exout.inflows1') : t('exout.inflows', { n: fmtNum(n) })),
+        clusters: (n) => (n === 1 ? t('exout.clusters1') : t('exout.clusters', { n: fmtNum(n) })),
+        transit: (xrp) => t('exout.transit', { xrp }),
+        wellKnown: t('exout.wellKnown'),
+      },
+    };
+    listEl.innerHTML = rows.map((row, i) => exchangeOutflowRowHtml(row, i + 1, ui)).join('');
+    listEl.hidden = false;
+    emptyEl.hidden = true;
+  } else {
+    listEl.innerHTML = '';
+    listEl.hidden = true;
+    emptyEl.hidden = false;
+  }
+  // Pflicht 11: der TATSÄCHLICHE Abdeckungszeitraum (min firstSeen der
+  // betrachteten Cluster bis zum Aggregationszeitpunkt) — nicht das
+  // nominelle Fenster (live lag die State-Tiefe zuletzt bei ~2 Tagen).
+  if (coverageEl) {
+    if (result?.coverageFrom) {
+      coverageEl.textContent = t('exout.coverage', {
+        from: fmtDateTime(result.coverageFrom),
+        to: fmtDateTime(result.generatedAt),
+      });
+      coverageEl.hidden = false;
+    } else {
+      coverageEl.textContent = '';
+      coverageEl.hidden = true;
+    }
+  }
+  // Cap-Sichtbarkeit: Cluster am 50-Kanten-Deckel des States — die Summen
+  // sind eine Untergrenze (nur bei belegter Kappung, kein Dauertext).
+  if (cappedEl) {
+    const capped = Number(bucket?.totals?.cappedClusters) || 0;
+    if (capped > 0) {
+      cappedEl.textContent = t('exout.capped', { n: fmtNum(capped) });
+      cappedEl.hidden = false;
+    } else {
+      cappedEl.textContent = '';
+      cappedEl.hidden = true;
+    }
+  }
+}
+
+// Fenster-Umschalter der Box (aria-pressed-Muster der Cluster-Dichte, keine
+// Persistenz — Default 7 Tage je Session).
+function bindExchangeOutflows() {
+  const b7 = document.getElementById('exout-window-7d');
+  const b30 = document.getElementById('exout-window-30d');
+  if (!b7 || !b30) return;
+  const setWindow = (days) => {
+    exoutWindow = days === 30 ? 30 : 7;
+    b7.setAttribute('aria-pressed', String(exoutWindow === 7));
+    b30.setAttribute('aria-pressed', String(exoutWindow === 30));
+    if (flowData) renderExchangeOutflows(flowData);
+  };
+  b7.addEventListener('click', () => setWindow(7));
+  b30.addEventListener('click', () => setWindow(30));
+}
+
 async function pollBlockWindow() {
   const res = await fetch('/api/block-window?range=' + encodeURIComponent(feedRange), { cache: 'no-store' });
   if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2656,6 +2858,10 @@ async function pollFlowState() {
   const body = await res.json();
   flowData = body;
   lastFlowStateAt = Date.now(); // Bestands-Zeitstempel (modal.persisted-Banner im Drilldown)
+  // Top-10 Börsen-Zuflüsse: Client-Aggregation aus derselben Antwort
+  // (Budget +0 Requests/+0 Functions); deckt auch den initialen Poll ab
+  // (Startblock ruft void serverPollTick() sofort nach dem Binden).
+  renderExchangeOutflows(body);
   if (feedMode === 'history') {
     await applyFlowStateView(body);
   } else {
@@ -3311,6 +3517,7 @@ bindViews();
 setView(viewFromHash()); // Deep-Link (#history/#check) anwenden, sonst Dashboard
 bindLive();
 bindFeed();
+bindExchangeOutflows();
 bindAddrActions();
 document.getElementById('stat-network').textContent = t('net.mainnet');
 // Standard-Feed ist LIVE (Tilt erfolgt in der Rate-Gate-Importkette,
@@ -3345,6 +3552,9 @@ document.addEventListener('hx:langchange', () => {
   updateLiveStats();
   document.getElementById('stat-network').textContent = t('net.mainnet');
   setConn(true, connLabel());
+  // Top-10-Box: Zeilen tragen t()-Texte (Kanten-/Cluster-Zähler, Badges,
+  // Abdeckungszeitraum) — nach applyStatic in der neuen Sprache neu bauen.
+  renderExchangeOutflows(flowData);
   // Fenster-Flächen in der neuen Sprache neu bauen (Notiz/Chart/Fenster-Karten
   // tragen t()-Texte; der ROHE reason-Vergleich bleibt sprachunabhängig).
   if (feedMode === 'history') {

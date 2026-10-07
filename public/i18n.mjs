@@ -125,6 +125,10 @@ export const DICT = {
     'legend.payment': 'Payment',
     'legend.check': 'Check/Channel',
     'legend.escrow': 'Escrow',
+    'legend.market': 'DEX/AMM',
+    'legend.nft': 'NFT',
+    'legend.admin': 'Admin',
+    'legend.fraud': 'Fraud edge',
     'legend.other': 'Other',
     'legend.malicious': 'Malicious',
     'legend.suspect': 'Suspect',
@@ -548,6 +552,30 @@ export const DICT = {
     'note.peeling-chain': 'Peeling chain: {hops} staged hops (avg {ratio} % forwarding).',
     'note.fake-nft-fraud-fee': 'NFTokenMint with usurious transfer fee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer to the same target {addr} in one ledger.',
+
+    /* index.html — Top-10-Börsen-Zuflüsse (Daten-Forensik 2026-10-07,
+       public/exchange-outflows.mjs): ehrliche Box — Grenzen (50-Kanten-Deckel,
+       Betrugs-Retention statt Wallet-Historie, Union-Erkennung) stehen in der
+       Fußnote, der reale Abdeckungszeitraum (coverageFrom→generatedAt) wird
+       dynamisch gerendert (#exout-coverage, Pflicht 11), der Cap-Hinweis nur
+       bei belegter Kappung (#exout-capped). */
+    'exout.title': 'Top exchanges receiving drained funds',
+    'exout.subtitle': 'Where the most drained funds land — the exchanges themselves are not the perpetrators.',
+    'exout.window7': '7 days',
+    'exout.window30': '30 days',
+    'exout.windowAria': 'Coverage window of the exchange inflows',
+    'exout.rank': 'Rank {n}',
+    'exout.inflows': '{n} edges',
+    'exout.inflows1': '1 edge',
+    'exout.clusters': '{n} clusters',
+    'exout.clusters1': '1 cluster',
+    'exout.transit': 'Transit share: {xrp} XRP',
+    'exout.empty': 'No inflows from drainer context to registry exchanges in the selected window yet.',
+    'exout.capped': '{n} of the considered clusters sit at the 50-edge cap of the state — all sums are a lower bound.',
+    'exout.coverage': 'Covered period: {from} – {to}',
+    'exout.note': 'Only the 50 largest edges by volume per cluster are kept by the state (lower bound); 30 days reflects the fraud retention of the live state, not a complete wallet history; exchange detection = registry ∪ verified well-known names.',
+    'exout.aria': 'Top 10 exchanges by incoming drops from drainer context',
+    'exout.wellKnown': 'well-known',
   },
 
   de: {
@@ -615,6 +643,10 @@ export const DICT = {
     'legend.payment': 'Payment',
     'legend.check': 'Check/Channel',
     'legend.escrow': 'Escrow',
+    'legend.market': 'DEX/AMM',
+    'legend.nft': 'NFT',
+    'legend.admin': 'Admin',
+    'legend.fraud': 'Betrug (Kante)',
     'legend.other': 'Sonstige',
     'legend.malicious': 'Maliziös',
     'legend.suspect': 'Verdächtig',
@@ -1038,6 +1070,30 @@ export const DICT = {
     'note.peeling-chain': 'Peeling-Kette: {hops} gestaffelte Hops (Ø {ratio} % Weiterleitung).',
     'note.fake-nft-fraud-fee': 'NFTokenMint mit Wucher-TransferFee ({pct} %).',
     'note.fake-nft-fraud-offer': '{n} NFTokenCreateOffer auf dasselbe Ziel {addr} in einem Ledger.',
+
+    /* index.html — Top-10-Börsen-Zuflüsse (Daten-Forensik 2026-10-07,
+       public/exchange-outflows.mjs): ehrliche Box — Grenzen (50-Kanten-Deckel,
+       Betrugs-Retention statt Wallet-Historie, Union-Erkennung) stehen in der
+       Fußnote, der reale Abdeckungszeitraum (coverageFrom→generatedAt) wird
+       dynamisch gerendert (#exout-coverage, Pflicht 11), der Cap-Hinweis nur
+       bei belegter Kappung (#exout-capped). */
+    'exout.title': 'Top-Börsen für abgeflossene Mittel',
+    'exout.subtitle': 'Wo das meiste abgeflossene Geld landet — die Börsen selbst sind nicht die Täter.',
+    'exout.window7': '7 Tage',
+    'exout.window30': '30 Tage',
+    'exout.windowAria': 'Zeitfenster der Börsen-Zuflüsse',
+    'exout.rank': 'Rang {n}',
+    'exout.inflows': '{n} Kanten',
+    'exout.inflows1': '1 Kante',
+    'exout.clusters': '{n} Cluster',
+    'exout.clusters1': '1 Cluster',
+    'exout.transit': 'Transit-Anteil: {xrp} XRP',
+    'exout.empty': 'Noch keine Zuflüsse aus Drainer-Kontext an Registry-Börsen im gewählten Fenster.',
+    'exout.capped': '{n} der betrachteten Cluster liegen am 50-Kanten-Deckel des States — alle Summen sind eine Untergrenze.',
+    'exout.coverage': 'Abgedeckter Zeitraum: {from} – {to}',
+    'exout.note': 'Vom State bleiben nur die 50 nach Volumen größten Kanten je Cluster erhalten (Untergrenze); 30 Tage entspricht der Betrugs-Retention des Live-States, keiner vollständigen Wallet-Historie; Börsen-Erkennung = Registry ∪ verifizierte well-known-Namen.',
+    'exout.aria': 'Top 10 Börsen nach eingehenden Drops aus Drainer-Kontext',
+    'exout.wellKnown': 'well-known',
   },
 };
 

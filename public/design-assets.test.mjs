@@ -16,9 +16,11 @@
  *     als letztes direktes Kind von .cluster-modal-body statt Side-Kind,
  *     width:100% statt max-content, th umbrechbar bei nowrap-td), Info-Boxen
  *     Historie/Archiv (renderShell-details + #feed-archive-hint + i18n-Keys).
- *  6) Cluster-Liste/Mega-Cluster (Design P2): Band-Breiten-Token statt
- *     hardcodeder 3-px-Bänder (einheitlich, KEIN strong-Token — Plan-Kritik
- *     7a), solide sev-malicious-Kopf-Tönung (kein Gradient), Drainer-Rollen-
+ *  6) Cluster-Liste/Mega-Cluster (Design P2): Bedeutungs-Vollrahmen statt
+ *     Linksbändchen (1px border-color je Severity/Rolle in derselben Token-
+ *     Farbe; KEIN border-left-Band, KEIN Band-Token — Vollrahmen-Umbau
+ *     2026-10-07), solide sev-malicious-Kopf-Tönung (kein Gradient),
+ *     Drainer-Rollen-
  *     Chip, --a6-r-xs für Swatches, Verdichtungs-Segment-Control mit
  *     aria-pressed + localStorage 'hx-density', data-size="mega" mit EINEM
  *     gemeinsamen '+N weitere Konten'-i18n-Wortfeld (Plan-Kritik 10).
@@ -250,18 +252,62 @@ test('Info-Boxen Historie/Archiv: renderShell-details, #feed-archive-hint, i18n-
 
 /* ---------------- Cluster-Liste/Mega-Cluster (Design P2, 2026-10-06) ---------------- */
 
-test('Band-Token: --a6-band-width ersetzt alle hardcodeden 3-px-Bänder, kein strong-Token', () => {
-  assert.match(styleCss, /--a6-band-width:\s*3px;/, 'Token definiert');
-  // Plan-Kritik 7a: das Band bleibt EINHEITLICH 3 px — ein verstärkendes
-  // strong-Token (4 px für sev-malicious) darf nicht existieren.
-  assert.doesNotMatch(styleCss, /--a6-band-width-strong/, 'kein Band-Verstärkungs-Token');
-  assert.doesNotMatch(styleCss, /border-left:\s*3px/, 'kein hardcodedes border-left: 3px mehr');
-  assert.doesNotMatch(styleCss, /border-left-width:\s*3px/, 'forced-colors-Block nutzt den Token');
-  for (const sel of ['.stat', '.block-card', '.log-row', '.cluster-card']) {
-    const block = styleCss.match(new RegExp(`${sel.replace('.', '\\.')}\\s*\\{[^}]*\\}`, ''));
+test('Bedeutungs-Vollrahmen: kein Linksbändchen, Bedeutung als border-color (Umbau 2026-10-07)', () => {
+  // Das 3-px-Linksbändchen ist ersatzlos entfernt: Bedeutung (Severity/Rolle)
+  // trägt jetzt der 1-px-Vollrahmen in derselben Token-Farbe (WCAG 1.4.11 —
+  // alle Bedeutungsfarben ≥ 3:1 gegen beide Theme-Surfaces, siehe
+  // CONTRAST_PAIRS). Kein Band-Token, kein border-left mehr im Stylesheet.
+  assert.doesNotMatch(styleCss, /border-left/, 'kein border-left-Band mehr');
+  assert.doesNotMatch(styleCss, /--a6-band-width/, 'Band-Token ersatzlos entfernt');
+  // Basis-Vollrahmen: 1 px in neutraler Token-Farbe (1:1 die bisherige
+  // Bandfarbe; .cluster-card steigt von der Alpha-card-line-Kante auf
+  // control-line ≥ 3:1 — .hx-kpi behält --a6-card-line).
+  const baseBorders = [
+    ['.stat', 'var\\(--a6-line-strong\\)'],
+    ['.block-card', 'var\\(--a6-line-strong\\)'],
+    ['.log-row', 'var\\(--a6-muted\\)'],
+    ['.cluster-card', 'var\\(--a6-control-line\\)'],
+  ];
+  for (const [sel, tokenRx] of baseBorders) {
+    const block = styleCss.match(new RegExp(`${sel.replace('.', '\\.')}\\s*\\{[^}]*\\}`));
     assert.ok(block, `Regelblock ${sel} vorhanden`);
-    assert.match(block[0], /border-left:\s*var\(--a6-band-width\)/, `${sel} nutzt den Band-Token`);
+    assert.match(block[0], new RegExp(`border:\\s*1px solid ${tokenRx}`), `${sel}: 1px-Vollrahmen`);
   }
+  // Varianten tragen die Bedeutung als border-color (alle vier Seiten).
+  const variants = [
+    ['.stat-malicious', '--a6-error'], ['.stat-suspect', '--a6-warn'],
+    ['.stat-events', '--a6-brand-blue'],
+    ['.block-card.has-malicious', '--a6-error'], ['.block-card.has-suspect', '--a6-warn'],
+    ['.log-row.sev-malicious', '--a6-error'], ['.log-row.sev-suspect', '--a6-warn'],
+    ['.log-row.sev-info', '--a6-info'],
+    ['.cluster-card.role-source', '--a6-role-source'],
+    ['.cluster-card.role-drainer', '--a6-role-drainer'],
+    ['.cluster-card.role-collector', '--a6-role-collector'],
+    ['.cluster-card.role-relay', '--a6-role-relay'],
+    ['.cluster-card.role-unknown', '--a6-role-unknown'],
+  ];
+  for (const [sel, token] of variants) {
+    const rx = sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const rule = styleCss.match(new RegExp(`${rx}\\s*\\{[^}]*\\}`));
+    assert.ok(rule, `Regel ${sel} vorhanden`);
+    assert.match(rule[0], new RegExp(`border-color:\\s*var\\(${token}\\)`), `${sel} in ${token}`);
+  }
+  // Forced colors: die Band-Nachzieh-Blöcke sind ersatzlos weg — der
+  // 1-px-CanvasText-Vollrahmen in den Sammellisten bleibt.
+  assert.doesNotMatch(styleCss, /border-left-width/, 'kein forced-colors-Bandblock mehr (style.css)');
+  // account-check.css (hardcodiertes 3px-Band) und drilldown.css (Forced-
+  // colors-Artefakt ohne Normalmodus-Pendant) folgen demselben Muster.
+  assert.doesNotMatch(accountCheckCss, /border-left/, 'check-card/check-report auf Vollrahmen');
+  assert.doesNotMatch(drilldownCss, /border-left/, 'drilldown-Band-Artefakt entfernt');
+  const checkCard = accountCheckCss.match(/\.check-card\s*\{[^}]*\}/);
+  assert.ok(checkCard, '.check-card-Regel vorhanden');
+  assert.match(checkCard[0], /border:\s*1px solid var\(--a6-control-line\)/, '.check-card: 1px-Vollrahmen');
+  const checkReport = accountCheckCss.match(/\.check-report\s*\{[^}]*\}/);
+  assert.ok(checkReport, '.check-report-Regel vorhanden');
+  assert.match(checkReport[0], /border:\s*1px solid var\(--a6-line-strong\)/, '.check-report: 1px-Vollrahmen');
+  const checkErr = accountCheckCss.match(/\.check-card-error\s*\{[^}]*\}/);
+  assert.ok(checkErr, '.check-card-error-Regel vorhanden');
+  assert.match(checkErr[0], /border-color:\s*var\(--a6-error\)/, 'Fehlerzustand als border-color');
 });
 
 test('Kleinradius-Token: --a6-r-xs definiert und von .swatch referenziert', () => {
@@ -475,10 +521,11 @@ test('Noir: Token-Override-Block vollständig (Flächen, Status, Akzent, Graph, 
     '--a6-brand-blue', '--a6-brand-teal', '--a6-brand-amber',
     '--a6-graph-canvas', '--a6-graph-grid', '--a6-graph-line', '--a6-graph-line-soft',
     '--a6-cluster-fill', '--a6-cluster-border', '--a6-cluster-hover',
-    '--a6-edge-payment', '--a6-edge-trustset', '--a6-edge-offer', '--a6-edge-escrow',
-    '--a6-edge-accountset', '--a6-edge-check', '--a6-edge-nft', '--a6-edge-neutral', '--a6-edge-ink',
+    '--a6-edge-payment', '--a6-edge-market', '--a6-edge-escrow',
+    '--a6-edge-admin', '--a6-edge-check', '--a6-edge-nft', '--a6-edge-fraud', '--a6-edge-neutral', '--a6-edge-ink',
     '--a6-role-source', '--a6-role-source-border', '--a6-role-drainer', '--a6-role-drainer-border',
     '--a6-role-collector', '--a6-role-collector-border', '--a6-role-relay', '--a6-role-relay-border',
+    '--a6-role-unknown',
     '--a6-sev-malicious', '--a6-sev-suspect', '--a6-sev-info', '--a6-sev-neutral',
     '--a6-ink-fill', '--a6-on-ink', '--a6-card-line',
     '--a6-swatch-payment', '--a6-swatch-other', '--a6-swatch-unknown', '--a6-swatch-unknown-line',
@@ -495,11 +542,16 @@ test('Noir: Token-Override-Block vollständig (Flächen, Status, Akzent, Graph, 
   assert.equal(noirTokens['--a6-edge-neutral'], '#8f8da0');
   assert.equal(noirTokens['--a6-on-ink'], '#0c0b14');
   assert.equal(noirTokens['--a6-cluster-fill'], '#262436');
-  assert.equal(noirTokens['--a6-swatch-unknown-line'], '#8f8da0');
+  // Unknown-Tafel (3D-Farb-Audit 2026-10-07): swatch = --a6-role-unknown
+  // (Eisblau, 13.69:1 auf der Bühne), Rand #46587e = 5.29:1 auf der Füllung.
+  assert.equal(noirTokens['--a6-swatch-unknown'], '#bfe3ff');
+  assert.equal(noirTokens['--a6-swatch-unknown-line'], '#46587e');
+  assert.equal(noirTokens['--a6-role-unknown'], '#bfe3ff');
   // Hell bleibt unangetastet (Spot): die SSOT-Werte stehen weiter im Light-Block.
   assert.equal(lightTokens['--a6-bg'], '#f6f6f7');
   assert.equal(lightTokens['--a6-accent'], '#ec5b00');
   assert.equal(lightTokens['--a6-on-ink'], '#ffffff');
+  assert.equal(lightTokens['--a6-role-unknown'], '#4a6478');
 });
 
 test('Noir: keine hartcodierten Hex außerhalb der beiden Token-Blöcke (style.css)', () => {
@@ -711,15 +763,21 @@ const CONTRAST_PAIRS = [
   ['brand-blue', 'surface', 4.5, 'Text'], ['brand-teal', 'surface', 4.5, 'Text'], ['brand-amber', 'surface', 4.5, 'Text'],
   ['accent', 'surface', 3, 'UI'], ['on-accent', 'accent', 4.5, 'Text'], ['accent-text', 'surface', 4.5, 'Text'],
   ['cluster-border', 'cluster-fill', 3, 'UI'],
-  ['edge-payment', 'surface', 3, 'UI'], ['edge-trustset', 'surface', 3, 'UI'], ['edge-offer', 'surface', 3, 'UI'],
-  ['edge-escrow', 'surface', 3, 'UI'], ['edge-accountset', 'surface', 3, 'UI'], ['edge-check', 'surface', 3, 'UI'],
+  ['edge-payment', 'surface', 3, 'UI'], ['edge-market', 'surface', 3, 'UI'],
+  ['edge-escrow', 'surface', 3, 'UI'], ['edge-admin', 'surface', 3, 'UI'], ['edge-check', 'surface', 3, 'UI'],
+  ['edge-nft', 'surface', 3, 'UI'], ['edge-fraud', 'surface', 3, 'UI'],
   ['edge-nft', 'surface', 3, 'UI'], ['edge-neutral', 'surface', 3, 'UI'], ['edge-neutral', 'surface-alt', 3, 'UI'],
   ['edge-ink', 'surface', 3, 'UI'],
   ['role-source', 'surface', 3, 'UI'], ['role-source-border', 'surface', 3, 'UI'],
   ['role-drainer', 'surface', 3, 'UI'], ['role-drainer-border', 'surface', 3, 'UI'],
   ['role-collector', 'surface', 3, 'UI'], ['role-collector-border', 'surface', 3, 'UI'],
   ['role-relay', 'surface', 3, 'UI'], ['role-relay-border', 'surface', 3, 'UI'],
+  ['role-unknown', 'surface', 3, 'UI'], ['role-unknown', 'surface-alt', 3, 'UI'],
   ['swatch-unknown-line', 'swatch-unknown', 3, 'UI'],
+  // 3D-Farb-Audit 2026-10-07: die Unknown-Swatch ist die 3D-Kugelfarbe —
+  // dauerhaft ≥3:1 gegen BEIDE Bühnen-Token (graph-canvas) und die Karten-
+  // Surface verankert (Hell 6.20 / Noir 13.69, vorher 1.14 bzw. 1.21 FAIL).
+  ['swatch-unknown', 'graph-canvas', 3, 'UI'], ['swatch-unknown', 'surface', 3, 'UI'],
   ['swatch-other', 'surface', 3, 'UI'],
 ];
 
@@ -756,13 +814,21 @@ test('Noir: JS-Canvas-Paletten — THEME_JS_COLORS deckt Kanten/Rollen (inkl. un
   assert.match(appJs, /applyThemeColors\(currentJsTheme\(\)\);/, 'Startwert vor dem ersten Canvas-Render angewandt');
   assert.match(appJs, /network\.setOptions\(/, 'vis-Options-Defaults über setOptions nachgeführt (Konstruktions-Lesezeit)');
   assert.match(appJs, /edgeDefault: \(\) => EDGE_DEFAULT/, 'edgeDefault als Theme-Thunk in beiden ctx');
-  // Light-Spots (Identität zur Alt-Palette):
-  assert.match(appJs, /Payment: '#b3261e'/, 'Light-Payment unverändert');
-  assert.match(appJs, /background: '#f0f0f2', border: '#62626b'/, 'Light-unknown unverändert');
+  // Light-Spots (Farb-Audit 2026-10-07: Kanten je Tx-KATEGORIE — payment =
+  // success-Grün statt Rot, nft Fuchsia statt Alt-Violett):
+  assert.match(appJs, /payment: '#066348', \/\/ = --a6-edge-payment = --a6-success/, 'Light-Payment = success-Familie (grün)');
+  assert.match(appJs, /nft: '#c026d3'/, 'Light-NFT = Fuchsia (escrow-Abstand 1.51:1)');
+  assert.match(appJs, /fraud: '#b3261e'/, 'Fraud-Override-Token Hell');
+  // Noir-Spots: payment = --a6-success exakt, nft Fuchsia (escrow 1.52 / payment 1.98).
+  assert.match(appJs, /payment: '#4ade80'/, 'Noir-Payment = --a6-success (Bundlung dokumentiert)');
+  assert.match(appJs, /nft: '#d946ef'/, 'Noir-NFT = Fuchsia');
+  // Unknown-Spots (3D-Farb-Audit 2026-10-07): Stahlblau (Hell) / Eisblau
+  // (Noir), dieselben Werte wie --a6-swatch-unknown/--a6-role-unknown.
+  assert.match(appJs, /background: '#4a6478', border: '#dbe6f2'/, 'Light-unknown = Stahlblau (6.20:1 auf der Bühne)');
   // Noir-Spots (PFLICHTKORREKTUR 7/8: unknown + Canvas-Fonts):
   assert.match(appJs, /canvasInk: '#f2f1f8'/, 'Noir-Canvas-Ink = --a6-ink');
   assert.match(appJs, /canvasBody: '#c9c7d6'/, 'Noir-Canvas-Body = --a6-body');
-  assert.match(appJs, /unknown: \{ background: '#262436', border: '#8f8da0'/, 'Noir-unknown auf Swatch-Teller');
+  assert.match(appJs, /unknown: \{ background: '#bfe3ff', border: '#46587e'/, 'Noir-unknown = Eisblau auf Swatch-Teller (13.69:1 auf der Bühne)');
   assert.match(appJs, /fontColor: '#f2f1f8'/, 'Noir-Cluster-Font hell');
   // Renderpfade lesen die theme-geführten Variablen statt Hex (die
   // Initialwerte der Tabellen selbst sind bewusst die Hell-Literale —

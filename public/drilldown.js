@@ -38,6 +38,9 @@
  */
 
 import { t, fmtNum, fmtClock, sevText, getLang } from './i18n.mjs';
+// Tx-Typ -> Kanten-Kategorie + Legende-Reihenfolge (DOM-frei, edge-colors.mjs;
+// Farb-WERTE kommen theme-geführt aus ctx.edgeColors/EDGE_DEFAULT — app.js).
+import { txCategory, EDGE_CATEGORY_ORDER } from './edge-colors.mjs';
 
 // Lokales Vendoren (Performance-Umbau 2026-10-05): 3d-force-graph@1.80.0
 // liegt in public/vendor/ (same-origin, vercel.json Rewrite /vendor/*). Der
@@ -59,6 +62,28 @@ const FORCE_GRAPH_INTEGRITY = 'sha384-Y7bC2PBKu8ujxtvo5+Z61OeGdSVRzFsYWBK4i5dnL/
  * Die drei Helfer sind bewusst Modul-Level und exportiert: public/
  * drilldown-freeze.test.mjs prüft Determinismus, Skalierung (N=5..300) und
  * Überlappungsfreiheit der Startpositionen ohne Browser. */
+
+// Volumen-Skalierung (3D-Forensik 2026-10-07): val = max(FLOOR, 1 + GAIN·
+// ln(1 + drops/1e6)) — weiche logarithmische Skala mit hartem Floor, EINE
+// Formel in EINEM Helper: cluster3dLayoutParams.valOf (unten) UND der
+// nodeVal-Accessor in build3D rufen beide computeNodeVal auf (kein Formel-
+// Drift; der Bundle-Radius bleibt r = nodeRelSize·cbrt(val)). Der Floor 8
+// (cbrt(8) = 2) gibt drops-losen Knoten den Mindestradius 2·nodeRelSize —
+// vorher saßen sie auf dem val=1-Fundament (r = nodeRelSize) und wurden im
+// Mega-Cluster sub-pixel, weil seedRadius/chargeDistanceMax mit maxR des
+// Mega-Knotens wuchsen und zoomToFit herausfuhr (514× Radius-Vorsprung,
+// Live-readPixels 2026-10-07). Der Log-Anteil (GAIN 2) dämpft genau das:
+// 135.4M XRP → 1.69× Unknown-Radius statt 514× — Drainer dominieren weiter
+// (Farbe + 1.45×-Ring + Größe), das Layout bleibt kompakt. NaN/±Infinity
+// fallen fail-closed auf den Floor (kein NaN-Radius im Physik-Lauf).
+export const NODE_VAL_FLOOR = 8;
+export const NODE_VAL_LOG_GAIN = 2;
+export function computeNodeVal(totalDrops) {
+  const drops = Math.max(0, totalDrops ?? 0);
+  const val = 1 + NODE_VAL_LOG_GAIN * Math.log1p(drops / 1e6);
+  return Number.isFinite(val) ? Math.max(NODE_VAL_FLOOR, val) : NODE_VAL_FLOOR;
+}
+
 export function cluster3dLayoutParams(nodes) {
   const N = Math.max(1, nodes.length);
   const k = Math.cbrt(N);
@@ -66,8 +91,9 @@ export function cluster3dLayoutParams(nodes) {
   // schrumpft mit cbrt(N) (Deckel 1.2), damit 300 Knoten auf der 520-px-
   // Bühne getrennt bleiben und 5 Knoten nicht unter ~3 px fallen.
   const nodeRelSize = Math.max(1.2, 4 / k);
-  // val-Zugriff identisch zum nodeVal-Accessor in build3D.
-  const valOf = (n) => Math.max(0, 1 + ((n.inDrops ?? 0) + (n.outDrops ?? 0)) / 1e6) || 1;
+  // val-Zugriff identisch zum nodeVal-Accessor in build3D — gemeinsamer
+  // Helper computeNodeVal (oben), nicht zwei Formel-Kopien.
+  const valOf = (n) => computeNodeVal((n.inDrops ?? 0) + (n.outDrops ?? 0));
   const radiusOf = (n) => Math.cbrt(valOf(n)) * nodeRelSize;
   let maxR = 0;
   for (const n of nodes) maxR = Math.max(maxR, radiusOf(n));
@@ -187,11 +213,19 @@ export const GRAPH3D_RING_CAP = 12;
 /* ---------------- Theme (Noir, 2026-10-06) ----------------
  * Die Farb-TABELLEN dieses Moduls (ctx.roleColors/ctx.edgeColors) mutiert
  * der Host in place (app.js applyThemeColors) — die Accessoren lesen sie je
- * Aufruf und brauchen keine eigene Kopie. Nur die CANVAS-FONTS der 2D-
- * Ausweichansicht folgen hier dem dokumentierten Token-Weg: --a6-ink/
- * --a6-body LIVE aus dem computed style (Fallback = heutige Hell-Literale,
- * damit Node-Tests ohne DOM unverändert bleiben); jsTheme() liest das
- * angewandte body[data-theme] (Default Hell ohne DOM). */
+ * Aufruf und brauchen keine eigene Kopie. Neue Unknown-Tinte (3D-Forensik
+ * 2026-10-07: Noir Eisblau #bfe3ff / Hell Stahlblau #4a6478) läuft deshalb
+ * ohne eigenen Listener über denselben Pfad: i18n feuert 'hx:themechange',
+ * der Host mutiert THEME_JS_COLORS/ROLE_COLORS in place, der Theme-Listener
+ * unten re-setzt die Accessoren + Ring-Material. Layer-Regel: Kugeln tragen
+ * die ROLLEN-Farbe (hier nur base.background — der Rand wird im 3D-Bundle
+ * bewusst NICHT gerendert: kein Extra-Geometry-Mesh je Knoten, sparsames
+ * Glow-/Rand-Verhalten; die Rand-Töne leben in 2D/Legende), Kanten den Tx-
+ * Typ. Nur die CANVAS-FONTS der 2D-Ausweichansicht folgen hier dem
+ * dokumentierten Token-Weg: --a6-ink/--a6-body LIVE aus dem computed style
+ * (Fallback = heutige Hell-Literale, damit Node-Tests ohne DOM unverändert
+ * bleiben); jsTheme() liest das angewandte body[data-theme] (Default Hell
+ * ohne DOM). */
 function jsTheme() {
   try {
     const th = typeof document !== 'undefined' && document.body && document.body.dataset
@@ -276,6 +310,23 @@ export function initClusterDrilldown(ctx) {
   // eingefroren. Abwärtskompatibel: ein String-ctx (Node-Tests, makeCtx)
   // bleibt als Konstante nutzbar.
   const edgeDefaultOf = typeof ctx.edgeDefault === 'function' ? ctx.edgeDefault : () => ctx.edgeDefault;
+  // Kantenfarbe je Tx-KATEGORIE (Audit 2026-10-07): ctx.edgeColors ist
+  // kategorie-geählt (EDGE_COLORS, app.js); der Lookup läuft über
+  // txCategory(edge-colors.mjs). Fallback ohne Host-Adapter (Node-Test-ctx):
+  // Roh-Typ-Lookup — unbekannt bleibt es beim edgeDefaultOf.
+  const edgeCategoryOf = typeof ctx.edgeCategory === 'function' ? ctx.edgeCategory : (ty) => String(ty ?? '');
+  // Fraud-Override-Grundlage (Kritiker-Pflichtkorrektur 4): Adressen mit
+  // severity 'malicious' im AKTUELLEN Cluster (Knoten tragen severity;
+  // Cluster-Kanten aus dem Live-Pfad zusätzlich e.severity — Flow-State-
+  // Kanten nicht). paintCluster setzt die Menge je Render; die Accessoren
+  // (3D/2D/Zeitachse) lesen sie je Kante.
+  let fraudAddrSet = new Set();
+  const edgeIsFraud = (e) => {
+    if (String(e?.severity ?? '') === 'malicious') return true;
+    const from = e && typeof e.source === 'object' ? String(e.source.id ?? '') : String((e && e.from) ?? '');
+    const to = e && typeof e.target === 'object' ? String(e.target.id ?? '') : String((e && e.to) ?? '');
+    return fraudAddrSet.has(from) || fraudAddrSet.has(to);
+  };
   const roleLabels = ctx.roleLabels;
   const addrActionsHtml = ctx.addrActionsHtml;
   // Namens-Badge-Lookup (XRPScan-Aliase): HOST-SEITIG GEGATET —
@@ -517,6 +568,11 @@ export function initClusterDrilldown(ctx) {
         <div class="cluster-modal-body">
           <section class="cluster-modal-graph" aria-label="${esc(t('modal.graphAria'))}">
             <div class="cluster-3d"></div>
+            <!-- Kanten-Kategorien-Legende (Audit 2026-10-07): dasselbe
+                 .legend/.legend-item/.swatch-Muster wie im Dashboard — Farben
+                 ausschließlich über die --a6-edge-* Tokens (swatch-* Regeln,
+                 style.css). Inhalt erst beim Graph-Render (renderEdgeLegend). -->
+            <div class="legend cluster-graph-legend" id="cluster-graph-legend" hidden></div>
             <p class="graph-note cluster-graph-note" hidden></p>
           </section>
           <aside class="cluster-modal-side" aria-label="${esc(t('modal.detailsAria'))}">
@@ -1187,7 +1243,17 @@ export function initClusterDrilldown(ctx) {
         <span>${esc(t('cluster.lastSeen'))}${esc(fmtClock(cluster.lastSeen))}</span>
       </span>`;
 
+    // Fraud-Menge des aktuellen Clusters (Kritiker-Pflichtkorrektur 4):
+    // Knoten mit severity 'malicious' — Basis des Kanten-Overrides in
+    // 3D/2D/Zeitachse (edgeIsFraud oben). Vor JEDEM Teilrender gesetzt,
+    // damit Freezes/Persistierte dieselbe Regel erfahren.
+    fraudAddrSet = new Set(
+      (Array.isArray(clusterNodes) ? clusterNodes : [])
+        .filter((n) => String(n?.severity ?? '') === 'malicious')
+        .map((n) => String(n.id))
+    );
     renderRoles(cluster, clusterNodes, rolesEl);
+    renderEdgeLegend();
     renderTimeline(cluster, clusterEdges, timelineEl);
     renderChain(cluster, clusterNodes, clusterEdges, chainEl);
     renderTable(clusterNodes, tableEl, clusterEdges);
@@ -1372,7 +1438,7 @@ export function initClusterDrilldown(ctx) {
     const points = [];
     for (const e of clusterEdges) {
       const ep = Date.parse(String(e.closeTime ?? ''));
-      if (Number.isFinite(ep)) points.push({ ep, type: String(e.type ?? '') });
+      if (Number.isFinite(ep)) points.push({ ep, type: String(e.type ?? ''), fraud: edgeIsFraud(e) });
     }
     if (!points.length) {
       el.innerHTML = `<h3 class="cluster-modal-h">${esc(t('modal.timelineTitle'))}</h3>`
@@ -1396,8 +1462,14 @@ export function initClusterDrilldown(ctx) {
     const CY = H / 2;
     const PAD_PCT = 4;
     const xOf = (ep) => (PAD_PCT + ((ep - min) / span) * (100 - 2 * PAD_PCT)).toFixed(2);
+    // Kantenfarbe je KATEGORIE + Fraud-Override (Kritiker-Pflichtkorrektur 4/6):
+    // Betrugs-Punkte als Konturkreis (ungefüllt) — der nicht-farbliche
+    // Zweitkanal, weil ein Punkt keine Dash-Form tragen kann.
+    const dotColor = (p) => (edgeIsFraud(p) ? edgeColors.fraud : edgeColors[edgeCategoryOf(p.type)]) || edgeDefaultOf();
     const dots = points.map((p) =>
-      `<circle cx="${xOf(p.ep)}%" cy="${CY}" r="3" fill="${esc(edgeColors[p.type] || edgeDefaultOf())}" opacity="0.85"></circle>`
+      p.fraud
+        ? `<circle cx="${xOf(p.ep)}%" cy="${CY}" r="3" fill="none" stroke="${esc(dotColor(p))}" stroke-width="2" opacity="0.9"></circle>`
+        : `<circle cx="${xOf(p.ep)}%" cy="${CY}" r="3" fill="${esc(dotColor(p))}" opacity="0.85"></circle>`
     ).join('');
     const minIso = new Date(min).toISOString();
     const maxIso = new Date(max).toISOString();
@@ -1642,13 +1714,15 @@ export function initClusterDrilldown(ctx) {
     return s === nodeId || t === nodeId;
   }
 
-  // Kantenfarbe: Typfarbe wie bisher; im Hover-Fokus treten nicht beteiligte
+  // Kantenfarbe: Tx-KATEGORIE (edge-colors.mjs) mit Fraud-Override VOR der
+  // Kategorie (Kritiker-Pflichtkorrektur 4 — severity auf der Kante oder
+  // malicious-Endpunkt im Cluster); im Hover-Fokus treten nicht beteiligte
   // Kanten auf den Kontrolllinien-Ton zurück (pro Kante steuerbar — das
   // Bundle kennt KEINE pro-Kanten-Deckkraft, linkOpacity ist global; eine
   // globale Abblendung auf 0.35 würde die fokussierten Kanten mit treffen).
   function linkColor3dAccessor() {
     return (l) => {
-      const base = edgeColors[String(l.type)] || edgeDefaultOf();
+      const base = (edgeIsFraud(l) ? edgeColors.fraud : edgeColors[edgeCategoryOf(l.type)]) || edgeDefaultOf();
       if (!hover3dNodeId) return base;
       return linkTouches3d(l, hover3dNodeId) ? base : graph3dLinkFaded();
     };
@@ -1783,6 +1857,26 @@ export function initClusterDrilldown(ctx) {
     }
   }
 
+  // Kanten-Kategorien-Legende im Graph-Overlay (Audit 2026-10-07): dieselben
+  // .legend/.legend-item/.swatch-Klassen wie die Dashboard-Legende — Farben
+  // ausschließlich aus den swatch-* Token-Regeln (style.css, themenbewusst),
+  // Labels über legend.* (DE/EN; data-i18n hält hx:langchange aktuell, Muster
+  // cluster-json-download oben). Reihenfolge: EDGE_CATEGORY_ORDER
+  // (public/edge-colors.mjs).
+  function renderEdgeLegend() {
+    const el = overlay && typeof overlay.querySelector === 'function' ? overlay.querySelector('.cluster-graph-legend') : null;
+    if (!el) return;
+    // Stub-sicher (Node-Tests fahren minimale DOM-Stubs ohne setAttribute):
+    // aria und Markup sind Best-Effort, hidden bleibt das ehrliche Signal.
+    if (typeof el.setAttribute === 'function') el.setAttribute('aria-label', t('legend.aria'));
+    try {
+      el.innerHTML = EDGE_CATEGORY_ORDER
+        .map((cat) => `<span class="legend-item"><span class="swatch swatch-${esc(cat)}"></span><span data-i18n="legend.${esc(cat)}">${esc(t(`legend.${cat}`))}</span></span>`)
+        .join('');
+      el.hidden = false;
+    } catch { /* Node-Stub ohne Markup-Fähigkeit: Legende bleibt verborgen */ }
+  }
+
   // Der erste Accessor-Durchlauf läuft, bevor irgendein Default-Knoten-Mesh
   // existiert (Klassen-Recovery braucht ein Vorbild in der Szene). Einmal je
   // Frame: Klassen lösen (Meshes der letzten Digest sind dann da), Accessor
@@ -1846,6 +1940,10 @@ export function initClusterDrilldown(ctx) {
         source: String(e.from),
         target: String(e.to),
         type: String(e.type ?? ''),
+        // severity durchreichen (Live-Kanten, lib/cluster.mjs:394): der
+        // Fraud-Override im linkColor3dAccessor liest sie je Kante; die
+        // Endpunkt-Prüfung läuft über fraudAddrSet (Knoten-Sverities).
+        ...(e.severity != null ? { severity: e.severity } : {}),
         // Tag-Felder durchreichen (linkLabel liest sie; Gate im Label-Callback).
         ...(e.toTag != null ? { toTag: e.toTag } : {}),
       })),
@@ -1975,7 +2073,9 @@ export function initClusterDrilldown(ctx) {
     fg3d
       .nodeColor(nodeColorAccessor())
       .nodeRelSize(layout.nodeRelSize) // Radius skaliert mit Knotenanzahl (5..300 lesbar)
-      .nodeVal((n) => 1 + ((n.inDrops ?? 0) + (n.outDrops ?? 0)) / 1e6)
+      // dieselbe Volumen-Skalierung wie cluster3dLayoutParams.valOf —
+      // gemeinsamer Helper computeNodeVal (Floor 8, Log-Gain 2).
+      .nodeVal((n) => computeNodeVal((n.inDrops ?? 0) + (n.outDrops ?? 0)))
       // Ring-Accessor (P3.2): null für alle Knoten außerhalb der Auswahl —
       // das Bundle erzeugt dann nur die Default-Sphere (kein Extra-Mesh).
       .nodeThreeObject((n) => drainerRing3d(n))
@@ -2037,20 +2137,26 @@ export function initClusterDrilldown(ctx) {
         color: roleColors[role],
       };
     }));
-    const vEdges = new window.vis.DataSet(clusterEdges.map((e) => ({
-      id: String(e.txHash || `${e.from}->${e.to}::${e.type}`),
-      from: String(e.from),
-      to: String(e.to),
-      label: String(e.type ?? ''),
-      // Tag-Suffix im Kanten-Tooltip nur bei Multi-User-Treffer des Ziels
-      // (Registry ODER verifizierter well-known-Name, multiUserEntryOf-Host-
-      // Gate) und belegtem toTag (fail-closed).
-      title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`
-        + (e.toTag != null && multiUserEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
-      color: { color: edgeColors[String(e.type)] || edgeDefaultOf(), highlight: canvasInkColor(), hover: canvasInkColor() },
-      arrows: { to: { enabled: true, scaleFactor: 0.5 } },
-      width: 1,
-    })));
+    const vEdges = new window.vis.DataSet(clusterEdges.map((e) => {
+      // Fraud-Override + Kategorie-Farbe (Kritiker-Pflichtkorrektur 4/6) wie
+      // im 3D-Accessor; gestrichelte Betrugskanten als Deutan-Zweitkanal.
+      const fraud = edgeIsFraud(e);
+      return {
+        id: String(e.txHash || `${e.from}->${e.to}::${e.type}`),
+        from: String(e.from),
+        to: String(e.to),
+        label: String(e.type ?? ''),
+        // Tag-Suffix im Kanten-Tooltip nur bei Multi-User-Treffer des Ziels
+        // (Registry ODER verifizierter well-known-Name, multiUserEntryOf-Host-
+        // Gate) und belegtem toTag (fail-closed).
+        title: `${displayAddr(e.from)} → ${displayAddr(e.to)} (${String(e.type ?? '')})`
+          + (e.toTag != null && multiUserEntryOf(String(e.to)) ? ` · #${e.toTag}` : ''),
+        color: { color: (fraud ? edgeColors.fraud : edgeColors[edgeCategoryOf(e.type)]) || edgeDefaultOf(), highlight: canvasInkColor(), hover: canvasInkColor() },
+        ...(fraud ? { dashes: [6, 4] } : {}),
+        arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+        width: 1,
+      };
+    }));
     vis2d = new window.vis.Network(graphEl, { nodes: vNodes, edges: vEdges }, {
       autoResize: true,
       physics: ctx.physicsCluster,

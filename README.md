@@ -198,11 +198,40 @@ Monitor-Logik:
   Stream-Nachricht enthält die Pfad-Konten nur indirekt über die
   Meta-Bilanzänderungen. Erfasst werden Absender und Ziel; Zwischenhops
   bleiben unbeobachtet.
-- **NFTokenAcceptOffer-Angebotsauflösung:** Erfasst wird die Transaktion,
-  wenn Köder als Absender oder als Owner eines betroffenen NFTokenOffer-
-  Ledger-Objekts beteiligt sind. Die Käufer-/Verkäufer-Adressen aus den
-  Offer-Ids (`NFTokenBuyOffer`/`NFTokenSellOffer`) werden nicht per
-  `ledger_entry` aufgelöst.
+- **NFTokenAcceptOffer-Angebotsauflösung:** Die direkte **Sell-Annahme**
+  (`NFTokenSellOffer`, ohne `NFTokenBuyOffer`) wird seit dem Lücken-Audit
+  2026-10-07 meta-basiert aufgelöst: das im selben Ledger konsumierte
+  NFTokenOffer-Objekt (DeletedNode) liefert Owner (Verkäufer) und Amount —
+  daraus entsteht die Kante Käufer → Verkäufer. Bewusst **unmapped** bleiben:
+  die **Buy-Annahme** (Zahlung läuft Owner → tx.Account — Richtung im
+  Kanten-Vertrag nicht ausdrückbar) und der **Brokered Mode** (`NFTokenBrokerFee`,
+  zwei konsumierte Offers — Owner-Auflösung mehrdeutig); ohne Meta im Entry
+  entsteht ebenfalls keine Kante. Nicht per `ledger_entry` nachgelöst wird
+  weiterhin (kein Request-Budget für Offer-Ids).
+- **CheckCash/Clawback kantenlos:** CheckCash kennt kein Empfänger-Feld
+  (nur CheckID/Amount/DeliverMin — der Casher ist selbst Empfänger; der
+  ursprüngliche Check-Empfänger steckt nur im Check-Ledger-Objekt), und
+  Clawbacks laufen Issuer → Holder-Adresse als Absender — die Flussrichtung
+  ist im Kanten-Vertrag (account → destination) nicht ausdrückbar. Beide
+  Typen zählen als Berührung/Evidenz, erzeugen aber keine Kante.
+- **AMM/Offer-Füllungen ohne Kanten:** AMMCreate/Deposit/Withdraw und
+  sofort gefüllte OfferCreates haben ihre Gegenpartei nur in den
+  Ledger-Meta (AMM-Account, Balance-Deltas) — sie erzeugen keine Kante;
+  AMMVote/Bid/Delete und alle reinen Admin-Tx sind bewusst kantenlos.
+- **Kanten-Codierung (Tx-Kategorie):** Kanten färben je Tx-Kategorie
+  (`txCategory`, edge-colors.mjs): Betrug = Rot (Severity-Override VOR der
+  Kategorie), Payment = Grün (success-Familie; im Noir-Theme exakt
+  `--a6-success` — bewusste „grün=gut"-Bundlung), DEX+AMM zusammen als
+  „Market" (die Einzeltöne waren praktisch ununterscheidbar), NFT = Fuchsia,
+  Escrow/Check-Channel/Admin in der Tokensprache. Betrugskanten tragen
+  zusätzlich ein Strichel-Muster (nicht-farblicher Kanal für Rot-Grün-
+  Schwäche); einzige Ausnahme ist die 3D-Bühne, deren Bundle keine
+  Kanten-Dashes kennt (dort trägt Farbe + Kanten-Tooltip die Information).
+- **Funding/Sweep-Messung Payment-only:** `traceFunding` und
+  `measureSweepRatio` werten ausschließlich Payments aus — Abflüsse über
+  EscrowFinish/CheckCash/AMM-/NFT-Verkäufe zählen nicht in `sweepRatio`
+  und unterschätzen non-Payment-Sweeps (bewusste Grenze der
+  Drainer-Bestätigung).
 - **Selbst-Check nur gegen Bekanntes:** Der Check findet ausschließlich
   Kontakte zu Adressen, die dieser Monitor bereits als Bedrohung erfasst hat.
   Eine Adresse, die von einer noch unbekannten Scam-Adresse angeschrieben

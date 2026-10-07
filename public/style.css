@@ -82,12 +82,6 @@
   --a6-r-lg: 1.375rem;
   --a6-r-pill: 999px;
   --a6-r-xs: 3px; /* kleinster Radius (Swatches, Scrollbar-Thumbs) — Design P4 */
-
-  /* Bedeutungsband-Breite (Design P2/P4): das linke 3-px-Band ist
-     Bedeutungsträger (Severity/Rolle), nie Deko — und bleibt EINHEITLICH
-     3 px für alle Stufen inkl. sev-malicious (Plan-Kritik 7a: keine
-     Verstärkung auf 4 px, kein linksseitiger Akzentstreifen-Wuchs). */
-  --a6-band-width: 3px;
   --a6-font: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   --a6-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
   --a6-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -157,14 +151,20 @@
   --a6-cluster-hover: #f6f6f7;
   --a6-cluster-radius: 12px;
 
-  /* Kanten: 1px, Typ-Codierung — exakt die EDGE_COLORS aus app.js */
-  --a6-edge-payment: #b3261e;
-  --a6-edge-trustset: #b45309;
-  --a6-edge-offer: #a16207;
+  /* Kanten: 1px, Tx-KATEGORIE-Codierung (txCategory, public/edge-colors.mjs)
+     — exakt die EDGE_COLORS-Kategorien aus app.js (Audit 2026-10-07).
+     payment = success-Familie ('grün=gut'-Bundlung, dokumentiert; 1.33:1
+     Luminanzabstand zum Check-Teal); market = DEX+AMM ZUSAMMENGELEGT (die
+     alten trustset/offer-Töne lagen bei 1.02:1 — Kritiker-Pflicht 5);
+     nft nach Fuchsia geöffnet (Abstand zu escrow 1.12:1 -> 1.51:1, Pflicht 6);
+     fraud = Severity-Rot als eigener Override-Token (Pflicht 4). */
+  --a6-edge-payment: #066348;
+  --a6-edge-market: #b45309;
   --a6-edge-escrow: #6d28d9;
-  --a6-edge-accountset: #1d4ed8;
   --a6-edge-check: #0f766e;
-  --a6-edge-nft: #a21caf;
+  --a6-edge-admin: #1d4ed8;
+  --a6-edge-nft: #c026d3;
+  --a6-edge-fraud: #b3261e;
   --a6-edge-neutral: #62626b;
   --a6-edge-ink: #141416;
 
@@ -179,6 +179,10 @@
   --a6-role-collector-border: #7c3a06;
   --a6-role-relay: #0f766e;
   --a6-role-relay-border: #115e59;
+  /* Unknown-Rolle (Vollrahmen-Umbau 2026-10-07): dieselbe Farbe für Legende,
+     3D-Kugel und Kartenrahmen statt neutralgrau — 6.20 / 5.45:1 gegen beide
+     Hell-Surfaces (WCAG 1.4.11, per node nachgerechnet). */
+  --a6-role-unknown: #4a6478;
 
   /* Eine Akzentfarbe je Schweregrad — bestehende Semantik 1:1 weiterverwendet */
   --a6-sev-malicious: #b3261e;
@@ -190,18 +194,28 @@
      hartcodierte Hex mehrfach im Stylesheet standen — dieselben Farben, nur
      noch referenziert. --a6-ink-fill ist die graphitfarbene Primäraktion
      (SKILL buttons .a6-button--primary), --a6-card-line der Brand-Rand der
-     Cluster-Karten (vorher D2-Regel mit Inline-rgba). */
+     Hero-KPI-Chips (.hx-kpi; die Cluster-Karten tragen seit dem Vollrahmen-
+     Umbau die neutrale control-line-Basis plus Rollenfarbe). */
   --a6-ink-fill: #141416;
   /* Text auf der Ink-Primärfläche (Tabs/Buttons im Auswahlzustand, #check-go):
      ersetzt die früheren hartcodierten #fff — Noir dreht beide Kanäle. */
   --a6-on-ink: #ffffff;
   --a6-card-line: rgba(22, 48, 92, 0.30);
-  --a6-swatch-payment: #d03b33;
+  --a6-swatch-payment: #066348; /* Payment-Kante ist GRÜN (Audit 2026-10-07):
+                                   success-Familie, 7.28:1 auf der Karte */
   --a6-swatch-other: #3f3f46;
-  --a6-swatch-unknown: #f0f0f2;
-  --a6-swatch-unknown-line: #62626b;
+  /* Unknown-Rolle (3D-Farb-Audit 2026-10-07): dieselbe Farbe wie
+     --a6-role-unknown — Legende, 3D-Kugel und Kartenrahmen teilen sich EINE
+     Tinte. Vorher #f0f0f2 auf der weißen Bühne: 1.14:1 (FAIL, die randlose
+     3D-Kugel war unsichtbar); Stahlblau #4a6478 = 6.20:1 gegen --a6-graph-
+     canvas ✓ UI. Rand #dbe6f2 = 4.91:1 auf der Füllung ✓ UI. */
+  --a6-swatch-unknown: #4a6478;
+  --a6-swatch-unknown-line: #dbe6f2;
   --a6-swatch-cluster-line: #17171b;
-  --a6-unknown-fill: #f0f0f2;
+  /* Flussketten-Chip: getönte Unknown-Familie statt Vollton — der Chip-Text
+     (--a6-body) bleibt ≥4.5:1 lesbar (Vollton #4a6478 unter #484850 wäre
+     <2:1); der Chip-RAND trägt den Vollton (.chain-node.chain-unknown). */
+  --a6-unknown-fill: #e7edf3;
 
   color: var(--a6-ink);
   background: var(--a6-bg);
@@ -264,13 +278,19 @@
   --a6-cluster-fill: #262436;
   --a6-cluster-border: #f2f1f8; /* 13.48 auf der Füllung ✓ UI */
   --a6-cluster-hover: #322f47;
-  --a6-edge-payment: #ff7a70;    /* 7.24 ✓ */
-  --a6-edge-trustset: #ffb45e;   /* 10.45 ✓ */
-  --a6-edge-offer: #f2b872;      /* 10.39 ✓ */
+  --a6-edge-payment: #4ade80;    /* 10.55 ✓ — exakt der Noir-success-Ton:
+                                    bewusste 'grün=gut'-Bundlung (Pflicht 6,
+                                    Option a); der Luminanzabstand zum
+                                    Check-Teal bleibt 1.11:1, dokumentiert;
+                                    Deutan-Zweitkanal sind die gestrichelten
+                                    Fraud-Kanten */
+  --a6-edge-market: #ffb45e;     /* 10.45 ✓ (DEX+AMM zusammengelegt, Pflicht 5) */
   --a6-edge-escrow: #b79cff;     /* 8.06 ✓ */
-  --a6-edge-accountset: #8ab4ff; /* 8.80 ✓ */
   --a6-edge-check: #3ecfbb;      /* 9.49 ✓ */
-  --a6-edge-nft: #e879f9;        /* 7.47 ✓ */
+  --a6-edge-admin: #8ab4ff;      /* 8.80 ✓ */
+  --a6-edge-nft: #d946ef;        /* 5.31 ✓ — Fuchsia statt #e879f9: escrow-
+                                    Abstand 1.08 -> 1.52, payment-Abstand 1.98 */
+  --a6-edge-fraud: #ff7a70;      /* 7.24 ✓ = --a6-sev-malicious (Override, Pflicht 4) */
   --a6-edge-neutral: #8f8da0;    /* 5.68 / 5.17 ✓ (auch globe.js-/Flow-Host-Fallback) */
   --a6-edge-ink: #f2f1f8;
   --a6-role-source: #7d9bff;           /* 7.01 ✓ */
@@ -281,6 +301,7 @@
   --a6-role-collector-border: #c98a45; /* 6.31 ✓ */
   --a6-role-relay: #3ecfbb;            /* 9.49 ✓ */
   --a6-role-relay-border: #2fa393;     /* 5.93 ✓ */
+  --a6-role-unknown: #bfe3ff;          /* 13.69 / 12.47 ✓ (Legende + 3D + Kartenrahmen) */
   --a6-sev-malicious: #ff7a70;
   --a6-sev-suspect: #fbbf24;
   --a6-sev-info: #8ab4ff;
@@ -288,18 +309,25 @@
   --a6-ink-fill: #f2f1f8;    /* Primärfläche invertiert */
   --a6-on-ink: #0c0b14;      /* 17.43 auf ink-fill ✓ */
   --a6-card-line: rgba(143, 123, 255, 0.35); /* Cluster-Kartenrand in Violett-Tinte */
-  --a6-swatch-payment: #ff7a70;
+  --a6-swatch-payment: #4ade80; /* = --a6-success (Payment-Kante grün) */
   --a6-swatch-other: #75718a;      /* 3.93 ✓ */
-  --a6-swatch-unknown: #262436;    /* wie cluster-fill */
-  --a6-swatch-unknown-line: #8f8da0; /* 4.67 auf der Füllung ✓ */
+  /* Unknown-Rolle (3D-Farb-Audit 2026-10-07), Eisblau wie der Rollen-Token
+     darüber — das alte #262436 lag mit 1.21:1 unter der Bühne #14131f (die
+     randlose 3D-Kugel war unsichtbar); #bfe3ff = 13.69:1 auf der Bühne ✓
+     UI. Rand #46587e = 5.29:1 auf der Füllung ✓ UI. */
+  --a6-swatch-unknown: #bfe3ff;
+  --a6-swatch-unknown-line: #46587e;
   --a6-swatch-cluster-line: #f2f1f8;
-  --a6-unknown-fill: #262436;
+  /* Flussketten-Chip: dunkle Unknown-Tönung — --a6-body (#c9c7d6) bleibt
+     ≥4.5:1 lesbar (Vollton #bfe3ff unter Hell-Text wäre <2:1); der Chip-
+     RAND trägt den Vollton (.chain-node.chain-unknown). */
+  --a6-unknown-fill: #1a2333;
   --a6-stage-bg: linear-gradient(155deg, #171627 0%, #14131f 60%, #100f1a 100%);
   --a6-stage-glow:
     radial-gradient(ellipse at 95% 0%, rgba(143, 123, 255, 0.16), transparent 55%),
     radial-gradient(ellipse at 0% 100%, rgba(62, 207, 187, 0.10), transparent 60%);
-  /* Theme-neutrale Tokens werden bewusst NICHT wiederholt: --a6-band-width,
-     --a6-r-*, --a6-font/--a6-mono, --a6-ease/--a6-fast/--a6-ui, --a6-gutter/
+  /* Theme-neutrale Tokens werden bewusst NICHT wiederholt: --a6-r-*,
+     --a6-font/--a6-mono, --a6-ease/--a6-fast/--a6-ui, --a6-gutter/
      --a6-container/--a6-stage-height. --a6-icon-accent erbt automatisch
      (var(--a6-brand-blue) resolves hier auf #7d9bff). --a6-globe-atmosphere
      (globe.css, niedrigere Spezifität) wird unten am Noir-Blockende
@@ -449,21 +477,21 @@ html, body {
   min-width: 104px;
   padding: 8px 12px;
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
-  /* 3px-Band links = Severity-LED der Kopf-KPIs (Status nie nur durch Farbe —
-     der Badge-/Labeltext trägt denselben Schweregrad). */
-  border-left: var(--a6-band-width) solid var(--a6-line-strong);
+  /* 1px-Vollrahmen in Severity-Farbe (alle vier Seiten) statt des früheren
+     3px-Linksbändchens — Status nie nur durch Farbe: der Badge-/Labeltext
+     trägt denselben Schweregrad; die Varianten unten setzen border-color. */
+  border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-sm);
   box-shadow: var(--a6-e1);
 }
 
 /* Netzwerk und Uhr sind Status-Chips im Cluster, keine KPI-Karten: kompakt,
-   flach, Haarlinie statt 3px-Band. */
+   flach, Haarlinie rundum statt Vollrahmen. */
 .stat-network,
 .stat-last {
   min-width: 0;
   padding: 6px 12px;
-  border-left: 1px solid var(--a6-line);
+  border: 1px solid var(--a6-line);
   background: var(--a6-surface-alt);
   box-shadow: none;
 }
@@ -491,9 +519,9 @@ html, body {
 .stat-network .stat-value { color: var(--a6-info); font-size: 15px; }
 .stat-last .stat-value { color: var(--a6-muted); }
 
-.stat-malicious { border-left-color: var(--a6-error); }
-.stat-suspect { border-left-color: var(--a6-warn); }
-.stat-events { border-left-color: var(--a6-brand-blue); }
+.stat-malicious { border-color: var(--a6-error); }
+.stat-suspect { border-color: var(--a6-warn); }
+.stat-events { border-color: var(--a6-brand-blue); }
 
 .conn {
   display: flex;
@@ -672,13 +700,14 @@ main {
 .block-card {
   padding: 12px 14px;
   background: var(--a6-surface);
-  border: 1px solid var(--a6-line);
-  border-left: var(--a6-band-width) solid var(--a6-line-strong);
+  /* 1px-Vollrahmen in Bedeutungsfarbe (has-malicious/has-suspect setzen
+     border-color) statt des früheren 3px-Linksbändchens. */
+  border: 1px solid var(--a6-line-strong);
   border-radius: var(--a6-r-md);
 }
 
-.block-card.has-malicious { border-left-color: var(--a6-error); }
-.block-card.has-suspect { border-left-color: var(--a6-warn); }
+.block-card.has-malicious { border-color: var(--a6-error); }
+.block-card.has-suspect { border-color: var(--a6-warn); }
 
 .block-head {
   display: flex;
@@ -919,17 +948,18 @@ main {
   gap: 12px;
   padding: 8px 12px;
   background: var(--a6-surface-alt);
-  border: 1px solid var(--a6-line);
-  border-left: var(--a6-band-width) solid var(--a6-muted);
+  /* 1px-Vollrahmen in muted (6.04 / 7.27:1 — ≥3:1-tauglich) statt des
+     früheren 3px-Linksbändchens; die sev-Varianten setzen border-color. */
+  border: 1px solid var(--a6-muted);
   border-radius: var(--a6-r-sm);
   font-size: 13px;
 }
 
 .log-row > * { min-inline-size: 0; }
 
-.log-row.sev-malicious { border-left-color: var(--a6-error); }
-.log-row.sev-suspect { border-left-color: var(--a6-warn); }
-.log-row.sev-info { border-left-color: var(--a6-info); }
+.log-row.sev-malicious { border-color: var(--a6-error); }
+.log-row.sev-suspect { border-color: var(--a6-warn); }
+.log-row.sev-info { border-color: var(--a6-info); }
 
 .log-time {
   font-family: var(--a6-mono);
@@ -1114,6 +1144,23 @@ main {
   .density-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
 }
 
+/* Fenster-Umschalter der Top-10-Börsen-Box (aria-pressed-Muster wie die
+   Dichte-Stufen, eigene Klasse — der density-Test zählt genau drei
+   .density-btn; Auswahlfläche über dieselben Tokens, kein neuer Wert). */
+.exout-window-btn {
+  padding: 8px 14px;
+}
+
+.exout-window-btn[aria-pressed="true"] {
+  background: var(--a6-ink-fill);
+  border-color: var(--a6-ink-fill);
+  color: var(--a6-on-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .exout-window-btn:not([aria-pressed="true"]):hover { background: var(--a6-surface-alt); }
+}
+
 .graph-disclaimer {
   margin: 0 0 12px;
   color: var(--a6-muted);
@@ -1150,15 +1197,24 @@ main {
 .swatch-unknown { background: var(--a6-swatch-unknown); border-color: var(--a6-swatch-unknown-line); border-radius: 50%; }
 .swatch-cluster { background: var(--a6-cluster-fill); border: 1px solid var(--a6-swatch-cluster-line); }
 
-/* Kantentyp-Swatches — Farben müssen von den Rollen-Swatches unterscheidbar
-   sein (Befund: payment==drainer #b3261e und other==relay #62626b waren
-   identisch; payment nutzt nun den Drainer-Highlight-Ton, other den
-   Relay-Randton, check entspricht EDGE_COLORS für CheckCreate/
-   PaymentChannelCreate in public/app.js). */
+/* Kantentyp-Swatches — seit dem Farb-Audit 2026-10-07 je Tx-KATEGORIE
+   (txCategory, edge-colors.mjs): Payment GRÜN (success-Familie — die alte
+   payment==drainer-Rot-Kollision ist behoben), market = DEX+AMM, admin =
+   Protokoll-Verwaltung, nft = Fuchsia, fraud = Severity-Rot (Override).
+   Farben ausschließlich über die --a6-edge-*/swatch-Tokens (beide Themes). */
 .swatch-payment { background: var(--a6-swatch-payment); }
 .swatch-escrow { background: var(--a6-edge-escrow); }
 .swatch-check { background: var(--a6-edge-check); }
+.swatch-market { background: var(--a6-edge-market); }
+.swatch-nft { background: var(--a6-edge-nft); }
+.swatch-admin { background: var(--a6-edge-admin); }
+.swatch-fraud { background: var(--a6-edge-fraud); }
 .swatch-other { background: var(--a6-swatch-other); }
+
+/* Kanten-Kategorien-Legende im Drilldown-Overlay (Audit 2026-10-07):
+   dieselbe .legend-Basis wie im Dashboard, innerhalb der Graph-Sektion
+   platziert; die Items sind inline-flex und umbrechen natürlich. */
+.cluster-graph-legend { margin: 8px 0 0; }
 
 /* Schweregrad-Swatches — Severity-Tokens, kein zweites Farbsystem */
 .swatch-sev-malicious { background: var(--a6-sev-malicious); }
@@ -1189,17 +1245,19 @@ main {
 
 .cluster-card {
   background: var(--a6-surface);
-  /* Eine Regel statt der früheren Doppel-Deklaration (Design-Audit): 1px Rand
-     in Brand-Tinte (--a6-card-line, ehemals D2-Folgeblock) + linkes 3px-Band
-     in der dominanten Rollenfarbe (Regeln unten). */
-  border: 1px solid var(--a6-card-line);
-  border-left: var(--a6-band-width) solid var(--a6-line-strong);
+  /* Neutrale 1px-Basis in control-line (3.66 / 3.93:1 ✓) statt der früheren
+     Alpha-card-line-Kante (< 2:1) mit 3px-Linksbändchen: die dominante Rolle
+     trägt jetzt der VOLLRAHMEN in Rollenfarbe (Regeln unten) — jede Karte
+     hat per app.js immer genau eine Rolle. --a6-card-line bleibt dem
+     .hx-kpi-Rand vorbehalten. */
+  border: 1px solid var(--a6-control-line);
   border-radius: var(--a6-r-md);
   padding: clamp(1rem, 1.5vw, 1.5rem);
   box-shadow: var(--a6-e1);
   cursor: pointer;
   min-inline-size: 0; /* Grid-Kind darf schrumpfen, damit Inhalte umbrechen */
-  transition: transform var(--a6-ui) var(--a6-ease), box-shadow var(--a6-ui) var(--a6-ease);
+  transition: transform var(--a6-ui) var(--a6-ease), box-shadow var(--a6-ui) var(--a6-ease),
+    border-color var(--a6-ui) var(--a6-ease);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1208,15 +1266,16 @@ main {
 
 .cluster-card:active { transform: translateY(0); }
 
-/* Linkes Band = dominante Rolle des Clusters — Kritik-Nachbesserung: die
-   Rollen-Hex stehen nicht mehr hardcoded da, sie folgen denselben Werten wie
-   ROLE_COLORS (app.js) und --a6-role-* (sonst bliebe die Fragmentierung
-   teilweise bestehen). */
-.cluster-card.role-source { border-left-color: var(--a6-role-source); }
-.cluster-card.role-drainer { border-left-color: var(--a6-role-drainer); }
-.cluster-card.role-collector { border-left-color: var(--a6-role-collector); }
-.cluster-card.role-relay { border-left-color: var(--a6-role-relay); }
-.cluster-card.role-unknown { border-left-color: var(--a6-control-line); }
+/* Vollrahmen in der dominanten Rolle des Clusters — die Rollenfarben stehen
+   als --a6-role-*-Tokens (Wertidentität mit ROLE_COLORS in app.js, D7);
+   unknown nutzt das eigene --a6-role-unknown, damit „Unknown" in Legende,
+   3D-Kugel und Kartenrahmen EINE Farbe ist (6.20 / 13.69:1 ✓ gegen beide
+   Theme-Surfaces). */
+.cluster-card.role-source { border-color: var(--a6-role-source); }
+.cluster-card.role-drainer { border-color: var(--a6-role-drainer); }
+.cluster-card.role-collector { border-color: var(--a6-role-collector); }
+.cluster-card.role-relay { border-color: var(--a6-role-relay); }
+.cluster-card.role-unknown { border-color: var(--a6-role-unknown); }
 
 .cluster-head {
   display: flex;
@@ -1226,10 +1285,9 @@ main {
 }
 
 /* Kopf-Tönung NUR für den Maliz-Träger (Design P2): SOLIDE error-soft-Fläche
-   als Platte im Karten-Polster — bewusst kein Gradient und keine Band-
-   Verstärkung (Plan-Kritik 7a: das Muster „runde Karte mit linksseitigem
-   Akzentstreifen“ wird nicht zusätzlich verstärkt; das Band bleibt für alle
-   Schweregrade einheitlich var(--a6-band-width)). Die Tönung ist Flächen-
+   als Platte im Karten-Polster — bewusst kein Gradient und keine Rahmen-
+   Verstärkung (Plan-Kritik 7a: keine Sonderdicke/Sonderfarbe je Schweregrad;
+   der Vollrahmen bleibt für alle einheitlich 1 px). Die Tönung ist Flächen-
    Hinterlegung hinter Text (Textfarbe bleibt Ink, ≥ 4,5:1 auf error-soft)
    — das Schweregrad-Signal selbst trägt das .risk-badge-Textlabel, die
    Fläche verstärkt nur die Hierarchie. */
@@ -1383,6 +1441,108 @@ main {
 .cluster-card.sev-malicious .cluster-xrp { color: var(--a6-error); }
 .cluster-card.sev-suspect .cluster-xrp { color: var(--a6-warn); }
 
+/* -------------------- Top-10 Börsen-Zuflüsse (2026-10-07) ----------------
+   Client-Aggregation aus der bestehenden /api/flow-state-View (public/
+   exchange-outflows.mjs + app.js renderExchangeOutflows) — kein neuer
+   api/*-Endpoint. Vollrahmen-Muster der Cluster-Karten (1 px control-line,
+   r-md), beide Themes laufen allein über die a6-Tokens (keine hartcodierten
+   Hex außerhalb des Token-Blocks); Badges im Look der .name-chip/.tag-chip. */
+.exout-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 2px 14px;
+  align-items: baseline;
+  border: 1px solid var(--a6-control-line);
+  border-radius: var(--a6-r-md);
+  padding: 10px 14px;
+  background: var(--a6-surface);
+  box-shadow: var(--a6-e1);
+  min-inline-size: 0;
+}
+
+.exout-rank {
+  font-family: var(--a6-mono);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-muted);
+  min-inline-size: 2ch;
+  text-align: right;
+}
+
+.exout-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-inline-size: 0; /* Grid-Kind darf schrumpfen — Umbruch vor Overflow */
+}
+
+.exout-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--a6-ink);
+  overflow-wrap: anywhere;
+  min-inline-size: 0;
+}
+
+.exout-domain {
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--a6-muted);
+}
+
+.exout-addr {
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  color: var(--a6-body);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  min-inline-size: 0;
+}
+
+.exout-amount {
+  font-family: var(--a6-mono);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--a6-ink);
+  text-align: right;
+}
+
+.exout-meta {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--a6-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.exout-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-pill);
+  background: var(--a6-surface);
+  color: var(--a6-brand-teal);
+  font-family: var(--a6-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+.exout-badge-wellknown { color: var(--a6-brand-blue); }
+
+/* ------------------- /Top-10 Börsen-Zuflüsse ---------------------------- */
+
 .cluster-txs,
 .cluster-accounts {
   font-family: var(--a6-mono);
@@ -1470,10 +1630,13 @@ main {
   color: var(--a6-role-relay);
 }
 
-/* Unbekannte Rolle in der Flusskette: wie der Rollen-Swatch (--a6-swatch-
-   unknown mit Randton) — abgrenzbar von relay (grau) und surface-alt. */
+/* Unbekannte Rolle in der Flusskette (3D-Farb-Audit 2026-10-07): Füllung =
+   getönte Unknown-Familie (--a6-unknown-fill, Text bleibt --a6-body und
+   liest sich ≥4.5:1), Rand = der volle Unknown-Ton --a6-role-unknown —
+   abgrenzbar von relay und surface-alt, derselbe Teller wie Legende und
+   3D-Kugel. */
 .chain-node.chain-unknown {
-  border-color: var(--a6-swatch-unknown-line);
+  border-color: var(--a6-role-unknown);
   color: var(--a6-body);
   background: var(--a6-unknown-fill);
 }
@@ -1990,12 +2153,5 @@ main {
      vollständig zurück (SKILL forced_colors_css: .a6-stage::before). */
   .hx-stage::before {
     display: none;
-  }
-
-  .block-card,
-  .log-row,
-  .cluster-card {
-    border-left-width: var(--a6-band-width);
-    border-left-color: CanvasText;
   }
 }

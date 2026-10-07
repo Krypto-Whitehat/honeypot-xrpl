@@ -72,6 +72,9 @@
  */
 
 import { t, sevText } from './i18n.mjs';
+// Tx-Typ -> Kanten-Kategorie (DOM-frei, edge-colors.mjs): die Arc-Farbe liest
+// EDGE_COLORS kategorie-geählt (Audit 2026-10-07), Muster drilldown.js.
+import { txCategory } from './edge-colors.mjs';
 /* Globe-Fallback-Illustration (Design P0, public/icons.mjs): textlose
  * Gravur-Kugel, aria-hidden — der Hinweistext (i18n key globe.fallback)
  * bleibt die tragende Auskunft. */
@@ -173,6 +176,9 @@ export function initGlobe(ctx) {
   const edgeDefaultOf = typeof ctx.edgeDefault === 'function'
     ? ctx.edgeDefault
     : (ctx.edgeDefault != null ? () => ctx.edgeDefault : () => null);
+  // Tx-Typ -> Kanten-Kategorie (ctx-Adapter, Muster drilldown.js; Fallback
+  // ohne Host: Roh-Typ-Lookup, unbekannt bleibt beim edgeDefaultOf).
+  const edgeCategoryOf = typeof ctx.edgeCategory === 'function' ? ctx.edgeCategory : (ty) => String(ty ?? '');
   const openCluster = typeof ctx.openCluster === 'function' ? ctx.openCluster : null;
   // Namens-Badge-Lookup (XRPScan-Aliase): HOST-GATE accountNameOf (liefert
   // null für maskierte/Deny-Adressen) PLUS Defense-in-Depth isFullShownAddr
@@ -907,12 +913,20 @@ export function initGlobe(ctx) {
       const to = String(e.to);
       const a = posOf.get(from); // centroid-oder-Hash
       const b = posOf.get(to);
-      // Farbe exakt EDGE_COLORS/EDGE_DEFAULT (app.js:382-395) — dieselbe
-      // Codierung wie Legende und Graph-Tab.
-      const color = edgeColors[String(e.type ?? '')] || edgeDefaultOf();
-      if (typeof color !== 'string') continue;
       const flagged = (SEV_RANK[sevByNode.get(from)] ?? 1) >= SEV_RANK.malicious
         || (SEV_RANK[sevByNode.get(to)] ?? 1) >= SEV_RANK.malicious;
+      // Fraud-Override VOR der Kategorie-Farbe (Kritiker-Pflichtkorrektur 4):
+      // `flagged` = ein Endpunkt malicious (sevByNode = Knoten-Sverities,
+      // dasselbe severityByAddress-Äquivalent wie app.js/drilldown) färbt
+      // den Bogen in die Severity-Rot-Familie (--a6-sev-malicious, theme-
+      // geführt via sevTokenColor). Sonst: Tx-KATEGORIE aus EDGE_COLORS
+      // (edge-colors.mjs) — dieselbe Codierung wie Legende und Graph-Tab.
+      // Das Strichel-Muster unten (dashLen/dashGap) bleibt der nicht-
+      // farbliche Deutan-Kanal der Betrugskanten.
+      const color = flagged
+        ? (sevTokenColor('malicious') || edgeDefaultOf())
+        : (edgeColors[edgeCategoryOf(e.type ?? '')] || edgeDefaultOf());
+      if (typeof color !== 'string') continue;
       arcs.push({
         startLat: a[0],
         startLng: a[1],

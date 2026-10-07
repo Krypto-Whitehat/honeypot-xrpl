@@ -53,6 +53,7 @@ const TOUCHER_D = `rTESTSWEEPER${"D".repeat(21)}4`;
 const TOUCHER_E = `rTESTSWEEPER${"E".repeat(21)}5`;
 const COLLECTOR = `rTESTSUMPX${"A".repeat(24)}6`;
 const FUNDER = `rTESTFUNDER${"A".repeat(23)}7`;
+const NFT_MINTER = `rTESTNFTMINTR${"A".repeat(22)}8`;
 
 // ---------- Zeitstempel ----------
 const NOW_ISO = new Date(Date.now() - 30_000).toISOString(); // frisch
@@ -161,6 +162,41 @@ test("touch -> niedriger ausgehender Sweep -> bleibt malicious, KEIN Drainer", a
   assert.equal(t.drainer, undefined);
   assert.equal(t.sweepRatio, undefined);
   assert.ok(!String(t.reason).startsWith("Drainer-Sweep:"), `reason: ${t.reason}`);
+});
+
+// Fake-Mint im Namen eines Köders: NFTokenMint mit optionalem Issuer-Feld
+// ("The issuer of the token, if the sender of the account is issuing it on
+// behalf of another account", xrpl.org NFTokenMint-Referenz) — Spiegel der
+// Detector-Regel (lib/detector.mjs:371, Fund-Adresse = Issuer), die der
+// Touch-Pfad seit dem Lücken-Audit 2026-10-07 ebenfalls trägt.
+function nftMintEvent(minter, hash, time) {
+  return {
+    hash,
+    validated: true,
+    close_time_iso: time,
+    tx_json: {
+      TransactionType: "NFTokenMint",
+      Account: minter,
+      Issuer: BAIT,
+      NFTokenTaxon: 1,
+    },
+  };
+}
+
+test("NFTokenMint mit Köder-Issuer -> suspect Threat für den Minter (fake NFT im Ködernamen)", async () => {
+  await handleTx(nftMintEvent(NFT_MINTER, "TESTNFTMINTHASH001", NOW_ISO));
+  const t = getThreat(NFT_MINTER);
+  assert.ok(t, "Threat-Eintrag für den Minter existiert");
+  assert.equal(t.risk, "suspect", "NFTokenMint ist kein malicious-Pfad (nur Payment/TrustSet)");
+  assert.ok(
+    t.evidence.some((e) => e.type === "NFTokenMint"),
+    "Evidenz trägt den Tx-Typ NFTokenMint"
+  );
+  assert.ok(!t.reason.includes(BAIT), "Reason enthält keine Köder-Adresse");
+  assert.ok(
+    t.evidence.some((e) => e.txHash === "TESTNFTMINTHASH001"),
+    "txHash-Evidenz bleibt erhalten"
+  );
 });
 
 test("Sweep >= 0.9 ohne Funding im Fenster -> keine Bestätigung (Präcondition)", async () => {
