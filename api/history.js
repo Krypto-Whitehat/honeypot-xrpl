@@ -154,7 +154,14 @@ async function handlePost(req, res) {
     const existingKeys = new Set(freshRead.list.map((c) => c?.key).filter(Boolean));
     // (ii) Validierung + Köder-Filter (still, kein Oracle).
     validated = validateAndSanitizeHistoryPayload(body, baitLabels, existingKeys);
-    // (iii) Merge ausschließlich im apply auf dem frischen Stand.
+    // (iii) Nur NEUE Cluster schreiben. Jeder Browser-Tab mit Live-Funden meldet bis alle 10 s;
+    // ohne diese Prüfung erzeugte jeder Besucher einen Commit im Daten-Repo (13.800+ Commits).
+    // Bereits bekannte Schlüssel brauchen keinen Schreibvorgang.
+    const newClusters = validated.accepted.filter((c) => c && !existingKeys.has(c.key));
+    if (!newClusters.length) {
+      return res.status(202).json({ accepted: validated.accepted.length, merged: freshRead.list.length, ignored: validated.ignored, dropped: 0, written: false });
+    }
+    // Merge ausschließlich im apply auf dem frischen Stand.
     const finalList = await writeHistoryGitHub(async (freshList) => {
       const merged = mergeHistory(freshList, validated.accepted, now, baitLabels);
       outcome = merged;
@@ -166,6 +173,7 @@ async function handlePost(req, res) {
       merged: finalList.length,
       ignored: validated.ignored,
       dropped: outcome ? outcome.dropped : 0,
+      written: true,
     });
   } catch (err) {
     // 409-Retry scheitert, 403/429, Netzwerk — kein 202 ohne Persistenz.
