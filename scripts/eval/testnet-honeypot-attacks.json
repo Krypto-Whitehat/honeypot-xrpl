@@ -1,0 +1,525 @@
+{
+ "description": "Testnet-Zahlungen an unsere Köder-Konten (data/threats-testnet-archive.json). Label malicious = Köder-Berührung durch Fremdkonto (Definition des Honeypots, NICHT unabhängig verifiziert).",
+ "knownBadAttackers": [
+  "rGjqr1LKcF5bX1q1PHqkHpmGz6BH65uedW",
+  "rHzg1i1fKLyddL2KwAgjWJoVVT1eftUPFx",
+  "rs8sr66PymJwHEdd4hy135C8qrfrpVP6jP",
+  "raDxZ2ZPjbjWDhqEVCNpSxQJs6yeiSwmqz",
+  "rw75qyyQ6JNggUfkaAVMU3FSQfuadnbLxF",
+  "rE9tTcXCAF7U5sDkqNj666DRDC2JLTEJET",
+  "rxRLHZHz65eZDgqWsACWe2wYneFrzQYQS"
+ ],
+ "cases": [
+  {
+   "id": "testnet-3313A3AB89",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21107346,
+    "transactions": [
+     {
+      "Account": "rGjqr1LKcF5bX1q1PHqkHpmGz6BH65uedW",
+      "Amount": "1",
+      "DeliverMax": "1",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21107364,
+      "Sequence": 21107344,
+      "SigningPubKey": "EDD2EB386C3F6B04642A32B616AD84426377BE202EB26CBF797D46598546BD3EBA",
+      "TransactionType": "Payment",
+      "TxnSignature": "A9B06E14004531875CD4B9B22BF4BAAD0EA90EC6A15DF922AE248C905FA72921ABC544F80590A3FD6282BC31273DB161ED4EAC0EE4F20F33ECA7833FF9B7F70B",
+      "ctid": "C142129200140001",
+      "date": 843879642,
+      "hash": "3313A3AB89028884D9C6BD298DA3D8D799CCE2F7036F3121F05EC60738B23136",
+      "inLedger": 21107346,
+      "ledger_index": 21107346,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000006",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000005"
+          },
+          "PreviousTxnID": "A376DCE04D2AF498D2FF17671E6050CE45C39B1B8B8CE609D904854A268E0594",
+          "PreviousTxnLgrSeq": 21107320
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rGjqr1LKcF5bX1q1PHqkHpmGz6BH65uedW",
+           "Balance": "99999987",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107345
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "FCD6BEFB4DC99C73DAF7F268D292826E219975C7B8488482E7169D80DCDAA779",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21107344
+          },
+          "PreviousTxnID": "DD5CC04E5EEA0D502E12985F7551B1F0AA06C5D57091B02359B1D79C419B3E74",
+          "PreviousTxnLgrSeq": 21107344
+         }
+        }
+       ],
+       "TransactionIndex": 20,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "1"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-EA51C51A6E",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21107635,
+    "transactions": [
+     {
+      "Account": "rHzg1i1fKLyddL2KwAgjWJoVVT1eftUPFx",
+      "Amount": "1",
+      "DeliverMax": "1",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21107653,
+      "Sequence": 21107633,
+      "SigningPubKey": "EDBB465EF341136F557DD1FEAB43CD82B876AD089A68823268E5B9FBCAA2B0A0E7",
+      "TransactionType": "Payment",
+      "TxnSignature": "0192DF060FECF66C1F7D56D0A150E89DAD617DCD62229B35F8DACC909EEAAA3DA04A1EBA18A9287755483B78651B21EB1586AEDCDA919E4A451DA20E98278B02",
+      "ctid": "C14213B300000001",
+      "date": 843880630,
+      "hash": "EA51C51A6E455588EB9EC04BD8F3008F1A67F9E3608B6E93B299E7C8110F9522",
+      "inLedger": 21107635,
+      "ledger_index": 21107635,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000007",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000006"
+          },
+          "PreviousTxnID": "3313A3AB89028884D9C6BD298DA3D8D799CCE2F7036F3121F05EC60738B23136",
+          "PreviousTxnLgrSeq": 21107346
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rHzg1i1fKLyddL2KwAgjWJoVVT1eftUPFx",
+           "Balance": "99999987",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107634
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "BBAED2A801426113451F46B0E65A68853564CA5F1AA3574BAE1D967E26C15F28",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21107633
+          },
+          "PreviousTxnID": "A54BFAB1DC795BC98473E2BD4F1BAC168F9916ABF9C7CFEA6854F0667F600311",
+          "PreviousTxnLgrSeq": 21107633
+         }
+        }
+       ],
+       "TransactionIndex": 0,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "1"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-0E7CD5AE09",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21108823,
+    "transactions": [
+     {
+      "Account": "rs8sr66PymJwHEdd4hy135C8qrfrpVP6jP",
+      "Amount": "1",
+      "DeliverMax": "1",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21108841,
+      "Sequence": 21108821,
+      "SigningPubKey": "ED1939B28D55BC0E5C5A65DFD8BD9563486621EC3E031136985FF2AEF25B50B7FE",
+      "TransactionType": "Payment",
+      "TxnSignature": "7D558DDEBA4DA2430F98E29A04EA6D4CBF162BFE5B7BA41D0C2FF448D94A8773F02C26EC009A8E8D2C462E891D04EC706788D7451BDEC5117C08AF4971ABD20D",
+      "ctid": "C142185700050001",
+      "date": 843884590,
+      "hash": "0E7CD5AE098EF6FC5DD817346B500F9EFD426714AA3D3319FE3558B255E3907A",
+      "inLedger": 21108823,
+      "ledger_index": 21108823,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000008",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000007"
+          },
+          "PreviousTxnID": "EA51C51A6E455588EB9EC04BD8F3008F1A67F9E3608B6E93B299E7C8110F9522",
+          "PreviousTxnLgrSeq": 21107635
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rs8sr66PymJwHEdd4hy135C8qrfrpVP6jP",
+           "Balance": "99999987",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21108822
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "CA2946356E073061D53A366AE6A1C29CE3A26A1514B50896E4ECB12E978303D8",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21108821
+          },
+          "PreviousTxnID": "FFACAF51ABC9E6F4A8EB63471B2CD42F751D1E43DA559392502CC665963DC63B",
+          "PreviousTxnLgrSeq": 21108821
+         }
+        }
+       ],
+       "TransactionIndex": 5,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "1"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-6DAA068235",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21108878,
+    "transactions": [
+     {
+      "Account": "raDxZ2ZPjbjWDhqEVCNpSxQJs6yeiSwmqz",
+      "Amount": "1",
+      "DeliverMax": "1",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21108896,
+      "Sequence": 21108876,
+      "SigningPubKey": "ED5A6639E958C8F4C22B8CE283193B5C252A6008DD3E467E5D7FE77EE388828068",
+      "TransactionType": "Payment",
+      "TxnSignature": "FDFF4BC51334EA1A4C625CD616DB17556FBFBA2F43B6FFD730056CAD704E5CF08DE65B5E77645F068C8716AD64B90D37672F37EDF846069849332A0AEA574A0A",
+      "ctid": "C142188E00090001",
+      "date": 843884770,
+      "hash": "6DAA068235ED42AD280913ECCA62DC385714D77FC50937B66FBCFE8A12D4C519",
+      "inLedger": 21108878,
+      "ledger_index": 21108878,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "raDxZ2ZPjbjWDhqEVCNpSxQJs6yeiSwmqz",
+           "Balance": "99999987",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21108877
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "1E7A702B63950CFD55281AE60359792DD37FE250BDE4BCBCB2D5B0C9D974D6A6",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21108876
+          },
+          "PreviousTxnID": "5356C4EDD147F5AF66341E2841EC5652336A267D60463DA6A1AF6DB9E5BAAE12",
+          "PreviousTxnLgrSeq": 21108876
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000009",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000008"
+          },
+          "PreviousTxnID": "0E7CD5AE098EF6FC5DD817346B500F9EFD426714AA3D3319FE3558B255E3907A",
+          "PreviousTxnLgrSeq": 21108823
+         }
+        }
+       ],
+       "TransactionIndex": 9,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "1"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-BBF6B5F2CF",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21108928,
+    "transactions": [
+     {
+      "Account": "rw75qyyQ6JNggUfkaAVMU3FSQfuadnbLxF",
+      "Amount": "1",
+      "DeliverMax": "1",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21108946,
+      "Sequence": 21108926,
+      "SigningPubKey": "ED28649502866223B0D8CEB896880A41C3FF9845C82B26C873AA7678E636D94C29",
+      "TransactionType": "Payment",
+      "TxnSignature": "96ABED40492D3589DAC3006A2A29C867D55F1DE9D343A8C716A01E1A9CB5CC446AD307AEDD6F2F9814FDCCA188AE8EC95CA2E093A7136AC24FB855763400740B",
+      "ctid": "C14218C000030001",
+      "date": 843884930,
+      "hash": "BBF6B5F2CFB307580BBEF9AC106B00B19374D9146335E9EE58551664FB01C02E",
+      "inLedger": 21108928,
+      "ledger_index": 21108928,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000010",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000009"
+          },
+          "PreviousTxnID": "6DAA068235ED42AD280913ECCA62DC385714D77FC50937B66FBCFE8A12D4C519",
+          "PreviousTxnLgrSeq": 21108878
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rw75qyyQ6JNggUfkaAVMU3FSQfuadnbLxF",
+           "Balance": "99999987",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21108927
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "9D9A39DD96BDB8CDA0262B2CE10E705DB01B82669101D01FC83A489D9C34B597",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21108926
+          },
+          "PreviousTxnID": "B8D5DE264B9E9FDC01B7D341EC69E61D70D9D4D2E9594B76B5B3A6F2CA6AF3DF",
+          "PreviousTxnLgrSeq": 21108926
+         }
+        }
+       ],
+       "TransactionIndex": 3,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "1"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-7352A7F102",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21110481,
+    "transactions": [
+     {
+      "Account": "rE9tTcXCAF7U5sDkqNj666DRDC2JLTEJET",
+      "Amount": "10",
+      "DeliverMax": "10",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21110499,
+      "Sequence": 21110477,
+      "SigningPubKey": "ED6CCB946A60FE63CDCA2DA01AD57A3CEEFE331B70925FE61F44D9C15AB447D5AE",
+      "TransactionType": "Payment",
+      "TxnSignature": "87E99326D63BC03CE09C6A2164C1BECF82E9DA803A3F532D44F97EDA5690048391F84F652830A9CCAF32FCA45B314F49593D1F329D9F5AE014D24CB610538001",
+      "ctid": "C1421ED100060001",
+      "date": 843890061,
+      "hash": "7352A7F102F9ED530ECFC6AFD8D89009C301B728284C07E1FD8F966C6B38EB39",
+      "inLedger": 21110481,
+      "ledger_index": 21110481,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000020",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000010"
+          },
+          "PreviousTxnID": "BBF6B5F2CFB307580BBEF9AC106B00B19374D9146335E9EE58551664FB01C02E",
+          "PreviousTxnLgrSeq": 21108928
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rE9tTcXCAF7U5sDkqNj666DRDC2JLTEJET",
+           "Balance": "99999978",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21110478
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "BF7535699C85FAA62B1D6ECE0332ADED9A8E2B3F9E336E6B39311F41B6CE8810",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21110477
+          },
+          "PreviousTxnID": "BE140B51D250DC4C03283DE419937CE94E35CC0BADD1FF02741F022F1AFDB4C1",
+          "PreviousTxnLgrSeq": 21110477
+         }
+        }
+       ],
+       "TransactionIndex": 6,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "10"
+      },
+      "validated": true
+     }
+    ]
+   }
+  },
+  {
+   "id": "testnet-7BA4BC817E",
+   "label": "malicious",
+   "source": "honeypot-archive (Payment an Köder HP-1, Testnet)",
+   "ledger": {
+    "ledger_index": 21110517,
+    "transactions": [
+     {
+      "Account": "rxRLHZHz65eZDgqWsACWe2wYneFrzQYQS",
+      "Amount": "10",
+      "DeliverMax": "10",
+      "Destination": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+      "Fee": "12",
+      "Flags": 0,
+      "LastLedgerSequence": 21110535,
+      "Sequence": 21110514,
+      "SigningPubKey": "ED00B3021E7327AC87DE0122A160F0E2FC7E39434BAEC4DB82ABE65E7FDD67E2AA",
+      "TransactionType": "Payment",
+      "TxnSignature": "02355B63D43C0BB4204918CEF49DDF642D1AA4FF0823D7BD4A49F67F56960784A2DEDFEE255EBE203165DFDDB30D8E0AD29523EC623B4E1B37FCD101DD027804",
+      "ctid": "C1421EF500070001",
+      "date": 843890190,
+      "hash": "7BA4BC817EF80BCB84CB702C51675ED78F25CB3C1AABFAC097C29F16ECCFD2BB",
+      "inLedger": 21110517,
+      "ledger_index": 21110517,
+      "meta": {
+       "AffectedNodes": [
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rxRLHZHz65eZDgqWsACWe2wYneFrzQYQS",
+           "Balance": "99999978",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21110515
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "86FC889AC9320B9E78347F9B96F3659CB5311ED828595E182F40A9D7648B5DD9",
+          "PreviousFields": {
+           "Balance": "100000000",
+           "Sequence": 21110514
+          },
+          "PreviousTxnID": "F82FBE79FB188CFCEFF66B44E4F02976FCDC1460395EC8FE0FC6422AF65DAB9E",
+          "PreviousTxnLgrSeq": 21110514
+         }
+        },
+        {
+         "ModifiedNode": {
+          "FinalFields": {
+           "Account": "rBjmVFG4FUR7gwq8vb9T4cujsHsL4QX6no",
+           "Balance": "100000030",
+           "Flags": 0,
+           "OwnerCount": 0,
+           "Sequence": 21107132
+          },
+          "LedgerEntryType": "AccountRoot",
+          "LedgerIndex": "8B0EF97A65FD77387F7EE541076125DBC7AEDAFFB54AE1502578E551BC942D06",
+          "PreviousFields": {
+           "Balance": "100000020"
+          },
+          "PreviousTxnID": "7352A7F102F9ED530ECFC6AFD8D89009C301B728284C07E1FD8F966C6B38EB39",
+          "PreviousTxnLgrSeq": 21110481
+         }
+        }
+       ],
+       "TransactionIndex": 7,
+       "TransactionResult": "tesSUCCESS",
+       "delivered_amount": "10"
+      },
+      "validated": true
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -483,16 +483,17 @@ export async function buildCtx(doc, entityDoc) {
   // treffen den Tick-Cache, keine zusätzlichen GitHub-Roundtrips. entityDoc
   // null/fehlend -> leeres Set (fail-open, Verhalten bitgleich ohne Layer).
   const excludeFresh = new Set(baitLabels.keys());
+  const exchangeKeys = new Set(); // nur Börsen (ohne Köder) — für benignAccounts
   for (const a of config.benign_accounts || []) {
     if (typeof a === "string") excludeFresh.add(a);
   }
   try {
-    for (const a of getExchangeRegistryMap().keys()) excludeFresh.add(a);
+    for (const a of getExchangeRegistryMap().keys()) { excludeFresh.add(a); exchangeKeys.add(a); }
   } catch {
     /* Registry-Layer optional (fail-open) */
   }
   try {
-    for (const a of (await getMultiUserAccountsMap()).keys()) excludeFresh.add(a);
+    for (const a of (await getMultiUserAccountsMap()).keys()) { excludeFresh.add(a); exchangeKeys.add(a); }
   } catch {
     /* Multi-User-Layer optional (fail-open) */
   }
@@ -500,7 +501,9 @@ export async function buildCtx(doc, entityDoc) {
   return {
     knownBad,
     benignIssuers: new Set(config.benign_issuers || []),
-    benignAccounts: new Set(config.benign_accounts || []),
+    // Börsen-Einzahlungsadressen (Registry ∪ verifizierte Namen) sind keine Welle-Ziele:
+    // Nutzer heben dort legitim ganze Guthaben ab (account-delete-sweep/mass-sweep-convergence).
+    benignAccounts: new Set([...(config.benign_accounts || []), ...exchangeKeys]),
     // marketExcludes (Kritik-Runde 3, T1.6): derselbe Börsen-/Köder-FP-Guard
     // wie excludeFresh oben — die Market-Regeln (amm-wash-swap/
     // thin-pool-exploit/spoof-offer-cycle, lib/detector.mjs) zählen

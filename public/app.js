@@ -2405,6 +2405,11 @@ function connLabel() {
   return t('conn.liveInit');
 }
 
+function exchangeUnionSet() {
+  if (!registryMod || typeof registryMod.multiUserSnapshot !== 'function') return new Set();
+  try { return new Set(registryMod.multiUserSnapshot().keys()); } catch { return new Set(); }
+}
+
 function buildCtx() {
   // history-Begrenzung: ~FIRST_SEEN_MAX Konten / 200 Ledger. Über die
   // Ledger-Spanne hinaus alte Einträge fallen raus (deterministisch nach
@@ -2441,8 +2446,10 @@ function buildCtx() {
     firstSeenAt,
     history: ledgerHistory,
     threats: new Map(),
-    // benignIssuers/benignAccounts: die Engine bringt ihre dokumentierten
-    // Gateway-Defaults mit; hier wird nichts ergänzt (keine Literale im Frontend).
+    // benignAccounts: Börsen-Union (Registry ∪ verifizierte well-known-Namen) — dieselbe
+    // Quelle wie die Tag-Chips. Ohne geladene Union bleibt die Menge leer (fail-open für
+    // Erkennung: dann greifen nur die Engine-Defaults).
+    benignAccounts: exchangeUnionSet(),
   };
 }
 
