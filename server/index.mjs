@@ -41,6 +41,7 @@ import {
 import { normalizeTag } from "../lib/tag-identity.mjs";
 import { validatorView } from "../lib/validator-service.mjs";
 import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
+import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -152,12 +153,15 @@ app.get("/api/stats", (req, res) => {
   res.json(computeStats(threatsCache, config.network));
 });
 
-app.get("/api/validator-trace", (req, res) => {
-  const days = loadDays(TRACE_DIR);
+app.get("/api/validator-trace", async (req, res) => {
   const range = String(req.query.range || "24h");
-  if (!days.length) return res.json({ available: false, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
+  const remote = traceTokenConfigured();
+  let days;
+  try { days = remote ? await loadDaysRemote(range) : loadDays(TRACE_DIR); } catch { return res.status(502).json({ error: "Trace-Speicher nicht lesbar." }); }
+  const source = remote ? "github-daten-repo" : "lokal";
+  if (!days.length) return res.json({ available: false, source, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
   const body = req.query.patterns ? crossValidatorPatterns(days, { range }) : traceForValidator(days, String(req.query.master || ""), { range });
-  res.json({ available: true, days: days.length, ...body });
+  res.json({ available: true, source, days: days.length, ...body });
 });
 
 app.get("/api/validators", async (req, res) => {

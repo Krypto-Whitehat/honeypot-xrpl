@@ -1,0 +1,49 @@
+# Validator-Trace-Recorder: zeichnet den Validations-Stream der dUNL dauerhaft auf.
+# Läuft als geplanter Job (max. 5 h je Lauf, Actions-Limit 6 h); der nächste Lauf startet
+# im 5-h-Takt. Die Warteschlange (concurrency, kein Abbruch) verhindert parallele Läufe.
+# Lücken zwischen zwei Läufen (Startverzug von GitHub) werden vom Recorder als 'gap'
+# gespeichert, nie als 'alles ok' interpretiert.
+#
+# Benötigt das Repo-Secret GITHUB_HISTORY_TOKEN (Fine-grained PAT, Contents: read/write,
+# NUR auf das Daten-Repo honeypot-xrpl-history). Ohne Secret bricht der Job ab.
+name: Validator-Trace-Recorder
+
+on:
+  schedule:
+    - cron: "5 */5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validator-trace
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22 (globales WebSocket)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Secret prüfen
+        env:
+          GITHUB_HISTORY_TOKEN: ${{ secrets.GITHUB_HISTORY_TOKEN }}
+        run: |
+          if [ -z "$GITHUB_HISTORY_TOKEN" ]; then
+            echo "GITHUB_HISTORY_TOKEN fehlt – Recorder würde lokal auf dem Runner schreiben und Daten verlieren."
+            exit 1
+          fi
+
+      - name: Recorder (5 h)
+        env:
+          GITHUB_HISTORY_TOKEN: ${{ secrets.GITHUB_HISTORY_TOKEN }}
+          TRACE_RUN_SECONDS: "18000"
+        run: node monitor/validator-trace.mjs

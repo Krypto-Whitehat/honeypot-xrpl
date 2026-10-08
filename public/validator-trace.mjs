@@ -73,7 +73,14 @@ export function createValidatorTrace(h) {
     body.innerHTML = '<div class="vt-cards">' + cards + "</div>"
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + bars3d(d.incidents, d.range)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.patterns")) + "</h3>" + chips(d.patterns)
+      + gapsBlock(d.gaps)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.timeline")) + "</h3>" + timeline(d.incidents);
+  }
+
+  function gapsBlock(gaps) {
+    if (!gaps || !gaps.length) return "";
+    return '<h3 class="vt-h">' + h.esc(h.t("vt.gaps")) + "</h3><ul class=\"vt-list\">" + gaps.slice(0, 50).map((g) =>
+      '<li class="vt-row"><span>' + h.esc(new Date(g.timeMs).toISOString().replace("T", " ").slice(0, 19)) + " UTC</span><span>" + h.esc(h.t("vt.ledger")) + " #" + h.esc(String(g.from)) + "–#" + h.esc(String(g.to)) + "</span></li>").join("") + "</ul>";
   }
 
   function renderPatterns(body, d) {
