@@ -4,14 +4,20 @@
 # Lücken zwischen zwei Läufen (Startverzug von GitHub) werden vom Recorder als 'gap'
 # gespeichert, nie als 'alles ok' interpretiert.
 #
-# Benötigt das Repo-Secret GITHUB_HISTORY_TOKEN (Fine-grained PAT, Contents: read/write,
-# NUR auf das Daten-Repo honeypot-xrpl-history). Ohne Secret bricht der Job ab.
+# Benötigt das Repo-Secret HISTORY_TOKEN (GitHub erlaubt keine Secret-Namen mit GITHUB_-Präfix);
+# es ist der Historie-Token (Contents: read/write, Daten-Repo honeypot-xrpl-history).
+# Ohne Secret bricht der Job ab.
 name: Validator-Trace-Recorder
 
 on:
   schedule:
     - cron: "5 */5 * * *"
   workflow_dispatch:
+    inputs:
+      run_seconds:
+        description: "Laufzeit in Sekunden (Test: 120, Betrieb: 18000)"
+        required: false
+        default: "18000"
 
 permissions:
   contents: read
@@ -35,15 +41,15 @@ jobs:
 
       - name: Secret prüfen
         env:
-          GITHUB_HISTORY_TOKEN: ${{ secrets.GITHUB_HISTORY_TOKEN }}
+          GITHUB_HISTORY_TOKEN: ${{ secrets.HISTORY_TOKEN }}
         run: |
           if [ -z "$GITHUB_HISTORY_TOKEN" ]; then
-            echo "GITHUB_HISTORY_TOKEN fehlt – Recorder würde lokal auf dem Runner schreiben und Daten verlieren."
+            echo "Secret HISTORY_TOKEN fehlt – Recorder würde lokal auf dem Runner schreiben und Daten verlieren."
             exit 1
           fi
 
       - name: Recorder (5 h)
         env:
-          GITHUB_HISTORY_TOKEN: ${{ secrets.GITHUB_HISTORY_TOKEN }}
-          TRACE_RUN_SECONDS: "18000"
+          GITHUB_HISTORY_TOKEN: ${{ secrets.HISTORY_TOKEN }}
+          TRACE_RUN_SECONDS: ${{ github.event.inputs.run_seconds || '18000' }}
         run: node monitor/validator-trace.mjs
