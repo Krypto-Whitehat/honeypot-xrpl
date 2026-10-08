@@ -9,14 +9,18 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const app = fs.readFileSync(path.join(here, "app.js"), "utf8").replace(/\r\n/g, "\n");
 
-test("Cluster-Liste merkt die Cluster-ID beim Mausdruck (pointerdown) und nutzt sie als Fallback im click", () => {
+test("Cluster-Liste: pointerdown merkt Karte und ID, pointerup öffnet bei ersetztem Knoten, click bleibt Fallback", () => {
   assert.match(app, /listEl\.addEventListener\('pointerdown'/);
-  assert.match(app, /const id = card \? clusterIdOfCard\(card\) : pressedClusterId;/);
+  assert.match(app, /listEl\.addEventListener\('pointerup'/);
+  assert.match(app, /if \(!pressed \|\| pressed\.node\.isConnected\) return;/);
+  assert.match(app, /if \(same\) openClusterModal\(id\);/);
   assert.match(app, /if \(id\) openClusterModal\(id\);/);
 });
 
-test("Fallback arbeitet mit der ID, nicht mit dem Index (kein Verwechseln nach Umsortierung)", () => {
-  const block = app.slice(app.indexOf("let pressedClusterId = null;"), app.indexOf("let pressedClusterId = null;") + 900);
+test("Fallback arbeitet mit der Cluster-ID, nicht mit dem Index (kein Verwechseln nach Umsortierung)", () => {
+  const start = app.indexOf("let pressed = null;");
+  assert.ok(start > 0, "Block vorhanden");
+  const block = app.slice(start, start + 900);
   assert.ok(block.includes("clusters[idx] ? clusters[idx].id : null"));
   assert.ok(!/openClusterModal\(\s*(idx|pressedIdx)\s*\)/.test(app));
 });

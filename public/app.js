@@ -2044,7 +2044,10 @@ function bindGraph() {
   // Die Liste wird im Live-Takt (~alle 4 s) komplett neu gerendert. Trifft ein Neurender zwischen
   // Mausdruck und Loslassen, liegt der Klick im Common-Ancestor (die Liste) und die Karte ist
   // ersetzt: ohne Merken ginge der Klick verloren. Deshalb merkt sich pointerdown die Cluster-ID.
-  let pressedClusterId = null;
+  // Die Liste wird im Live-Takt (~alle 4 s) komplett neu gerendert. Ist die gedrückte Karte beim
+  // Loslassen ersetzt, feuert der Browser KEIN click (Start-Knoten nicht mehr im DOM). Deshalb
+  // öffnet pointerup die Karte unter dem Zeiger, wenn sie dieselbe Cluster-ID trägt.
+  let pressed = null; // { id, node }
   const clusterIdOfCard = (card) => {
     const idx = Number(card.dataset.clusterIndex);
     const clusters = lastClusterGraph && Array.isArray(lastClusterGraph.clusters) ? lastClusterGraph.clusters : [];
@@ -2052,12 +2055,20 @@ function bindGraph() {
   };
   listEl.addEventListener('pointerdown', (e) => {
     const card = e.target.closest('.cluster-card');
-    pressedClusterId = card ? clusterIdOfCard(card) : null;
+    pressed = card ? { id: clusterIdOfCard(card), node: card } : null;
+  });
+  listEl.addEventListener('pointerup', (e) => {
+    if (!pressed || pressed.node.isConnected) return;
+    const card = e.target.closest('.cluster-card');
+    const id = card ? clusterIdOfCard(card) : null;
+    const same = id && id === pressed.id;
+    pressed = null;
+    if (same) openClusterModal(id);
   });
   listEl.addEventListener('click', (e) => {
     const card = e.target.closest('.cluster-card');
-    const id = card ? clusterIdOfCard(card) : pressedClusterId;
-    pressedClusterId = null;
+    const id = card ? clusterIdOfCard(card) : (pressed ? pressed.id : null);
+    pressed = null;
     if (id) openClusterModal(id);
   });
   listEl.addEventListener('keydown', (e) => {
