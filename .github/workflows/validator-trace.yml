@@ -1,12 +1,12 @@
 # Validator-Trace-Recorder: zeichnet den Validations-Stream der dUNL dauerhaft auf.
-# Läuft als geplanter Job (max. 5 h je Lauf, Actions-Limit 6 h); der nächste Lauf startet
-# im 5-h-Takt. Die Warteschlange (concurrency, kein Abbruch) verhindert parallele Läufe.
-# Lücken zwischen zwei Läufen (Startverzug von GitHub) werden vom Recorder als 'gap'
-# gespeichert, nie als 'alles ok' interpretiert.
+# Läuft als geplanter Job (max. 5 h je Lauf, Actions-Limit 6 h). Die Warteschlange
+# (concurrency, kein Abbruch) verhindert parallele Läufe. Lücken zwischen Läufen (Startverzug)
+# werden vom Recorder als 'gap' gespeichert, nie als 'alles ok' interpretiert.
 #
-# Benötigt das Repo-Secret HISTORY_TOKEN (GitHub erlaubt keine Secret-Namen mit GITHUB_-Präfix);
-# es ist der Historie-Token (Contents: read/write, Daten-Repo honeypot-xrpl-history).
-# Ohne Secret bricht der Job ab.
+# Speicherweg: Das Daten-Repo honeypot-xrpl-history wird per DEPLOY-KEY geklont (Secret
+# HISTORY_DEPLOY_KEY, Schreibrecht NUR auf dieses Repo). Der Recorder schreibt die Tagesdateien
+# in den Klon; danach ein Commit und Push. Kein Token mit Zugriff auf andere Repos nötig.
+# Das Deploy-Repo selbst bekommt keinen Commit, also kein Vercel-Redeploy.
 name: Validator-Trace-Recorder
 
 on:
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     steps:
-      - name: Checkout
+      - name: Checkout (Deploy-Repo, Code)
         uses: actions/checkout@v4
 
       - name: Node 22 (globales WebSocket)
@@ -39,17 +39,42 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Secret prüfen
+      - name: Deploy-Key prüfen
         env:
-          GITHUB_HISTORY_TOKEN: ${{ secrets.HISTORY_TOKEN }}
+          KEY: ${{ secrets.HISTORY_DEPLOY_KEY }}
         run: |
-          if [ -z "$GITHUB_HISTORY_TOKEN" ]; then
-            echo "Secret HISTORY_TOKEN fehlt – Recorder würde lokal auf dem Runner schreiben und Daten verlieren."
+          if [ -z "$KEY" ]; then
+            echo "Secret HISTORY_DEPLOY_KEY fehlt – ohne Ziel-Repo würde der Recorder Daten verlieren."
             exit 1
           fi
 
-      - name: Recorder (5 h)
+      - name: Daten-Repo klonen (Deploy-Key)
+        uses: actions/checkout@v4
+        with:
+          repository: Krypto-Whitehat/honeypot-xrpl-history
+          ref: main
+          path: history
+          ssh-key: ${{ secrets.HISTORY_DEPLOY_KEY }}
+
+      - name: Recorder (in den Daten-Klon)
         env:
-          GITHUB_HISTORY_TOKEN: ${{ secrets.HISTORY_TOKEN }}
+          TRACE_DATA_DIR: ${{ github.workspace }}/history/data/validator-trace
           TRACE_RUN_SECONDS: ${{ github.event.inputs.run_seconds || '18000' }}
         run: node monitor/validator-trace.mjs
+
+      - name: Commit + Push (nur Trace-Ordner)
+        if: always()
+        working-directory: history
+        run: |
+          git config user.name "validator-trace-recorder"
+          git config user.email "validator-trace-recorder@users.noreply.github.com"
+          mkdir -p data/validator-trace
+          git add data/validator-trace
+          if git diff --cached --quiet; then
+            echo "keine Änderungen"
+          else
+            git commit -q -m "trace: recorder $(date -u +%FT%TZ)"
+            git pull --rebase -q
+            git push -q
+            echo "Trace-Daten gepusht"
+          fi

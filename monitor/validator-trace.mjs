@@ -3,10 +3,11 @@
 // Start:   node monitor/validator-trace.mjs          (Node >= 22: globales WebSocket)
 // Testlauf: TRACE_RUN_SECONDS=300 node monitor/validator-trace.mjs
 //
-// Speicher (wie der Historie-Button):
-//   - mit GITHUB_HISTORY_TOKEN: data/validator-trace/YYYY-MM-DD.json im PRIVATEN Daten-Repo
+// Speicher:
+//   - mit GITHUB_HISTORY_TOKEN: data/validator-trace/YYYY-MM-DD.json per API im PRIVATEN Daten-Repo
 //     (lib/validator-trace-store.mjs), Flush alle 5 min, nur geänderte Tage.
-//   - ohne Token (lokal):       dieselben Dateien im Arbeitsverzeichnis, Flush alle 30 s.
+//   - ohne Token: Dateien in TRACE_DATA_DIR (Standard data/validator-trace), Flush alle 30 s.
+//     Der Workflow klont das Daten-Repo und committet diesen Ordner per Deploy-Key.
 // Lücken: Kommt nach einem Ledger-Index ein größerer Sprung, wird die fehlende Spanne als
 // 'gap' gespeichert. Ohne diese Markierung sähe Stille wie 'alle Validatoren ok' aus.
 // Aufbewahrung: 365 Tage (lokal: Dateien löschen, remote: pruneRemote einmal täglich).
@@ -18,7 +19,7 @@ import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs"
 import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DATA_DIR = path.join(ROOT, "data", "validator-trace");
+const DATA_DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validator-trace");
 const REMOTE = traceTokenConfigured();
 const RETENTION_DAYS = 365;
 const RIPPLE_EPOCH = 946684800;
