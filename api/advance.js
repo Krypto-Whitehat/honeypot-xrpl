@@ -116,6 +116,9 @@ import {
   readGitHubContents,
   writeGitHubContents,
   historyKey,
+  historyLastWriteMs,
+  HISTORY_BATCH_MS,
+  pruneHistoryByAge,
   readHistoryGitHub,
   mergeHistory,
   writeHistoryGitHub,
@@ -426,6 +429,7 @@ async function rpc(method, params, tries = 3) {
 // Die merged-Schicht selbst feuert KEINEN honeycluster-Request (nur GitHub-
 // Reads, lib/threats-service.mjs getThreatKnowledge).
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+const HISTORY_FILE_PATH_ADV = "data/history.json"; // Pfad im Daten-Repo (wie HISTORY_FILE_PATH in lib/history.mjs)
 // Drainer-Historie (data/history.json im privaten Daten-Repo): nur schreiben, wenn ein Cluster-
 // Schlüssel NEU ist. Eine Zeitdrosselung pro Instanz griff nicht (Vercel betreibt mehrere
 // Instanzen). Sichtungszähler bestehender Cluster laufen nicht mit; Cluster werden je Tick neu
@@ -983,10 +987,20 @@ export default async function handler(req, res) {
           historyHasNewKeys = false;
         }
       }
+      // Batching: neue Cluster werden höchstens einmal je HISTORY_BATCH_MS committet. Zurückgestellte
+      // Cluster bleiben im Flow-State (30 Tage Fraud-Retention) und kommen im nächsten Fenster.
+      let historyDue = false;
       if (historyHasNewKeys) {
         try {
+          historyDue = now - (await historyLastWriteMs(HISTORY_FILE_PATH_ADV)) >= HISTORY_BATCH_MS;
+        } catch {
+          historyDue = false;
+        }
+      }
+      if (historyDue) {
+        try {
           await writeHistoryGitHub((fresh) =>
-            mergeHistory(fresh, fraudClusters, now, baitLabels).list
+            pruneHistoryByAge(mergeHistory(fresh, fraudClusters, now, baitLabels).list, now).list
           );
         } catch {
           /* Best-effort: History-Write-Fehler kippt den Tick nicht */

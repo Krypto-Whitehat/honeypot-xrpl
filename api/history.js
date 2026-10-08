@@ -46,6 +46,7 @@ import {
   writeHistoryGitHub,
   validateAndSanitizeHistoryPayload,
   mergeHistory,
+  pruneHistoryByAge,
   sanitizeHistoryList,
   searchHistory,
   rateLimitHistory,
@@ -164,8 +165,9 @@ async function handlePost(req, res) {
     // Merge ausschließlich im apply auf dem frischen Stand.
     const finalList = await writeHistoryGitHub(async (freshList) => {
       const merged = mergeHistory(freshList, validated.accepted, now, baitLabels);
-      outcome = merged;
-      return merged.list;
+      const aged = pruneHistoryByAge(merged.list, now);
+      outcome = { ...merged, dropped: merged.dropped + aged.dropped };
+      return aged.list;
     });
     getCache = null; // GET-Cache nach erfolgreichem Write invalidieren
     return res.status(202).json({
