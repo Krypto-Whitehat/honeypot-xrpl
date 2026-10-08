@@ -115,6 +115,7 @@ import {
 import {
   readGitHubContents,
   writeGitHubContents,
+  historyKey,
   readHistoryGitHub,
   mergeHistory,
   writeHistoryGitHub,
@@ -425,12 +426,11 @@ async function rpc(method, params, tries = 3) {
 // Die merged-Schicht selbst feuert KEINEN honeycluster-Request (nur GitHub-
 // Reads, lib/threats-service.mjs getThreatKnowledge).
 const XRPL_ADDR_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
-// Drosselung der Drainer-Historie (data/history.json im privaten Daten-Repo): ein Commit je
-// Tick war die Ursache von ~13.800 Commits. Verworfen wird dadurch nur die Sichtungszählung
-// eines übersprungenen Ticks; jeder Tick leitet die Cluster neu aus dem Flow-State ab. Der
-// Flow-State und das Block-Fenster sind cursor-gekoppelt und bleiben UNGEDROSSELT.
-const HISTORY_WRITE_MIN_MS = 60000;
-let lastHistoryWriteMs = 0;
+// Drainer-Historie (data/history.json im privaten Daten-Repo): nur schreiben, wenn ein Cluster-
+// Schlüssel NEU ist. Eine Zeitdrosselung pro Instanz griff nicht (Vercel betreibt mehrere
+// Instanzen). Sichtungszähler bestehender Cluster laufen nicht mit; Cluster werden je Tick neu
+// aus dem Flow-State abgeleitet. Flow-State und Block-Fenster sind cursor-gekoppelt und
+// bleiben unverändert.
 const HISTORY_SEED_MAX = 20000; // Speicher-Obergrenze für firstSeen/history-Seeds
 // Export (Test-Seam, Muster setRpcForTests): die Handler-Tests prüfen den
 // verifiedFresh-fail-open-Pfad (entityDoc null -> leeres Set) direkt.
@@ -974,12 +974,20 @@ export default async function handler(req, res) {
           lastReportedAt: now,
         });
       }
-      if (fraudClusters.length && now - lastHistoryWriteMs >= HISTORY_WRITE_MIN_MS) {
+      let historyHasNewKeys = false;
+      if (fraudClusters.length) {
+        try {
+          const known = new Set((await readHistoryGitHub()).list.map((c) => c?.key).filter(Boolean));
+          historyHasNewKeys = fraudClusters.some((c) => !known.has(historyKey(c.members)));
+        } catch {
+          historyHasNewKeys = false;
+        }
+      }
+      if (historyHasNewKeys) {
         try {
           await writeHistoryGitHub((fresh) =>
             mergeHistory(fresh, fraudClusters, now, baitLabels).list
           );
-          lastHistoryWriteMs = now;
         } catch {
           /* Best-effort: History-Write-Fehler kippt den Tick nicht */
         }
