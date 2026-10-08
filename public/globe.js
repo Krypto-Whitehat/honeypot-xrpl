@@ -98,6 +98,8 @@ const RING_WINDOW_MS = 30000;      // Puls-Ringe nur für Kanten mit closeTime j
 const RING_REPEAT_MS = 1200;       // ringRepeatPeriod laut Plan
 const RING_MAX_RADIUS_DEG = 3.5;     // Ring-Radius in Grad (Kugel-Oberfläche)
 const RING_PROPAGATION_SPEED = 4;  // Grad pro Sekunde
+const LIVE_TTL_MS = 45000;          // Live-Drainer-Kanten: 45 s sichtbar (Bogen + Puls-Ring)
+const LIVE_MAX = 120;               // Deckel des Live-Puffers je Instanz
 const ARC_STROKE_DEFAULT = 0.35;    // Strichstärke Standard-Kanten
 const ARC_STROKE_FLAGGED = 0.7;    // Strichstärke bei malicious-Beteiligung
 const ARC_DASH_LEN_FLAGGED = 0.45; // Strichlänge (relativ zur Bogenlänge, Bundle-Shader prüft mod(relDist, len+gap) > len)
@@ -160,7 +162,7 @@ export function initGlobe(ctx) {
   if (!ctx || typeof ctx.getClusterGraph !== 'function') {
     // Ohne Host-Draht bleibt das Modul wirkungslos passiv (Null-Guard-Muster
     // app.js:48-51: kein Top-Level-Crash, der Rest des Dashboards läuft weiter).
-    return { activate() {}, deactivate() {}, refresh() {} };
+    return { activate() {}, deactivate() {}, refresh() {}, pushLive() {} };
   }
 
   const displayAddr = typeof ctx.displayAddr === 'function' ? ctx.displayAddr
@@ -237,6 +239,7 @@ export function initGlobe(ctx) {
   let legendEl = null;            // Legende .globe-legend (Re-Erzeugen nach showNote-Muster)
   let lastLabelsSig = '';         // Signatur der zuletzt angewandten Länder-Labels
   let lastLegendSig = '';         // Signatur der zuletzt angewandten Legende
+  const liveEdges = [];           // Echtzeit-Drainer-Kanten {from,to,sev,ep} (TTL LIVE_TTL_MS)
 
   /* ---------------- Hilfen ---------------- */
 
@@ -955,6 +958,44 @@ export function initGlobe(ctx) {
       }
     }
 
+    // ECHTZEIT-KANTEN (Drainer-Funde des letzten validierten Ledgers, pushLive):
+    // Positionen wie bei den übrigen Knoten symbolisch (ctx.hashOf -> coordsFromHash,
+    // kein Geodaten-Versprechen). Bogen + Puls-Ring, verfallen nach LIVE_TTL_MS.
+    const liveNow = Date.now();
+    const liveFresh = liveEdges.filter((x) => liveNow - x.ep <= LIVE_TTL_MS);
+    liveEdges.length = 0;
+    liveEdges.push(...liveFresh);
+    if (liveFresh.length && hashOf) {
+      const addrs = new Set();
+      for (const x of liveFresh) { addrs.add(x.from); addrs.add(x.to); }
+      await Promise.all([...addrs].map(async (id) => {
+        if (coords.has(id) || posOf.has(id)) return;
+        let hex = '';
+        try { hex = String(await hashOf(id)); } catch { hex = ''; }
+        const c = /^[0-9a-f]{16}/i.test(hex) ? coordsFromHash(hex) : null;
+        if (c) coords.set(id, c);
+      }));
+    }
+    for (const x of liveFresh) {
+      const a = posOf.get(x.from) || coords.get(x.from);
+      const b = posOf.get(x.to) || coords.get(x.to);
+      if (!a || !b) continue;
+      const color = sevTokenColor(x.sev) || edgeDefaultOf();
+      if (typeof color !== 'string') continue;
+      const hot = x.sev === 'malicious';
+      arcs.push({
+        startLat: a[0], startLng: a[1], endLat: b[0], endLng: b[1], color,
+        stroke: hot ? ARC_STROKE_FLAGGED : ARC_STROKE_DEFAULT,
+        dashLen: hot ? ARC_DASH_LEN_FLAGGED : 1,
+        dashGap: hot ? ARC_DASH_GAP_FLAGGED : 0,
+        label: `<span class="globe-addr-label">${esc(displayAddr(x.from))} → ${esc(displayAddr(x.to))}</span>`,
+      });
+      ringSources.push(
+        { key: a[0] + ',' + a[1], lat: a[0], lng: a[1], sev: x.sev, ep: x.ep },
+        { key: b[0] + ',' + b[1], lat: b[0], lng: b[1], sev: x.sev, ep: x.ep },
+      );
+    }
+
     // AGGREGIERTE Land-zu-Land-Bögen: nur Flows, bei denen BEIDE Seiten über
     // die name->centroid-Map aus countries[] auflösbar sind; null-seitige
     // Flows (null->Land, Land->null) sind per Definition nicht bogenfähig
@@ -1579,5 +1620,19 @@ export function initGlobe(ctx) {
     });
   } catch { /* Noop ohne addEventListener */ }
 
-  return { activate, deactivate, refresh };
+  // Echtzeit-Drainer-Kanten aus dem Live-Pfad (app.js -> live-monitor.mjs).
+  // edges: [{from,to,sev:'malicious'|'suspect'}] — Adressen nur intern, Anzeige
+  // ausschließlich über displayAddr (Host-Gate). Fail-closed: ungültige Einträge fallen weg.
+  function pushLive(edges) {
+    if (!Array.isArray(edges)) return;
+    const ep = Date.now();
+    for (const x of edges) {
+      if (!x || !x.from || !x.to || x.from === x.to) continue;
+      liveEdges.push({ from: String(x.from), to: String(x.to), sev: x.sev === 'malicious' ? 'malicious' : 'suspect', ep });
+    }
+    while (liveEdges.length > LIVE_MAX) liveEdges.shift();
+    refresh();
+  }
+
+  return { activate, deactivate, refresh, pushLive };
 }

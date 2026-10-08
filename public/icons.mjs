@@ -4,7 +4,7 @@
  *
  * STILVERTRAG (im Test icons.test.mjs erzwungen):
  *  - Illustrationen auf 160×120-Grid, Icons auf 24×24-Grid; viewBox exakt.
- *  - fill="none", stroke="currentColor", stroke-width 1.5, linecap/linejoin
+ *  - fill="none", stroke="currentColor", stroke-width 1.1, linecap/linejoin
  *    "round" auf dem Wurzel-<svg> — Kinder erben; Theme-Treue über
  *    currentColor (Leerzustand: var(--a6-control-line) via .empty-illu).
  *  - Koordinaten auf 0.5-px-Raster (Strichgravur, scharf auf HiDPI);
@@ -32,7 +32,7 @@
  * MODUL-VERTRAG (Muster cluster-chips.mjs:1-27): DOM-frei beim Import, kein
  * fetch, kein window/document — einzig mountEmptyIllu() greift guarded aufs
  * DOM zu und ist im Node-Test ohne Dokument eine No-op. */
-const SVG_ATTRS = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
+const SVG_ATTRS = 'fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"';
 
 const illu = (inner) => `<svg viewBox="0 0 160 120" ${SVG_ATTRS}>${inner}</svg>`;
 const icon = (inner, extra = '') => `<svg ${extra} viewBox="0 0 24 24" ${SVG_ATTRS}>${inner}</svg>`;

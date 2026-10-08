@@ -19,7 +19,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // importiert sie für Destination-Tag-Kantenattribute (normalizeTag,
 // computeTransitFlags); fehlt sie hier, bricht die Modul-Evaluation des
 // Browser-Clusters (404, Muster stride.mjs in server/index.mjs).
-const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs"]);
+const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs", "live-edges.mjs"]);
 
 export default async function handler(req, res) {
   try {

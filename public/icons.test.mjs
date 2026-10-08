@@ -4,7 +4,7 @@
  * Header-Logo (.brand-mark in index.html/history-host.html) und das Favicon
  * (public/favicon.svg) — kein Browser nötig:
  *  1) Stilvertrag: viewBox-Grids (Illustrationen 160×120, Icons 24×24),
- *     fill="none"/stroke="currentColor"/1.5 px/runde Kappen auf der Wurzel.
+ *     fill="none"/stroke="currentColor"/1.1 px/runde Kappen auf der Wurzel.
  *  2) Unikat-Regel (harte Auftrags-Vorgabe): kein SVG-Inhalt in zwei Rollen —
  *     normalisierter Hash UND Teilstring-Vergleich über alle Rollen.
  *  3) Marke ≠ Icons: das Logo teilt mit keiner Icon-Rolle Forminhalte; die
@@ -79,7 +79,7 @@ test('Stilvertrag: viewBox-Grids, currentColor-Gravur, runde Kappen auf der Wurz
     const expectVb = name in ILLUSTRATIONS ? '0 0 160 120' : '0 0 24 24';
     assert.ok(s.includes(`viewBox="${expectVb}"`), `${name}: viewBox ${expectVb}`);
     for (const attr of [
-      'fill="none"', 'stroke="currentColor"', 'stroke-width="1.5"',
+      'fill="none"', 'stroke="currentColor"', 'stroke-width="1.1"',
       'stroke-linecap="round"', 'stroke-linejoin="round"', 'aria-hidden="true"',
     ]) {
       assert.ok(s.includes(attr), `${name}: ${attr} fehlt`);

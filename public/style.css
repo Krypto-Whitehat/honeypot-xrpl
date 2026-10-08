@@ -2897,3 +2897,49 @@ body[data-a6] {
 @media (max-width: 700px) {
   .pm-row { grid-template-columns: 1fr 1fr; }
 }
+
+.tk-name {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--a6-line-strong);
+  border-radius: var(--a6-r-xs);
+  font-family: var(--a6-font);
+  font-size: 11px;
+  color: var(--a6-brand-blue);
+}
+
+/* Validator-Panel: Watchlist-Zeilen und Alarme nach Ampel-Tokens */
+.vl-list, .vl-alerts { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vl-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) minmax(90px, 1fr) repeat(4, minmax(90px, 1fr));
+  gap: 8px 14px;
+  align-items: baseline;
+  padding: 7px 9px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  font-size: 12px;
+}
+.vl-row small { display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--a6-muted); font-family: var(--a6-mono); }
+.vl-domain { font-weight: 600; color: var(--a6-ink); overflow-wrap: anywhere; }
+.vl-key { font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
+.vl-metric { font-family: var(--a6-mono); font-variant-numeric: tabular-nums; color: var(--a6-ink); }
+.vl-ok { border-color: var(--a6-line); }
+.vl-warn { border-color: var(--a6-sev-suspect); }
+.vl-bad { border-color: var(--a6-sev-malicious); }
+.vl-alerts { margin-top: 10px; }
+.vl-alert {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 9px;
+  border: 1px solid var(--a6-line);
+  border-radius: var(--a6-r-sm);
+  font-size: 12px;
+}
+.vl-alert.vl-bad { border-color: var(--a6-sev-malicious); }
+.vl-alert.vl-warn { border-color: var(--a6-sev-suspect); }
+.vl-attr { margin: 10px 0 0; font-size: 11px; }
+@media (max-width: 760px) {
+  .vl-row { grid-template-columns: 1fr 1fr; }
+}

@@ -39,6 +39,7 @@ import {
   getMultiUserAccountsMap,
 } from "../lib/threats-service.mjs";
 import { normalizeTag } from "../lib/tag-identity.mjs";
+import { validatorView } from "../lib/validator-service.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -147,6 +148,14 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/stats", (req, res) => {
   res.json(computeStats(threatsCache, config.network));
+});
+
+app.get("/api/validators", async (req, res) => {
+  try {
+    res.json(await validatorView());
+  } catch {
+    res.status(502).json({ error: "Validator-Abfrage fehlgeschlagen." });
+  }
 });
 
 app.get("/api/threats", (req, res) => {
@@ -831,7 +840,7 @@ app.get("/api/ledger", async (req, res) => {
 // tag-identity.mjs (2026-10-05): DOM-freie Tag-Pure-Bibliothek — cluster.mjs
 // importiert sie für Destination-Tag-Kantenattribute; fehlt sie hier, bricht
 // die Modul-Evaluation des Browser-Clusters (404, Muster stride.mjs).
-const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs"]);
+const LIB_WHITELIST = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs", "live-edges.mjs"]);
 app.get("/lib/:name", (req, res) => {
   if (!LIB_WHITELIST.has(req.params.name)) return res.status(404).end();
   res.sendFile(path.join(ROOT, "lib", req.params.name));

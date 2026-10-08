@@ -1,37 +1,126 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/public/index.html" },
-    { "source": "/index.html", "destination": "/public/index.html" },
-    { "source": "/app.js", "destination": "/public/app.js" },
-    { "source": "/i18n.mjs", "destination": "/public/i18n.mjs" },
-    { "source": "/style.css", "destination": "/public/style.css" },
-    { "source": "/globe.js", "destination": "/public/globe.js" },
-    { "source": "/globe.css", "destination": "/public/globe.css" },
-    { "source": "/history.js", "destination": "/public/history.js" },
-    { "source": "/history.css", "destination": "/public/history.css" },
-    { "source": "/account-check.js", "destination": "/public/account-check.js" },
-    { "source": "/account-check.css", "destination": "/public/account-check.css" },
-    { "source": "/drilldown.js", "destination": "/public/drilldown.js" },
-    { "source": "/drilldown.css", "destination": "/public/drilldown.css" },
-    { "source": "/name-index.mjs", "destination": "/public/name-index.mjs" },
-    { "source": "/vendor/vis-network.min.js", "destination": "/public/vendor/vis-network.min.js" },
-    { "source": "/vendor/globe.gl.min.js", "destination": "/public/vendor/globe.gl.min.js" },
-    { "source": "/vendor/topojson-client.min.js", "destination": "/public/vendor/topojson-client.min.js" },
-    { "source": "/vendor/3d-force-graph.min.js", "destination": "/public/vendor/3d-force-graph.min.js" },
-    { "source": "/history-host", "destination": "/public/history-host.html" },
-    { "source": "/history-host.html", "destination": "/public/history-host.html" },
-    { "source": "/about", "destination": "/public/about.html" },
-    { "source": "/about.html", "destination": "/public/about.html" },
-    { "source": "/lib/detector.mjs", "destination": "/api/lib-detector" },
-    { "source": "/lib/:name", "destination": "/api/lib-detector?name=:name" },
-    { "source": "/api/block-window", "destination": "/api/flow-state?route=block-window" }
+    {
+      "source": "/",
+      "destination": "/public/index.html"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/public/index.html"
+    },
+    {
+      "source": "/app.js",
+      "destination": "/public/app.js"
+    },
+    {
+      "source": "/i18n.mjs",
+      "destination": "/public/i18n.mjs"
+    },
+    {
+      "source": "/style.css",
+      "destination": "/public/style.css"
+    },
+    {
+      "source": "/globe.js",
+      "destination": "/public/globe.js"
+    },
+    {
+      "source": "/globe.css",
+      "destination": "/public/globe.css"
+    },
+    {
+      "source": "/history.js",
+      "destination": "/public/history.js"
+    },
+    {
+      "source": "/history.css",
+      "destination": "/public/history.css"
+    },
+    {
+      "source": "/account-check.js",
+      "destination": "/public/account-check.js"
+    },
+    {
+      "source": "/account-check.css",
+      "destination": "/public/account-check.css"
+    },
+    {
+      "source": "/drilldown.js",
+      "destination": "/public/drilldown.js"
+    },
+    {
+      "source": "/drilldown.css",
+      "destination": "/public/drilldown.css"
+    },
+    {
+      "source": "/name-index.mjs",
+      "destination": "/public/name-index.mjs"
+    },
+    {
+      "source": "/vendor/vis-network.min.js",
+      "destination": "/public/vendor/vis-network.min.js"
+    },
+    {
+      "source": "/vendor/globe.gl.min.js",
+      "destination": "/public/vendor/globe.gl.min.js"
+    },
+    {
+      "source": "/vendor/topojson-client.min.js",
+      "destination": "/public/vendor/topojson-client.min.js"
+    },
+    {
+      "source": "/vendor/3d-force-graph.min.js",
+      "destination": "/public/vendor/3d-force-graph.min.js"
+    },
+    {
+      "source": "/history-host",
+      "destination": "/public/history-host.html"
+    },
+    {
+      "source": "/history-host.html",
+      "destination": "/public/history-host.html"
+    },
+    {
+      "source": "/about",
+      "destination": "/public/about.html"
+    },
+    {
+      "source": "/about.html",
+      "destination": "/public/about.html"
+    },
+    {
+      "source": "/lib/detector.mjs",
+      "destination": "/api/lib-detector"
+    },
+    {
+      "source": "/lib/:name",
+      "destination": "/api/lib-detector?name=:name"
+    },
+    {
+      "source": "/api/block-window",
+      "destination": "/api/flow-state?route=block-window"
+    },
+    {
+      "source": "/api/validators",
+      "destination": "/api/stats?route=validators"
+    }
   ],
   "functions": {
-    "api/lib-detector.js": { "includeFiles": "lib/**" },
-    "api/threats.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
-    "api/check/[address].js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
-    "api/advance.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" },
-    "api/account-report.js": { "includeFiles": "lib/**,config.json,public/data/exchange-registry.json" }
+    "api/lib-detector.js": {
+      "includeFiles": "lib/**"
+    },
+    "api/threats.js": {
+      "includeFiles": "lib/**,config.json,public/data/exchange-registry.json"
+    },
+    "api/check/[address].js": {
+      "includeFiles": "lib/**,config.json,public/data/exchange-registry.json"
+    },
+    "api/advance.js": {
+      "includeFiles": "lib/**,config.json,public/data/exchange-registry.json"
+    },
+    "api/account-report.js": {
+      "includeFiles": "lib/**,config.json,public/data/exchange-registry.json"
+    }
   },
   "cleanUrls": true
 }

@@ -3689,7 +3689,7 @@ async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
 
   finishBlockCard(card, visibleFindings, ledgerTxCount, entries.length);
   registerFindings(visibleFindings, idx);
-  liveMonitor?.record(idx, closeIso, ledgerTxCount, visibleFindings);
+  liveMonitor?.record(idx, closeIso, ledgerTxCount, visibleFindings, entries);
   liveStats.ledgers += 1;
   liveStats.txs += ledgerTxCount;
   updateLiveStats();
@@ -4036,7 +4036,7 @@ else window.addEventListener('load', preloadHeavyVendors, { once: true });
 let liveMonitor = null;
 import('/live-monitor.mjs')
   .then((m) => {
-    liveMonitor = m.createLiveMonitor({ t, esc, ruleName, noteText, defang, displayFindingAddr });
+    liveMonitor = m.createLiveMonitor({ t, esc, ruleName, noteText, defang, displayFindingAddr, nameOf: accountNameOf, pushGlobe: (edges) => globeMod?.pushLive?.(edges) });
     liveMonitor.init();
   })
   .catch(() => {});
