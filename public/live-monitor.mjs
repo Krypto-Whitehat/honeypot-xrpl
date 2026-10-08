@@ -24,13 +24,23 @@ export function createLiveMonitor(h) {
       if (f.severity === 'malicious') malicious += 1;
       else if (f.severity === 'suspect') suspect += 1;
     }
-    samples.push({ ledgerIndex: Number(ledgerIndex), closeMs, txCount: Number(txCount) || 0, malicious, suspect });
+    const rules = {};
+    for (const f of findings || []) if (f.severity === 'malicious' || f.severity === 'suspect') rules[f.ruleId] = (rules[f.ruleId] ?? 0) + 1;
+    samples.push({ ledgerIndex: Number(ledgerIndex), closeMs, txCount: Number(txCount) || 0, malicious, suspect, rules });
     while (samples.length > PATTERN_SAMPLES_MAX) samples.shift();
     anomalies = detectPatterns(samples).slice(-40);
     ticker(findings, ledgerIndex);
     if (h.pushGlobe) { const edges = liveEdgesOf(entries, findings); if (edges.length) h.pushGlobe(edges); }
     const now = Date.now();
     if (now - paintAt >= PANEL_PAINT_MS) { paintAt = now; paintPattern(); }
+  }
+
+  // Dominante Regel des Ledgers (Ursachen-Hinweis im Panel): Regel-ID mit den meisten Funden.
+  function topRuleOf(ledgerIndex) {
+    const s = samples.find((x) => x.ledgerIndex === ledgerIndex);
+    if (!s || !s.rules) return null;
+    const top = Object.entries(s.rules).sort((a, b) => b[1] - a[1])[0];
+    return top ? h.ruleName(top[0]) + ' × ' + top[1] : null;
   }
 
   function paintPattern() {
@@ -61,7 +71,8 @@ export function createLiveMonitor(h) {
       return '<li class="pm-row pm-' + h.esc(a.type) + '"><span class="pm-time">' + h.esc(time) + '</span>'
         + '<span class="pm-type">' + h.esc(h.t('pattern.type.' + a.type)) + '</span>'
         + '<span class="pm-ledger">#' + h.esc(String(a.ledgerIndex)) + '</span>'
-        + '<span class="pm-val">' + h.esc(String(a.value)) + ' <small>/ ' + h.esc(String(Math.round(a.baseline * 10) / 10)) + ' · ' + h.esc(ratio) + '</small></span></li>';
+        + '<span class="pm-val">' + h.esc(String(a.value)) + ' <small>/ ' + h.esc(String(Math.round(a.baseline * 10) / 10)) + ' · ' + h.esc(ratio) + '</small></span>'
+        + (topRuleOf(a.ledgerIndex) ? '<span class="pm-rule">' + h.esc(topRuleOf(a.ledgerIndex)) + '</span>' : '') + '</li>';
     }).join('');
   }
 
@@ -99,6 +110,13 @@ export function createLiveMonitor(h) {
     if (!list || !empty || !alerts) return;
     const vals = Array.isArray(body?.validators) ? body.validators : [];
     empty.hidden = vals.length > 0;
+    const cov = document.getElementById("validator-coverage");
+    if (cov && body?.dunl) {
+      const d = body.dunl;
+      cov.textContent = d.listed == null
+        ? h.t("validator.coverageFallback", { n: d.matched })
+        : h.t("validator.coverage", { matched: d.matched, listed: d.listed, seq: d.sequence ?? "–" });
+    }
     const pct = (x) => (x && x.total ? Math.round((x.missed / x.total) * 1000) / 10 : null);
     const score = (x) => (x && x.score != null ? (Math.round(x.score * 10000) / 100).toFixed(2) + " %" + (x.incomplete ? " " + h.t("validator.partial") : "") : "–");
     list.innerHTML = vals.map((v) => {

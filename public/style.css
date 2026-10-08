@@ -2943,3 +2943,7 @@ body[data-a6] {
 @media (max-width: 760px) {
   .vl-row { grid-template-columns: 1fr 1fr; }
 }
+
+.vl-cov { margin: 0 0 8px; font-size: 12px; color: var(--a6-muted); font-family: var(--a6-mono); }
+
+.pm-rule { grid-column: 1 / -1; font-family: var(--a6-font); font-size: 11px; color: var(--a6-muted); }
