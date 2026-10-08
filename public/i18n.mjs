@@ -52,7 +52,7 @@ export const THEMES = ['noir', 'light'];
 export const DEFAULT_THEME = 'noir';
 /* meta[name=theme-color]-Werte der Browser-Chrome je Theme (alle drei Heads
  * tragen den Noir-Wert statisch; applyTheme hält das Meta aktuell). */
-export const THEME_META_COLORS = { noir: '#0c0b14', light: '#ffffff' };
+export const THEME_META_COLORS = { noir: '#0a0c0f', light: '#ffffff' };
 
 /* ------------------------------------------------------------------ */
 /* Wörterbuch (flache Keys; EN und DE haben dieselbe Schlüsselmenge —  */

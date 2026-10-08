@@ -536,12 +536,12 @@ test('Noir: Token-Override-Block vollständig (Flächen, Status, Akzent, Graph, 
   assert.deepEqual(missing, [], 'fehlende Noir-Overrides');
   // Spot-Werte: die Noir-Identität (Indigo-Schwarz + Violett-Akzent) und die
   // PFLICHTKORREKTUR-8-unknown-Tafel.
-  assert.equal(noirTokens['--a6-bg'], '#0c0b14');
-  assert.equal(noirTokens['--a6-ink'], '#f2f1f8');
-  assert.equal(noirTokens['--a6-accent'], '#8f7bff');
-  assert.equal(noirTokens['--a6-edge-neutral'], '#8f8da0');
-  assert.equal(noirTokens['--a6-on-ink'], '#0c0b14');
-  assert.equal(noirTokens['--a6-cluster-fill'], '#262436');
+  assert.equal(noirTokens['--a6-bg'], '#0a0c0f');
+  assert.equal(noirTokens['--a6-ink'], '#eef2f6');
+  assert.equal(noirTokens['--a6-accent'], '#8fb8dc');
+  assert.equal(noirTokens['--a6-edge-neutral'], '#8c96a2');
+  assert.equal(noirTokens['--a6-on-ink'], '#0a0c0f');
+  assert.equal(noirTokens['--a6-cluster-fill'], '#161a20');
   // Unknown-Tafel (3D-Farb-Audit 2026-10-07): swatch = --a6-role-unknown
   // (Eisblau, 13.69:1 auf der Bühne), Rand #46587e = 5.29:1 auf der Füllung.
   assert.equal(noirTokens['--a6-swatch-unknown'], '#bfe3ff');
@@ -600,7 +600,7 @@ test('Noir: Theme-Default + Bootstrap + Toggle-Container in allen drei HTML-Seit
     ['history-host.html', historyHostHtml],
   ]) {
     assert.match(html, /<body data-a6 data-theme="noir">/, `${name}: Noir als statischer Default (kein FOUC)`);
-    assert.match(html, /meta name="theme-color" content="#0c0b14"/, `${name}: Browser-Chrome in Noir-Farbe`);
+    assert.match(html, /meta name="theme-color" content="#0a0c0f"/, `${name}: Browser-Chrome in Noir-Farbe`);
     assert.match(html, /localStorage\.getItem\('hx-theme'\)\s*===\s*'light'/, `${name}: Bootstrap liest 'hx-theme'`);
     assert.match(html, /document\.body\.dataset\.theme = 'light'/, `${name}: Bootstrap schaltet Hell vor dem ersten Paint`);
     assert.match(html, /<div class="theme-switch" id="theme-switch"><\/div>/, `${name}: Toggle-Container neben dem Sprachumschalter`);
@@ -826,10 +826,10 @@ test('Noir: JS-Canvas-Paletten — THEME_JS_COLORS deckt Kanten/Rollen (inkl. un
   // (Noir), dieselben Werte wie --a6-swatch-unknown/--a6-role-unknown.
   assert.match(appJs, /background: '#4a6478', border: '#dbe6f2'/, 'Light-unknown = Stahlblau (6.20:1 auf der Bühne)');
   // Noir-Spots (PFLICHTKORREKTUR 7/8: unknown + Canvas-Fonts):
-  assert.match(appJs, /canvasInk: '#f2f1f8'/, 'Noir-Canvas-Ink = --a6-ink');
+  assert.match(appJs, /canvasInk: '#eef2f6'/, 'Noir-Canvas-Ink = --a6-ink');
   assert.match(appJs, /canvasBody: '#c9c7d6'/, 'Noir-Canvas-Body = --a6-body');
   assert.match(appJs, /unknown: \{ background: '#bfe3ff', border: '#46587e'/, 'Noir-unknown = Eisblau auf Swatch-Teller (13.69:1 auf der Bühne)');
-  assert.match(appJs, /fontColor: '#f2f1f8'/, 'Noir-Cluster-Font hell');
+  assert.match(appJs, /fontColor: '#eef2f6'/, 'Noir-Cluster-Font hell');
   // Renderpfade lesen die theme-geführten Variablen statt Hex (die
   // Initialwerte der Tabellen selbst sind bewusst die Hell-Literale —
   // applyThemeColors mutiert sie in place; geprüft wird der RENDER-PFAD):

@@ -135,10 +135,10 @@ const CATEGORY_HEX = {
     '--a6-edge-admin': '#8ab4ff',
     '--a6-edge-nft': '#d946ef',
     '--a6-edge-fraud': '#ff7a70',
-    '--a6-edge-neutral': '#8f8da0',
+    '--a6-edge-neutral': '#8c96a2',
   },
 };
-const SURFACE = { Hell: '#ffffff', Noir: '#14131f' };
+const SURFACE = { Hell: '#ffffff', Noir: '#101317' };
 
 test('Kategorie-Palette: exakte Token-Werte in beiden Themes (style.css SSOT)', () => {
   for (const [theme, tokens] of [['Hell', lightTokens], ['Noir', noirView]]) {

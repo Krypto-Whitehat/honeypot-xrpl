@@ -895,7 +895,7 @@ function edgeIsFraud(e, sevByAddr) {
   ) >= SEV_OVERRIDE_RANK.malicious;
 }
 // Neutraler Kanten-Ton — let (nicht const): applyThemeColors() tauscht den
-// Wert beim Theme-Wechsel (Noir #8f8da0 = --a6-edge-neutral, 5.68:1 auf der
+// Wert beim Theme-Wechsel (Noir #8c96a2 = --a6-edge-neutral, 5.68:1 auf der
 // dunklen Bühne; #62626b wäre dort nur ~2.2:1). Unbekannte Kanten-Typen
 // lesen den Wert je Render, Kontext-Verbraucher (drilldown/globe) über den
 // edgeDefault-Thunk.
@@ -904,7 +904,7 @@ let EDGE_DEFAULT = '#62626b';
 // Rollen-Farbcodierung (Design-Vorgabe Astra 6): tonale Fläche, 1px
 // Tintenrand je Rolle. Unknown seit dem 3D-Farb-Audit 2026-10-07 KEIN
 // Neutralgrau mehr: der bisherige Hell-Wert #f0f0f2 lag mit 1.14:1 unter
-// der weißen Bühne (Noir #262436: 1.21:1 auf #14131f) — die 3D-Kugel ohne
+// der weißen Bühne (Noir #161a20: 1.21:1 auf #101317) — die 3D-Kugel ohne
 // Rand-Mesh war unsichtbar. Neu: entsättigtes Stahlblau (Hell) / Eisblau
 // (Noir), beides ≥3:1 gegen beide Bühnen (Werte live per WCAG gerechnet)
 // und gegen alle Rollen-/Kantentöne unterschieden; dieselben Werte wie
@@ -997,10 +997,10 @@ const THEME_JS_COLORS = {
     },
   },
   noir: {
-    canvasInk: '#f2f1f8',      // = --a6-ink (Noir) 16.38 ✓
+    canvasInk: '#eef2f6',      // = --a6-ink (Noir) 16.38 ✓
     canvasBody: '#c9c7d6',     // = --a6-body 11.05 ✓
-    edgeDefault: '#8f8da0',    // = --a6-edge-neutral 5.68 ✓
-    edgeHighlight: '#f2f1f8',  // 16.38 ✓
+    edgeDefault: '#8c96a2',    // = --a6-edge-neutral 5.68 ✓
+    edgeHighlight: '#eef2f6',  // 16.38 ✓
     edge: {
       // Kategorie-Schlüssel (txCategory) = --a6-edge-* Tokens (Noir-Block).
       // payment = --a6-success exakt (#4ade80): bewusste 'grün=gut'-Bundlung
@@ -1019,8 +1019,8 @@ const THEME_JS_COLORS = {
       unknown: { background: '#bfe3ff', border: '#46587e', highlight: { background: '#d9efff', border: '#46587e' }, hover: { background: '#d9efff', border: '#46587e' } },
     },
     cluster: {
-      color: { background: '#262436', border: '#f2f1f8', highlight: { background: '#322f47', border: '#f2f1f8' }, hover: { background: '#322f47', border: '#f2f1f8' } },
-      fontColor: '#f2f1f8',
+      color: { background: '#161a20', border: '#eef2f6', highlight: { background: '#1e242c', border: '#eef2f6' }, hover: { background: '#1e242c', border: '#eef2f6' } },
+      fontColor: '#eef2f6',
     },
   },
 };

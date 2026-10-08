@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Theme-Farbe der Browser-Chrome: Noir ist Erstbesuch-Default (identisch
        zu index.html; i18n.mjs applyTheme/setTheme hält das Meta aktuell). -->
-  <meta name="theme-color" content="#0c0b14">
+  <meta name="theme-color" content="#0a0c0f">
   <title>Honeypot XRPL – Flow-Host</title>
   <meta name="description" content="Accumulated cross-block flow state of the XRPL ledger walk: cluster view with roles, volume and sighting times, plus the cursor position of the walk.">
   <link rel="stylesheet" href="style.css">
@@ -379,7 +379,7 @@ function renderFlowGraph(graph, fraudAddrs) {
   const labelNodes = graph.nodes.length <= NODE_LABEL_MAX;
   const labelEdgeIds = new Set(graph.edges.slice(0, EDGE_LABEL_MAX).map(edgeIdentity));
   // Token-Weg (Noir-Theme): Kanten-/Label-/Kontur-Töne LIVE aus den Tokens
-  // (--a6-edge-neutral ist theme-geführt; Noir #8f8da0 statt #62626b);
+  // (--a6-edge-neutral ist theme-geführt; Noir #8c96a2 statt #62626b);
   // Literale nur als Hell-Fallback.
   const edgeColor = cssToken('--a6-edge-neutral') || '#62626b';
   const fraudColor = cssToken('--a6-edge-fraud') || cssToken('--a6-sev-malicious') || '#b3261e';
