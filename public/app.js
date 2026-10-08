@@ -3689,6 +3689,7 @@ async function analyzeLedgerBlock(idx, declaredCount, closeIso, card) {
 
   finishBlockCard(card, visibleFindings, ledgerTxCount, entries.length);
   registerFindings(visibleFindings, idx);
+  liveMonitor?.record(idx, closeIso, ledgerTxCount, visibleFindings);
   liveStats.ledgers += 1;
   liveStats.txs += ledgerTxCount;
   updateLiveStats();
@@ -4029,3 +4030,13 @@ function preloadHeavyVendors() {
 }
 if (document.readyState === 'complete') preloadHeavyVendors();
 else window.addEventListener('load', preloadHeavyVendors, { once: true });
+
+/* Muster-Monitor + Drainer-Ticker: eigenes, lazy geladenes Modul (Speed-Budget
+ * ≤ 200 KB je App-Datei). Vor dem Laden ist liveMonitor null — der Hook ist dann no-op. */
+let liveMonitor = null;
+import('/live-monitor.mjs')
+  .then((m) => {
+    liveMonitor = m.createLiveMonitor({ t, esc, ruleName, noteText, defang, displayFindingAddr });
+    liveMonitor.init();
+  })
+  .catch(() => {});

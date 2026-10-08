@@ -257,6 +257,16 @@
         </div>
 
         <div class="console-col">
+    <section class="panel pattern-panel" aria-labelledby="pattern-title">
+      <div class="panel-head">
+        <h2 id="pattern-title" data-i18n="pattern.title">Network load patterns</h2>
+        <span class="hint" data-i18n="pattern.hint">Ledger-level anomalies (load spikes, close gaps, finding bursts) with UTC timestamps</span>
+      </div>
+      <div class="pattern-chart" id="pattern-chart" aria-live="off"></div>
+      <ol class="pattern-list" id="pattern-list"></ol>
+      <p class="empty-note" id="pattern-empty" data-i18n="pattern.empty" hidden>No anomalies in the sample window – the baseline is still forming or the network is quiet.</p>
+    </section>
+
     <section class="panel" aria-labelledby="graph-title">
       <div class="panel-head">
         <h2 class="hx-shine-word" id="graph-title" data-i18n="graph.title">Activity Graph</h2>
@@ -316,8 +326,18 @@
            (app.js renderGraphArchiveNote). -->
       <p class="graph-note" id="graph-archive-note" hidden></p>
 
-      <div id="graph" data-i18n-aria="graph.aria"></div>
-      <div id="globe" data-i18n-aria="globe.aria" hidden></div>
+      <div class="graph-live">
+        <div class="graph-live-view">
+          <div id="graph" data-i18n-aria="graph.aria"></div>
+          <div id="globe" data-i18n-aria="globe.aria" hidden></div>
+        </div>
+        <aside class="drain-ticker" aria-labelledby="ticker-title">
+          <h3 id="ticker-title" data-i18n="ticker.title">Live drainer ticker</h3>
+          <p class="hint" data-i18n="ticker.hint">Findings of the latest validated ledgers, newest first</p>
+          <ol class="ticker-list" id="ticker-list" aria-live="polite"></ol>
+          <p class="empty-note" id="ticker-empty" data-i18n="ticker.empty" hidden>No drainer activity observed yet.</p>
+        </aside>
+      </div>
 
       <ul class="cluster-list" id="cluster-list" data-i18n-aria="cluster.aria" hidden></ul>
       <p class="empty" id="cluster-empty" data-i18n="cluster.empty" hidden>No clusters yet – waiting for ledgers.</p>

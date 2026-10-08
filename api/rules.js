@@ -93,6 +93,10 @@ export const THRESHOLDS_BY_RULE = {
     windowLedgers: MARKET_THRESHOLDS.spoofWindowLedgers,                 // Fenster <= 300 Ledger
     minCancelNotionalDrops: MARKET_THRESHOLDS.spoofMinCancelNotionalDrops, // >= 100 XRP Cancel-Notional
   },
+  "amm-pool-drain": {
+    minShare: MARKET_THRESHOLDS.ammDrainMinShare,                        // >= 50 % des XRP-Pools in einer Tx
+    minPoolDrops: MARKET_THRESHOLDS.ammDrainMinPoolDrops,                // Pool vorher >= 10 XRP
+  },
 };
 
 export default async function handler(req, res) {
