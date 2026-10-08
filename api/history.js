@@ -47,6 +47,8 @@ import {
   validateAndSanitizeHistoryPayload,
   mergeHistory,
   pruneHistoryByAge,
+  historyLastWriteMs,
+  HISTORY_BATCH_MS,
   sanitizeHistoryList,
   searchHistory,
   rateLimitHistory,
@@ -161,6 +163,17 @@ async function handlePost(req, res) {
     const newClusters = validated.accepted.filter((c) => c && !existingKeys.has(c.key));
     if (!newClusters.length) {
       return res.status(202).json({ accepted: validated.accepted.length, merged: freshRead.list.length, ignored: validated.ignored, dropped: 0, written: false });
+    }
+    // Batching: höchstens ein Commit je HISTORY_BATCH_MS. Außerhalb des Fensters bleibt der Batch
+    // beim Client in der Schlange (deferred). Lesefehler -> deferred (fail-closed, kein Blindschreiben).
+    let windowOpen = false;
+    try {
+      windowOpen = now - (await historyLastWriteMs()) >= HISTORY_BATCH_MS;
+    } catch {
+      windowOpen = false;
+    }
+    if (!windowOpen) {
+      return res.status(202).json({ accepted: validated.accepted.length, merged: freshRead.list.length, ignored: validated.ignored, dropped: 0, written: false, deferred: true });
     }
     // Merge ausschließlich im apply auf dem frischen Stand.
     const finalList = await writeHistoryGitHub(async (freshList) => {

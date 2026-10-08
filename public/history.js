@@ -246,7 +246,10 @@ export function initHistory(ctx) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ clusters: batch }),
       });
-      if (res.ok) {
+      const body = res.ok ? await res.json().catch(() => ({})) : {};
+      if (res.ok && body.deferred) {
+        /* Batch-Fenster des Servers zu: Cluster bleiben in der Schlange */
+      } else if (res.ok) {
         for (const c of batch) seen.add(c.key);
         persistSeen();
         pending = pending.filter((p) => !batch.includes(p));
