@@ -40,6 +40,7 @@ import {
 } from "../lib/threats-service.mjs";
 import { normalizeTag } from "../lib/tag-identity.mjs";
 import { validatorView } from "../lib/validator-service.mjs";
+import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -64,6 +65,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+const TRACE_DIR = path.join(ROOT, "data", "validator-trace");
 
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
 
@@ -148,6 +150,14 @@ app.get("/api/health", (req, res) => {
 
 app.get("/api/stats", (req, res) => {
   res.json(computeStats(threatsCache, config.network));
+});
+
+app.get("/api/validator-trace", (req, res) => {
+  const days = loadDays(TRACE_DIR);
+  const range = String(req.query.range || "24h");
+  if (!days.length) return res.json({ available: false, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
+  const body = req.query.patterns ? crossValidatorPatterns(days, { range }) : traceForValidator(days, String(req.query.master || ""), { range });
+  res.json({ available: true, days: days.length, ...body });
 });
 
 app.get("/api/validators", async (req, res) => {

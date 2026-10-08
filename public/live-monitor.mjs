@@ -12,6 +12,13 @@ const TICKER_MAX = 60;
 const TICKER_SHOWN = 30;
 
 export function createLiveMonitor(h) {
+  let traceMod = null;
+  const loadTrace = () => import('/validator-trace.mjs').then((mod) => {
+    traceMod = traceMod || mod.createValidatorTrace({ t: h.t, esc: h.esc, ruleName: h.ruleName });
+    return traceMod;
+  }).catch(() => null);
+  const openTrace = (master, title) => loadTrace().then((tm) => tm && tm.openValidator(master, title));
+  const openPatterns = () => loadTrace().then((tm) => tm && tm.openPatterns());
   const samples = [];
   let anomalies = [];
   const rows = [];
@@ -123,7 +130,7 @@ export function createLiveMonitor(h) {
       const bad = v.revoked || (v.agreement1h && v.agreement1h.score != null && v.agreement1h.score < 0.95);
       const cls = v.revoked ? "vl-bad" : bad ? "vl-warn" : "vl-ok";
       const short = String(v.key || "").slice(0, 10) + "…" + String(v.key || "").slice(-6);
-      return "<li class=\"vl-row " + cls + "\"><span class=\"vl-domain\">" + h.esc(v.domain || "–") + "</span>"
+      return "<li class=\"vl-row " + cls + "\" data-master=\"" + h.esc(v.key || "") + "\" data-domain=\"" + h.esc(v.domain || "") + "\" tabindex=\"0\" role=\"button\"><span class=\"vl-domain\">" + h.esc(v.domain || "–") + "</span>"
         + "<span class=\"vl-key\">" + h.esc(short) + "</span>"
         + "<span class=\"vl-metric\"><small>1 h</small> " + h.esc(score(v.agreement1h)) + "</span>"
         + "<span class=\"vl-metric\"><small>" + h.esc(h.t("validator.missed")) + "</small> " + h.esc(pct(v.agreement1h) == null ? "–" : pct(v.agreement1h) + " %") + "</span>"
@@ -143,6 +150,11 @@ export function createLiveMonitor(h) {
   // Validator-Gesundheit (xrpscan, serverseitig gecacht): Takt 60 s, nur wenn das Panel existiert.
   function startValidatorPanel() {
     if (!document.getElementById("validator-list")) return;
+    const list = document.getElementById("validator-list");
+    const openRow = (el) => { const row = el.closest && el.closest("[data-master]"); if (row) openTrace(row.dataset.master, row.dataset.domain || null); };
+    list.addEventListener("click", (e) => openRow(e.target));
+    list.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(e.target); } });
+    document.getElementById("validator-patterns-btn")?.addEventListener("click", openPatterns);
     const tick = async () => {
       try {
         const res = await fetch("/api/validators", { cache: "no-store" });

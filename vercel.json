@@ -103,6 +103,10 @@
     {
       "source": "/api/validators",
       "destination": "/api/stats?route=validators"
+    },
+    {
+      "source": "/api/validator-trace",
+      "destination": "/api/stats?route=trace"
     }
   ],
   "functions": {

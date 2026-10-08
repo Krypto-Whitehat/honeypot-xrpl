@@ -2947,3 +2947,38 @@ body[data-a6] {
 .vl-cov { margin: 0 0 8px; font-size: 12px; color: var(--a6-muted); font-family: var(--a6-mono); }
 
 .pm-rule { grid-column: 1 / -1; font-family: var(--a6-font); font-size: 11px; color: var(--a6-muted); }
+
+/* Validator-Trace-Overlay: Dialog über dem Dashboard, Ampelfarben aus Tokens, 3D nur per CSS. */
+.vt-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 18px; background: color-mix(in srgb, var(--a6-bg) 72%, transparent); backdrop-filter: blur(6px); }
+.vt-panel { width: min(1040px, 100%); max-height: 92vh; overflow: auto; background: var(--a6-surface); border: 1px solid var(--a6-line-strong); border-radius: var(--a6-r-md); padding: 18px; box-shadow: var(--a6-e3); }
+.vt-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--a6-line); padding-bottom: 10px; }
+.vt-head h2 { margin: 0; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; overflow-wrap: anywhere; }
+.vt-close { min-height: 40px; padding: 6px 14px; background: transparent; color: var(--a6-ink); border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-sm); cursor: pointer; }
+.vt-tabs { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; }
+.vt-tab { min-height: 40px; padding: 6px 12px; background: transparent; color: var(--a6-body); border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-sm); cursor: pointer; font-size: 12px; }
+.vt-tab[aria-pressed="true"] { border-color: var(--a6-accent); color: var(--a6-ink); background: color-mix(in srgb, var(--a6-accent) 18%, var(--a6-surface)); }
+.vt-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.vt-card { padding: 10px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); }
+.vt-card small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; color: var(--a6-muted); }
+.vt-card b { font-family: var(--a6-mono); font-size: 20px; font-variant-numeric: tabular-nums; }
+.vt-card.vt-missed { border-color: var(--a6-sev-suspect); }
+.vt-card.vt-wrong-hash, .vt-card.vt-partial { border-color: var(--a6-sev-malicious); }
+.vt-h { margin: 18px 0 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--a6-muted); font-weight: 650; }
+.vt-3d { perspective: 800px; height: 230px; display: flex; align-items: flex-end; justify-content: center; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas) repeating-linear-gradient(0deg, var(--a6-graph-grid) 0 1px, transparent 1px 24px), repeating-linear-gradient(90deg, var(--a6-graph-grid) 0 1px, transparent 1px 24px); overflow: hidden; }
+.vt-floor { display: flex; align-items: flex-end; gap: 4px; height: 150px; transform: rotateX(56deg) rotateZ(-26deg); transform-style: preserve-3d; padding-bottom: 6px; }
+.vt-bar { width: 14px; height: calc(var(--h, 0) * 1px + 3px); min-height: 3px; background: linear-gradient(to top, var(--a6-accent), var(--a6-accent-hi)); border: 1px solid var(--a6-line-strong); box-shadow: 0 0 0 1px var(--a6-line); transform-style: preserve-3d; }
+.vt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.vt-chip { font-size: 11px; padding: 3px 8px; border: 1px solid var(--a6-line-strong); border-radius: var(--a6-r-xs); font-family: var(--a6-mono); }
+.vt-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vt-ev { display: grid; grid-template-columns: 180px 150px 130px 1fr; gap: 8px; padding: 6px 8px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); font-size: 12px; font-family: var(--a6-mono); }
+.vt-ev.vt-missed { border-color: var(--a6-sev-suspect); }
+.vt-ev.vt-wrong-hash, .vt-ev.vt-partial { border-color: var(--a6-sev-malicious); }
+.vt-reasons { display: flex; flex-wrap: wrap; gap: 4px; }
+.vt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vt-row, .vt-rec { display: flex; justify-content: space-between; gap: 10px; padding: 6px 8px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); font-size: 12px; font-family: var(--a6-mono); }
+.vt-key { color: var(--a6-muted); }
+.vt-empty { color: var(--a6-muted); font-size: 13px; }
+.vt-note { margin: 14px 0 0; font-size: 11px; color: var(--a6-muted); }
+[data-master] { cursor: pointer; }
+[data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
+@media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-ev { grid-template-columns: 1fr 1fr; } }
