@@ -2719,3 +2719,80 @@ body[data-a6] {
   .stat { min-width: 0; }
   .stat-network { grid-column: 1 / -1; }
 }
+
+/* ---------------- Sidebar-Shell (Redesign 2026-10-08, gr8r-Muster) ----------
+   Ab 900 px wird die Modul-Navigation zur fixierten Glas-Sidebar links; der
+   Seiteninhalt rückt per body-Padding auf. Darunter bleibt die Leiste oben
+   (mobil ohne Hover-Abhängigkeit). Gilt identisch für index, about und
+   history-host, weil alle drei dieselbe .view-nav-Struktur tragen. Die
+   "liquid"-Wirkung ist rein CSS: Glas-Füllung mit Blur, weiche Akzentlichter
+   in den Ecken, Auswahl als Verlauf mit Akzent-Kante. */
+@media (min-width: 900px) {
+  body[data-a6] {
+    padding-left: 248px;
+  }
+
+  .view-nav {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 248px;
+    height: 100vh;
+    height: 100dvh;
+    margin: 0;
+    max-width: none;
+    padding: 22px 14px;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-bottom: 0;
+    border-right: 1px solid var(--a6-line-strong);
+    background: color-mix(in srgb, var(--a6-surface) 74%, transparent);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    z-index: 20;
+    isolation: isolate;
+  }
+
+  .view-nav::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(180px 220px at 0% 0%, color-mix(in srgb, var(--a6-accent) 16%, transparent), transparent 70%),
+      radial-gradient(200px 240px at 100% 100%, color-mix(in srgb, var(--a6-brand-teal) 10%, transparent), transparent 70%);
+  }
+
+  .view-nav .view-tab {
+    width: 100%;
+    justify-content: flex-start;
+    min-height: 44px;
+    padding: 10px 12px;
+    border-radius: var(--a6-r-md);
+    transition: background-color var(--a6-fast) var(--a6-ease), color var(--a6-fast) var(--a6-ease);
+  }
+
+  .view-nav .view-tab:hover {
+    background: color-mix(in srgb, var(--a6-accent) 10%, transparent);
+  }
+
+  .view-nav .view-tab[aria-selected="true"],
+  .view-nav .view-tab[aria-current="page"] {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--a6-accent) 24%, transparent), transparent 92%);
+    box-shadow: inset 2px 0 0 var(--a6-accent);
+  }
+
+  .topbar,
+  .hx-stage,
+  main,
+  .footbar {
+    min-width: 0;
+  }
+}
+
+@media (min-width: 900px) and (prefers-reduced-motion: reduce) {
+  .view-nav .view-tab { transition: none; }
+}

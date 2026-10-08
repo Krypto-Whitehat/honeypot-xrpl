@@ -141,7 +141,8 @@ export function aggregateExchangeOutflows(view, exchangeMap, nowMs, opts = {}) {
 
   const seven = bucketAcc(7, EXOUT_WINDOW_7D_MS);
   const thirty = bucketAcc(30, EXOUT_WINDOW_30D_MS);
-  const buckets = [seven, thirty];
+  const all = bucketAcc(null, Infinity); // seit Start des States (keine Zeitgrenze)
+  const buckets = [seven, thirty, all];
   let coverageFromMs = null;
 
   for (const c of clusters) {
@@ -223,6 +224,7 @@ export function aggregateExchangeOutflows(view, exchangeMap, nowMs, opts = {}) {
   return {
     seven: finishBucket(seven, topN),
     thirty: finishBucket(thirty, topN),
+    all: finishBucket(all, topN),
     coverageFrom: coverageFromMs === null ? null : new Date(coverageFromMs).toISOString(),
     generatedAt,
   };

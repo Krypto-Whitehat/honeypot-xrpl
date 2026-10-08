@@ -2914,7 +2914,7 @@ async function applyFlowStateView(view) {
  * (esc + displayFindingAddr, Pflicht 12); der Abdeckungszeitraum
  * (coverageFrom→generatedAt, Pflicht 11) und der 50-Kanten-Cap-Hinweis
  * machen die Grenzen der Box sichtbar. */
-let exoutWindow = 7;             // aktives Fenster des Umschalters (7 | 30)
+let exoutWindow = 7;             // aktives Fenster des Umschalters (7 | 30 | 'all')
 let exoutUnionRetryDone = false; // Einmal-Guard des Nachzieh-Takts (kein Loop)
 let exoutMaskRepairInFlight = false; // Einmal-Guard des Masken-Nachziehs (kein Loop)
 
@@ -2956,7 +2956,7 @@ function renderExchangeOutflows(viewData) {
       result = null; // Aggregations-Fehler: leer statt erfundener Zahlen
     }
   }
-  const bucket = exoutWindow === 30 ? result?.thirty : result?.seven;
+  const bucket = exoutWindow === 'all' ? result?.all : exoutWindow === 30 ? result?.thirty : result?.seven;
   const rows = Array.isArray(bucket?.rows) ? bucket.rows : [];
   if (rows.length) {
     // Host-Gates der Zeilen (Pflicht 12): esc auf jeden Registry-String,
@@ -3039,15 +3039,18 @@ function renderExchangeOutflows(viewData) {
 function bindExchangeOutflows() {
   const b7 = document.getElementById('exout-window-7d');
   const b30 = document.getElementById('exout-window-30d');
-  if (!b7 || !b30) return;
+  const bAll = document.getElementById('exout-window-all');
+  if (!b7 || !b30 || !bAll) return;
   const setWindow = (days) => {
-    exoutWindow = days === 30 ? 30 : 7;
+    exoutWindow = days === 30 ? 30 : days === 'all' ? 'all' : 7;
     b7.setAttribute('aria-pressed', String(exoutWindow === 7));
     b30.setAttribute('aria-pressed', String(exoutWindow === 30));
+    bAll.setAttribute('aria-pressed', String(exoutWindow === 'all'));
     if (flowData) renderExchangeOutflows(flowData);
   };
   b7.addEventListener('click', () => setWindow(7));
   b30.addEventListener('click', () => setWindow(30));
+  bAll.addEventListener('click', () => setWindow('all'));
 }
 
 /* ---------- Top-10 Drainer-Rangliste (Drainer-Tranche 2026-10-07) ----------
@@ -3061,7 +3064,7 @@ function bindExchangeOutflows() {
  * weitergeleitete nur als Badge. Zeilen-Markup ausschließlich über die
  * Host-Gates (esc + displayFindingAddr, Pflicht 12); Tags als Chips nur über
  * esc (Tag 0 ist ein echter Tag, lib/tag-identity.mjs). */
-let droutWindow = 7;             // aktives Fenster des Umschalters (7 | 30)
+let droutWindow = 7;             // aktives Fenster des Umschalters (7 | 30 | 'all')
 let droutUnionRetryDone = false; // Einmal-Guard des Nachzieh-Takts (kein Loop)
 let droutMaskRepairInFlight = false; // Einmal-Guard des Masken-Nachziehs (kein Loop)
 
@@ -3100,7 +3103,7 @@ function renderDrainerTop10(viewData) {
       result = null; // Aggregations-Fehler: leer statt erfundener Zahlen
     }
   }
-  const bucket = droutWindow === 30 ? result?.thirty : result?.seven;
+  const bucket = droutWindow === 'all' ? result?.all : droutWindow === 30 ? result?.thirty : result?.seven;
   const rows = Array.isArray(bucket?.rows) ? bucket.rows : [];
   if (rows.length) {
     // Host-Gates der Zeilen (Pflicht 12): esc auf jeden String,
@@ -3177,15 +3180,18 @@ function renderDrainerTop10(viewData) {
 function bindDrainerTop10() {
   const b7 = document.getElementById('drout-window-7d');
   const b30 = document.getElementById('drout-window-30d');
-  if (!b7 || !b30) return;
+  const bAll = document.getElementById('drout-window-all');
+  if (!b7 || !b30 || !bAll) return;
   const setWindow = (days) => {
-    droutWindow = days === 30 ? 30 : 7;
+    droutWindow = days === 30 ? 30 : days === 'all' ? 'all' : 7;
     b7.setAttribute('aria-pressed', String(droutWindow === 7));
     b30.setAttribute('aria-pressed', String(droutWindow === 30));
+    bAll.setAttribute('aria-pressed', String(droutWindow === 'all'));
     if (flowData) renderDrainerTop10(flowData);
   };
   b7.addEventListener('click', () => setWindow(7));
   b30.addEventListener('click', () => setWindow(30));
+  bAll.addEventListener('click', () => setWindow('all'));
 }
 
 async function pollBlockWindow() {
