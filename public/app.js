@@ -2041,9 +2041,24 @@ function bindGraph() {
     if (!c) return;
     openClusterModal(c.id);
   };
+  // Die Liste wird im Live-Takt (~alle 4 s) komplett neu gerendert. Trifft ein Neurender zwischen
+  // Mausdruck und Loslassen, liegt der Klick im Common-Ancestor (die Liste) und die Karte ist
+  // ersetzt: ohne Merken ginge der Klick verloren. Deshalb merkt sich pointerdown die Cluster-ID.
+  let pressedClusterId = null;
+  const clusterIdOfCard = (card) => {
+    const idx = Number(card.dataset.clusterIndex);
+    const clusters = lastClusterGraph && Array.isArray(lastClusterGraph.clusters) ? lastClusterGraph.clusters : [];
+    return clusters[idx] ? clusters[idx].id : null;
+  };
+  listEl.addEventListener('pointerdown', (e) => {
+    const card = e.target.closest('.cluster-card');
+    pressedClusterId = card ? clusterIdOfCard(card) : null;
+  });
   listEl.addEventListener('click', (e) => {
     const card = e.target.closest('.cluster-card');
-    if (card) openFromCard(card);
+    const id = card ? clusterIdOfCard(card) : pressedClusterId;
+    pressedClusterId = null;
+    if (id) openClusterModal(id);
   });
   listEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
