@@ -23,7 +23,12 @@ const DATA_DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validato
 const REMOTE = traceTokenConfigured();
 const RETENTION_DAYS = 365;
 const RIPPLE_EPOCH = 946684800;
-const WSS = ["wss://s1.ripple.com", "wss://xrplcluster.com"];
+// Validations-Stream: nur xrpld-Server liefern ihn (Clio wie honeycluster kann ihn
+// NICHT — ein Clio-Fallback würde Ledger ohne Validations sehen und fälschlich
+// 'alle verpasst' aufzeichnen). s1.ripple.com ist laut xrpl.org "not for sustained
+// or business use" — ein Dauer-Stream ist genau das, daher xrplcluster (InFTF).
+// Env TRACE_WSS (Komma-Liste) erlaubt einen anderen xrpld-Endpunkt ohne Code-Änderung.
+const WSS = (process.env.TRACE_WSS || "wss://xrplcluster.com").split(",").map((s) => s.trim()).filter(Boolean);
 const VL_URL = "https://vl.ripple.com";
 const REGISTRY_URL = "https://api.xrpscan.com/api/v1/validatorregistry";
 const DETAIL_QUEUE_MAX = 50;
