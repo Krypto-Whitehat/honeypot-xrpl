@@ -1,0 +1,59 @@
+# Betriebs-Watchdog: vierter, versetzter Heartbeat für POST /api/advance.
+#
+# Hintergrund: Die drei Advance-Crons (Offsets 0/2/4) fielen am 08.10.2026 für
+# ~25 min KOLLEKTIV aus — GitHub startete keine geplanten Läufe, ohne dass ein
+# Job lief und fehlschlug (die Selbst-Dispatch-Kette greift nur, wenn ein Lauf
+# tatsächlich stattfindet und fehlschlägt). Ein vierter Zeitplan erhöht die
+# Chance, dass mindestens ein Scheduler-Slot feuert. Der Tick ist idempotent:
+# /api/advance verarbeitet einfach die anstehenden Blöcke.
+#
+# Zusatz: Frische-Check des Validator-Trace-Recorders. Schreibt der Recorder
+# (geplant alle 5 h) heute noch keine Tagesdatei, wird der Workflow per
+# workflow_dispatch neu angestoßen — dafür wird dasselbe Repo-Secret
+# ADVANCE_CHAIN_TOKEN wie bei der Advance-Kette genutzt (GITHUB_TOKEN darf laut
+# Live-Messung 05.10.2026 nicht dispatchen). Ohne Secret: nur der Heartbeat läuft.
+name: Ops-Watchdog (Heartbeat + Trace-Frische)
+
+on:
+  schedule:
+    - cron: "9,24,39,54 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+concurrency:
+  group: ops-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Heartbeat POST /api/advance
+        run: |
+          code=$(curl -s -o response.json -w "%{http_code}" -X POST https://honeypot-xrpl.vercel.app/api/advance)
+          echo "advance HTTP $code"
+          cat response.json
+          # 200 = Tick gelaufen; 503 = fail-closed ohne Vercel-ENV (dokumentiert).
+          # Nur Transport-/5xx-Fehler außer 503 lassen den Job fehlschlagen.
+          if [ "$code" != "200" ] && [ "$code" != "503" ]; then exit 1; fi
+      - name: Trace-Frische prüfen, Recorder bei Bedarf neu starten
+        continue-on-error: true
+        env:
+          CHAIN_TOKEN: ${{ secrets.ADVANCE_CHAIN_TOKEN }}
+        run: |
+          # Der Recorder schreibt bei laufendem Betrieb eine Tagesdatei je UTC-Tag.
+          # range=1h liefert days>0 nur, wenn heute bereits geschrieben wurde.
+          t=$(curl -s --max-time 15 "https://honeypot-xrpl.vercel.app/api/validator-trace?range=1h")
+          echo "$t" | head -c 300; echo
+          if echo "$t" | grep -q '"available":true'; then echo "Trace-Daten frisch"; exit 0; fi
+          echo "keine Trace-Datei für heute -> Recorder-Workflow anstoßen"
+          if [ -z "$CHAIN_TOKEN" ]; then echo "kein CHAIN_TOKEN -> kein Dispatch möglich"; exit 0; fi
+          curl -s --max-time 10 -o /dev/null -w "dispatch validator-trace HTTP %{http_code}\n" \
+            -X POST \
+            -H "Authorization: Bearer $CHAIN_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/validator-trace.yml/dispatches" \
+            -d '{"ref":"main"}'
