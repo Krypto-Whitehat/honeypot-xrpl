@@ -59,7 +59,7 @@ const dirty = new Set();  // Daten, die beim nächsten Flush geschrieben werden 
 let lastLedger = null;    // letzter gesehener Ledger-Index (für Lückenerkennung)
 
 function emptyDay(date) {
-  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null };
+  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null, firstMs: null, lastMs: null, hourly: {} };
 }
 function dayObj(date) {
   if (!days.has(date)) {
@@ -67,7 +67,10 @@ function dayObj(date) {
     if (!REMOTE) {
       try { obj = JSON.parse(fs.readFileSync(path.join(DATA_DIR, date + ".json"), "utf8")); } catch { obj = null; }
     }
-    if (obj) { obj.gaps ??= []; obj.incidents ??= []; obj.validators ??= {}; obj.ledgers ??= 0; obj.quorumFail ??= 0; }
+    if (obj) {
+      obj.gaps ??= []; obj.incidents ??= []; obj.validators ??= {}; obj.ledgers ??= 0; obj.quorumFail ??= 0;
+      obj.hourly ??= {}; obj.firstMs ??= null; obj.lastMs ??= null;
+    }
     days.set(date, obj ?? emptyDay(date));
   }
   return days.get(date);
@@ -78,16 +81,25 @@ function recordResult(r, detailNote) {
   const d = dayObj(date);
   d.ledgers += 1;
   if (!r.hasQuorum) d.quorumFail += 1;
+  // Aufzeichnungsspanne + Stunden-Buckets: Stundenzähler machen die Overlay-
+  // Zusammenfassung fenster-genau (Tageszähler können das nicht leisten).
+  if (!d.firstMs || r.closeMs < d.firstMs) d.firstMs = r.closeMs;
+  if (!d.lastMs || r.closeMs > d.lastMs) d.lastMs = r.closeMs;
+  const hk = Math.floor(r.closeMs / 3600000);
+  const hb = (d.hourly[hk] ??= { l: 0, v: {} });
+  hb.l += 1;
   const bad = new Set(r.incidents.map((i) => i.master));
   for (const m of MEMBERS) {
     const v = (d.validators[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0 });
-    if (!bad.has(m)) v.ok++;
+    const hv = (hb.v[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0 });
+    if (!bad.has(m)) { v.ok++; hv.ok++; }
   }
   for (const inc of r.incidents) {
     const v = d.validators[inc.master];
-    if (inc.type === "missed") v.missed++;
-    else if (inc.type === "partial") v.partial++;
-    else if (inc.type === "wrong-hash") v.wrongHash++;
+    const hv = hb.v[inc.master];
+    if (inc.type === "missed") { v.missed++; hv.missed++; }
+    else if (inc.type === "partial") { v.partial++; hv.partial++; }
+    else if (inc.type === "wrong-hash") { v.wrongHash++; hv.wrongHash++; }
     d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined });
   }
   d.lastLedger = r.ledgerIndex;

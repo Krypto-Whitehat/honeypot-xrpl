@@ -56,25 +56,35 @@ jobs:
           path: history
           ssh-key: ${{ secrets.HISTORY_DEPLOY_KEY }}
 
-      - name: Recorder (in den Daten-Klon)
+      - name: Recorder + periodischer Push (alle 5 min, nicht erst am Laufende)
         env:
           TRACE_DATA_DIR: ${{ github.workspace }}/history/data/validator-trace
           TRACE_RUN_SECONDS: ${{ github.event.inputs.run_seconds || '18000' }}
-        run: node monitor/validator-trace.mjs
-
-      - name: Commit + Push (nur Trace-Ordner)
-        if: always()
-        working-directory: history
         run: |
-          git config user.name "validator-trace-recorder"
-          git config user.email "validator-trace-recorder@users.noreply.github.com"
-          mkdir -p data/validator-trace
-          git add data/validator-trace
-          if git diff --cached --quiet; then
-            echo "keine Änderungen"
-          else
-            git commit -q -m "trace: recorder $(date -u +%FT%TZ)"
-            git pull --rebase -q
-            git push -q
-            echo "Trace-Daten gepusht"
-          fi
+          # Der Recorder schreibt lokal in den Daten-Klon (atomar via tmp+rename).
+          # Eine Push-Schleife committed/pusht alle 5 min: Sichtbarkeit im Overlay
+          # in <= 5 min statt erst nach 5 h, und bei Runner-Verlust gehen maximal
+          # 5 min Aufzeichnung verloren statt des ganzen Laufs.
+          git -C history config user.name "validator-trace-recorder"
+          git -C history config user.email "validator-trace-recorder@users.noreply.github.com"
+          node monitor/validator-trace.mjs &
+          REC=$!
+          push_flush() {
+            cd history || return 0
+            mkdir -p data/validator-trace
+            git add data/validator-trace
+            if ! git diff --cached --quiet; then
+              git commit -q -m "trace: recorder $(date -u +%FT%TZ)"
+              git pull --rebase -q || git pull --rebase -q || true
+              git push -q || echo "Push fehlgeschlagen, nächster Takt versucht erneut"
+              echo "Trace-Daten gepusht"
+            fi
+            cd ..
+          }
+          while kill -0 "$REC" 2>/dev/null; do
+            sleep 300
+            push_flush
+          done
+          wait "$REC"; CODE=$?
+          push_flush
+          exit $CODE

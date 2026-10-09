@@ -67,10 +67,38 @@ export function createValidatorTrace(h) {
 
   function renderValidator(body, d) {
     overlay.querySelector("#vt-title").textContent = current.title;
-    const s = d.summary;
-    const cards = [["ok", s.ok], ["partial", s.partial], ["missed", s.missed], ["wrong-hash", s.wrongHash], ["observed", s.observed]]
+    // xrpscan-Referenz (Agreement-Scores aus der Liste) + Master-Key, damit klar ist,
+    // WELCHER Validator mit WELCHER Referenzmetrik untersucht wird.
+    const ref = current.ref;
+    const refLine = ref && (ref.a1h || ref.a24h || ref.a30d)
+      ? '<p class="vt-ref"><small>' + h.esc(h.t("vt.ref")) + "</small> "
+        + "1 h " + h.esc(ref.a1h || "–") + " · 24 h " + h.esc(ref.a24h || "–") + " · 30 d " + h.esc(ref.a30d || "–") + "</p>"
+      : "";
+    const keyLine = '<p class="vt-key-full"><small>' + h.esc(h.t("vt.master")) + "</small> " + h.esc(d.master || current.master || "") + "</p>";
+    // Aufzeichnungs-Deckung: wieviele Ledger wurden beobachtet, über welche Spanne,
+    // wieviele Lücken-Ledger. Macht sichtbar, WAS überhaupt untersucht wurde.
+    const c = d.coverage || {};
+    const span = c.firstMs && c.lastMs
+      ? new Date(c.firstMs).toISOString().slice(5, 16).replace("T", " ") + " – " + new Date(c.lastMs).toISOString().slice(5, 16).replace("T", " ") + " UTC"
+      : "–";
+    const coverageLine = '<p class="vt-coverage"><small>' + h.esc(h.t("vt.coverage")) + "</small> "
+      + h.esc(h.t("vt.coverageVal", { ledgers: c.ledgers ?? 0, days: c.days ?? 0, span, gaps: c.gapLedgers ?? 0, qf: c.quorumFail ?? 0 })) + "</p>";
+    // Fenster-genaue Karten (Stundenzähler), sonst Tages-Gesamtzähler mit Hinweis.
+    const w = d.inWindow;
+    const src = w || d.summary;
+    const scopeTag = w
+      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.inWindow")) + (w.estimated ? " · " + h.esc(h.t("vt.estimated")) : "") + "</small></p>"
+      : '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small></p>";
+    const cards = [["ok", src.ok], ["partial", src.partial], ["missed", src.missed], ["wrong-hash", src.wrongHash], ["observed", src.observed]]
       .map(([k, v]) => '<div class="vt-card vt-' + k + '"><small>' + h.esc(h.t("vt.k." + k)) + "</small><b>" + h.esc(String(v)) + "</b></div>").join("");
-    body.innerHTML = '<div class="vt-cards">' + cards + "</div>"
+    const totalLine = w
+      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small> ok " + h.esc(String(d.summary.ok)) + " · " + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(d.summary.missed)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(d.summary.wrongHash)) + "</p>"
+      : "";
+    const noData = !d.summary.observed && !(d.incidents || []).length
+      ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
+      : "";
+    body.innerHTML = keyLine + refLine + coverageLine + scopeTag
+      + '<div class="vt-cards">' + cards + "</div>" + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + bars3d(d.incidents, d.range)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.patterns")) + "</h3>" + chips(d.patterns)
       + gapsBlock(d.gaps)
@@ -126,8 +154,8 @@ export function createValidatorTrace(h) {
     }).join("") + "</ol>";
   }
 
-  function openValidator(master, title) {
-    current = { mode: "validator", master, title: title || master.slice(0, 14) + "…", range: "24h" };
+  function openValidator(master, title, ref) {
+    current = { mode: "validator", master, title: title || master.slice(0, 14) + "…", range: "24h", ref: ref || null };
     load();
   }
   function openPatterns() {
