@@ -75,6 +75,9 @@ function dayObj(date) {
     if (obj) {
       obj.gaps ??= []; obj.incidents ??= []; obj.validators ??= {}; obj.ledgers ??= 0; obj.quorumFail ??= 0;
       obj.hourly ??= {}; obj.firstMs ??= null; obj.lastMs ??= null;
+      // Altbestand: noQuorum-Zähler fehlen -> 0, damit ++ nicht auf undefined läuft.
+      for (const v of Object.values(obj.validators)) if (v && typeof v === "object") v.noQuorum ??= 0;
+      for (const hb of Object.values(obj.hourly)) for (const v of Object.values(hb?.v ?? {})) if (v && typeof v === "object") v.noQuorum ??= 0;
     }
     days.set(date, obj ?? emptyDay(date));
   }
@@ -95,8 +98,8 @@ function recordResult(r, detailNote) {
   hb.l += 1;
   const bad = new Set(r.incidents.map((i) => i.master));
   for (const m of MEMBERS) {
-    const v = (d.validators[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0 });
-    const hv = (hb.v[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0 });
+    const v = (d.validators[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
+    const hv = (hb.v[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
     if (!bad.has(m)) { v.ok++; hv.ok++; }
   }
   for (const inc of r.incidents) {
@@ -105,6 +108,7 @@ function recordResult(r, detailNote) {
     if (inc.type === "missed") { v.missed++; hv.missed++; }
     else if (inc.type === "partial") { v.partial++; hv.partial++; }
     else if (inc.type === "wrong-hash") { v.wrongHash++; hv.wrongHash++; }
+    else if (inc.type === "no-quorum") { v.noQuorum = (v.noQuorum ?? 0) + 1; hv.noQuorum = (hv.noQuorum ?? 0) + 1; }
     d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined });
   }
   d.lastLedger = r.ledgerIndex;

@@ -2957,7 +2957,7 @@ body[data-a6] {
 .vt-tabs { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; }
 .vt-tab { min-height: 40px; padding: 6px 12px; background: transparent; color: var(--a6-body); border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-sm); cursor: pointer; font-size: 12px; }
 .vt-tab[aria-pressed="true"] { border-color: var(--a6-accent); color: var(--a6-ink); background: color-mix(in srgb, var(--a6-accent) 18%, var(--a6-surface)); }
-.vt-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.vt-cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
 .vt-card { padding: 10px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); }
 .vt-card small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; color: var(--a6-muted); }
 .vt-card b { font-family: var(--a6-mono); font-size: 20px; font-variant-numeric: tabular-nums; }
