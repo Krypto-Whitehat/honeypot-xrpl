@@ -23,7 +23,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeLedger } from "../lib/detector.mjs";
+import { analyzeLedger, expandBatches } from "../lib/detector.mjs";
 import { strideHashes } from "../lib/stride.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { getPublicThreats } from "../lib/threats-service.mjs";
@@ -201,15 +201,17 @@ export default async function handler(req, res) {
       const { entries, unresolved } = await resolveHashes(rawTxs);
       resolvedTxCount = entries.length;
       unresolvedTxCount = unresolved;
-      txSource = entries;
+      txSource = expandBatches(entries);
       const result = analyzeLedger({ transactions: entries }, await buildCtx());
       findings = result.findings;
     } else {
       // expand:true-Pfad: volle Objekte, Adapter stempelt meta/ledger_index/
       // close_time_iso pro Entry; analyzeLedger akzeptiert die
       // {ledger:{transactions}}-Form direkt (extractTransactions).
+      // expandBatches (idempotent): Batch-Inner werden eigene txRecords —
+      // sonst sind innere Payments im Client-Graph unsichtbar (XLS-56).
       const ledgerIndex = Number(led?.ledger?.ledger_index ?? led?.ledger_index) || null;
-      txSource = rawTxs.map((e) => stampExpandEntry(e, ledgerIndex, closeTime));
+      txSource = expandBatches(rawTxs.map((e) => stampExpandEntry(e, ledgerIndex, closeTime)));
       const result = analyzeLedger(led, await buildCtx());
       findings = result.findings;
       resolvedTxCount = ledgerTxCount;

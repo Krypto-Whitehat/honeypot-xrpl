@@ -87,7 +87,7 @@ import {
   ARCHIVE_MAX_BYTES,
   hasFraudEvidence,
 } from "../lib/flow-state.mjs";
-import { analyzeLedger } from "../lib/detector.mjs";
+import { analyzeLedger, expandBatches } from "../lib/detector.mjs";
 import { txRecordFromEntry } from "../lib/cluster.mjs";
 import { createRateGate, parseRetryAfterMs } from "../lib/rate-gate.mjs";
 import {
@@ -567,9 +567,13 @@ async function fetchBlock(ledgerIndex, ctx) {
       ? new Date((ledger.close_time + 946684800) * 1000).toISOString()
       : null);
   const raw = Array.isArray(ledger.transactions) ? ledger.transactions : [];
-  const entries = raw
+  const stamped = raw
     .map((e) => stampExpandEntry(e, ledgerIndexActual, closeIso))
     .filter((e) => e && typeof e === "object" && (e.TransactionType || e.tx_json || e.tx));
+  // Batch-Inner expandieren (XLS-56): sonst sind innere Payments für Records,
+  // Flow-Edges und Köder-Filter unsichtbar. Idempotent — analyzeLedger
+  // expandiert nicht nochmal.
+  const entries = expandBatches(stamped);
   // Bait-Filter (serverseitig, still — kein Oracle): tx mit Köder-Endpunkt.
   const cleanEntries = entries.filter((e) => {
     const rec = txRecordFromEntry(e, closeIso);
