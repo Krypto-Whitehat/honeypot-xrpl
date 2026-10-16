@@ -57,6 +57,10 @@
       "destination": "/public/name-index.mjs"
     },
     {
+      "source": "/i18n-validator.mjs",
+      "destination": "/public/i18n-validator.mjs"
+    },
+    {
       "source": "/vendor/vis-network.min.js",
       "destination": "/public/vendor/vis-network.min.js"
     },

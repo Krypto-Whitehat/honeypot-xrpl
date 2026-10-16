@@ -165,6 +165,15 @@
   --a6-graph-line: #17171b;
   --a6-graph-line-soft: rgba(20, 20, 22, 0.12);
 
+  /* Prismenflaechen des 3D-Profils: Schleier und Kante sind Theme-Werte, keine
+     Konstanten im Profil. Light traegt eine dunkle Kante auf heller Buehne, Noir eine helle
+     auf dunkler. Die alte Kante rgba(20,20,22,.24) war im ausgelieferten Noir-Theme auf
+     #101317 nicht mehr von der Vorderflaeche zu trennen - die drei Flaechen lasen sich als
+     ein einziger Fleck, und das Prisma wirkte schraeg statt kantig. */
+  --a6-face-shade: rgba(12, 12, 14, 0.38);
+  --a6-face-sheen: rgba(255, 255, 255, 0.24);
+  --a6-face-edge: rgba(20, 20, 22, 0.24);
+
   /* Gemeinsame Bühnenhöhen-Leiter (Design-Audit 2026-10-06): #graph, #globe
      und .cluster-3d (drilldown.css) teilen sich diese Höhe — vorher sprang die
      Bühne beim Tab-Wechsel Live→Globe um 200 px. Basis 720 px; die Stufen
@@ -300,6 +309,9 @@
   --a6-graph-grid: rgba(238, 242, 246, 0.06);
   --a6-graph-line: #eef2f6;
   --a6-graph-line-soft: rgba(238, 242, 246, 0.14);
+  --a6-face-shade: rgba(6, 8, 11, 0.42);
+  --a6-face-sheen: rgba(255, 255, 255, 0.22);
+  --a6-face-edge: rgba(238, 242, 246, 0.26);
   --a6-cluster-fill: #161a20;
   --a6-cluster-border: #eef2f6;
   --a6-cluster-hover: #1e242c;
@@ -2984,114 +2996,189 @@ body[data-a6] {
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
 @media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-ev { grid-template-columns: 1fr 1fr; } }
 /* Incident-Profil (3D): ein Prisma je Zeitintervall.
-   Geometrie ist abgeleitet statt paarweise gesetzt: --d = max. Tiefe des Profils,
-   --dz = --d * tan 41deg (0,86929) = Höhenversatz dieser Tiefe, --skew = 41deg.
-   Die Tiefenfläche ist --dc breit und mit -skew geschert (Höhenversatz bei x = --dc:
-   dc * tan 41deg = --dzc). Die Deckfläche ist --dzc hoch und mit (skew - 90deg) geschert
-   (Breitenversatz bei y = --dzc: dzc * tan 49deg = 1,15037 * 0,86929 * dc = dc). Beide Kanten
-   treffen sich deshalb bei jeder Breite exakt; ein Wertepaar wie 15/13 wäre nur für eine
-   einzige Breite geschlossen und öffnet das Prisma um Bruchteile eines Pixels.
+   Geometrie ist abgeleitet statt paarweise gesetzt: --skew = 45deg, --d = max. Tiefe des
+   Profils, --dz = --d * tan 45deg (1) = Höhenversatz dieser Tiefe. Die Tiefenfläche ist
+   --dc breit und mit -skew geschert (Höhenversatz bei x = --dc: dc * tan 45deg = --dzc). Die
+   Deckfläche ist --dzc hoch und mit (skew - 90deg) geschert (Breitenversatz bei y = --dzc:
+   dzc * cot 45deg = dc). Beide Kanten treffen sich deshalb bei jeder Breite exakt; ein
+   Wertepaar wie 15/13 wäre nur für eine einzige Breite geschlossen und öffnet das Prisma um
+   Bruchteile eines Pixels.
 
-   Tiefe je Säule statt je Profil (--dc <= --bh): eine feste Tiefe macht aus kleinen Werten
-   schiefe Bänder. Gemessen 2026-10-16 live (peak 5000, --d 7,63 px, --dz 6,63 px): ein
-   Intervall mit 1 Vorfall war 2,48 px hoch - Grundriss-Rückkante (6,63 px) und Deckfläche
-   (6,63 px) ragten ÜBER die Balken-Oberkante, und die Deckflächen benachbarter Säulen
-   berührten sich mit 2,4 px Abstand (Säule 29 px + Tiefe 7,63 px gegen Schrittweite 39 px).
-   Das Profil las sich als durchgehendes Schrägband statt als Säulen. Deshalb:
-     --dc = min(--d, --bh) für Säulen mit Vorfällen, --dzc = --dc * tan 41deg.
-   Damit gilt dzc <= 0,869 * bh < bh: die Grundriss-Rückkante liegt unter der Balken-Oberkante,
-   der Grundriss ist von der Vorderfläche verdeckt (geometrisch korrekt - die Grundfläche
-   eines soliden Prismas sieht man nicht), und die Deckfläche ist nie höher als der Balken.
-   Säulen ohne Vorfälle behalten --d: dort ist der Grundriss die Kachel des Intervalls.
-   Profiltiefe ist eine Sichtbarkeits-Regel, keine Sparregel. Gemessen 2026-10-16 (7-Tage-
-   Fenster, peak 4, Container 963 px, 24 Säulen): mit 0,5cqw war --d 4,82 px und --dzc 4,19 px,
-   die Deckfläche lag pixelgleich über dem Balken (Luminanz 0,55 gegen 0,54) und die Tiefen-
-   fläche war schmaler als ein Rasterzeichen - das Profil las sich als flacher Kamm statt als
-   Prisma. Deshalb 0,85cqw (8,19 px bei 963 px, Obergrenze 11 px) und --gap auf 1,15cqw.
-   Invariante --dc <= --d <= --gap in jedem cqw-Zweig (0,85 < 1,15, 3 < 4, 11 < 15): der
-   Überstand in die Nachbarsspalte ist nie positiv, und der Abstand zweier Deckflächen bleibt
-   bei 963 px Container 29,97 + 11,25 - 8,31 = 32,91 px.
+   Warum 45deg und nicht 51deg (gemessen 2026-10-16 im ausgelieferten Overlay, Content 961 px,
+   24-h-Fenster, peak 50, Zelle 30,87 px): eine waagerechte Deckflaeche kann in einer Ansicht von
+   oben nie hoeher sein als sie tief ist. Der Hoehenversatz der Tiefe --dc ist --dc * tan(--skew),
+   und genau dieser Versatz ist die Hoehe der Deckflaeche. Bei 51deg (tan 1,2349) war die Kappe
+   8,38 px hoch an einer Tiefe von 6,78 px - die Kappe war hoeher als die Tiefe breit, also ein
+   Koerper, den keine Ansicht von oben zeigen kann. Das, nicht die Zellenbreite, ist der Grund
+   des schraegen Eindrucks. 45deg ist die obere Grenze einer gueltigen Ansicht und zugleich die
+   kanonische Kavaliere-Projektion: Kappe 6,79 px = Tiefe 6,79 px an 24,07 px Vorderflaeche,
+   28 % Scheranteil. Der Scheranteil (Scherflaeche / Vorderflaeche) haengt an --d / --col-w
+   (0,22 -> 28 %) und nicht am Winkel; der Winkel entscheidet nur Kappenhoehe und Rampenneigung.
+   Verworfen: 36deg bei 0,30 * Zelle (Tiefenflaeche 9,26 px an 21,61 px Vorderflaeche - 43 %
+   Scheranteil, die Scherflaeche lehnte 54deg aus der Lotrechten, das Feld las sich als nach
+   rechts kippende Nadeln, und die Kappe von 6,72 px war zu niedrig, um als Flaeche gelesen zu
+   werden) und 30deg (Kappe 3,92 px - deutlich unter dieser Grenze).
 
-   Beleuchtung (Licht von oben): drei getrennte Töne, nicht drei Überlagerungen derselben
-   Farbe: Vorderfläche die Typ-Farbfolge, Deckfläche dieselbe Farbe mit 45 % Weiß, Tiefenfläche
-   sie mit 42 % Schwarz. Gemessen 2026-10-16 im ausgelieferten Noir-Theme (Pixel im Plot, ein
-   und dieselbe Säule): Deckfläche rgb(208,213,219) = L 212, Vorderfläche rgb(154,164,176) =
-   L 163, Tiefenfläche rgb(103,109,117) = L 108 - drei unterscheidbare Töne. Die alte Fassung
-   legte 26 % Weiß auf eine Fläche, die schon die Farbe des obersten Farbverlaufs trug; die
-   Kante war im gerasterten Bild nicht mehr von der Vorderfläche zu trennen. Es sind Schleier
-   über var(--vt-cap), keine Theme-Farben: sie hellen bzw. dunkeln in Light und Noir gleich ab
-   und lassen kein Hex-Literal außerhalb der Token-Blöcke entstehen.
+   Prisma in eigener Zelle (--dc <= 0,22 * --col-w): die Vorderfläche ist --col-w - --dc
+   breit, die Tiefenfläche füllt den Rest derselben Zelle (left: 100% der Vorderfläche,
+   Breite --dc), die Deckfläche schert um genau --dc nach rechts und endet an der
+   Zellenkante. Ein Prisma ragt damit nie in die Nachbarspalte - die frühere Klammer
+   --dc <= --gap war nur nötig, weil die Tiefenfläche außerhalb der Säule lag
+   (left: 100% der Säule) und in den Abstand hineinragte.
+
+   Warum die Zelle breiter und der Abstand kleiner sein muss (gemessen 2026-10-16 live im
+   ausgelieferten Overlay, 7d-Fenster: Aussenbreite 987 px = Content 961 px, Plot 909,48 px,
+   Abstand 11,04 px, Säule 27,31 px, Tiefe 8,16 px, Deckfläche 7,09 px): die Zelle war nur
+   2,5-mal so breit wie ihr Abstand, und die Tiefenfläche war eine 8-px-Scheibe an einer
+   27-px-Säule - das Profil las sich als Kamm aus dünnen Stäben, nicht als Säulenfeld.
+   Neu: --gap 7,69 px, --col-w 30,86 px, --dc 6,79 px, Vorderfläche 24,07 px. Dieselbe
+   Projektion, dieselbe Achse - aber als Körper lesbar, weil die Zelle 4-mal so breit ist
+   wie der Abstand und gut ein Fünftel davon Tiefe zeigt.
+
+   Tiefe ist je Profil konstant: --dc = --d für jede Säule, auch für eine mit einem einzigen
+   Vorfall. Die begrenzte Fassung --dc = min(--d, --bh) machte die Säulen unterschiedlich
+   dick - gemessen 2026-10-16 im 24-h-Fenster (peak 50) 10,48 px Tiefenfläche an der
+   7-Vorfall-Säule gegen 3,52 px an der 1-Vorfall-Säule. Dieselbe Projektion, zwei
+   Körperbreiten nebeneinander: das Profil las sich schräg statt als Säulenfeld.
+
+   Unter jeder Säule steht dieselbe Bodenplatte (--base-h, volle Zellenbreite, Farbe des
+   Intervall-Zustands). Vorher war der Grundriss je Säule verschieden hoch (6,81 px unter
+   einer 5-Vorfall-Säule gegen 4 px unter einer leeren) und ragte seitlich unter der
+   Tiefenfläche hervor - ein angeschnittener Sockel statt einer Ebene. Jetzt ist die
+   Null-Linie für alle 24 Intervalle dieselbe Kante, und ein leeres Intervall ist eine
+   Platte ohne Körper statt einer Halbkachel.
+
+   --col-w ist nachgerechnet, nicht gesetzt: .vt-plot zieht links --gutter und rechts 3px ab,
+   .vt-bars teilt den Rest in 24 Säulen und 23 Abstand. Kontrolle 2026-10-16 (Content 961 px,
+   altes --gutter 40,36 px, altes --d 8,16 px, altes --gap 11,05 px):
+   (961 - 40,36 - 11,16 - 254,18) / 24 = 27,30 px - gegen gemessene 27,3 px Säulenbreite.
+   Mit dem neuen --gap 7,69 px: 30,86 px. Invariante --dc <= 0,22 * --col-w gilt im Band,
+   in dem die Tiefe aus der Zelle kommt. Nachgerechnet über c = Content in px
+   (gap = clamp(4, 0,008c, 11), gutter = clamp(20, 0,042c, 42)):
+   col-w = (0,774c - 3) / 24 für 476 <= c <= 1000 und col-w = (0,816c - 45) / 24 für
+   1000 <= c <= 1375. Die 4-px-Untergrenze greift unter c = 568 px (col-w = 18,19 px),
+   der 8,5-px-Deckel über c = 1192 px (col-w = 38,65 px). Im Mittelband ist die Vorderfläche
+   genau 78 % der Zelle; unterhalb davon ist die Tiefe die Untergrenze und die Vorderfläche
+   wird schmaler - bei 460 px Content: Zelle 14,38 px, Tiefe 4 px, Vorderfläche 10,38 px (72 %).
+   Unter 115 px Content trägt der Raster nicht - 24 Säulen und 23 * 4 px Abstand brauchen
+   115 px ohne jede Säulenbreite; der schmalste real gemessene Container sind 260 px Content
+   (390 px Viewport, 286 px Aussenbreite), und unter 380 px Content geht das Profil auf eine
+   flache Ebene zurück (Container-Query unten).
+
+   Beleuchtung (Licht von oben): drei getrennte Toene, nicht drei Ueberlagerungen
+   derselben Farbe: Vorderflaeche die Typ-Farbfolge, Deckflaeche dieselbe Farbe mit 16-18 %
+   Weiss, Tiefenflaeche sie mit 38-42 % Schwarz. Die Schleier und die Kante sind Theme-Werte
+   (--a6-face-shade / --a6-face-sheen / --a6-face-edge), keine Konstanten im Profil: auf
+   #101317 traegt jede Flaeche eine helle Kante, weil eine dunkle Kante im Noir-Theme die
+   drei Flaechen nicht mehr trennte. Die alten Schleier 45 % Weiss und 55 % Schwarz wuschen
+   die Typ-Farbe auf der Deckflaeche aus (bernsteinfarbene missed-Saeulen endeten als graues
+   Blech) und machten die Tiefenflaeche zu einem schwarzen Keil.
+   Die Saulentiefe --d ist eine Rendering-Groesse mit einer Achsen-Grenze:
+   min(max(4 px, 0,22 * Zellenbreite), 8,5 px, Plot-Hoehe * --dmax). Die ersten beiden Grenzen
+   geben das Volumen - die Tiefe haengt an der Zelle, nicht an einem Datenwert, und alle
+   24 Intervalle behalten dieselbe Projektion. Die dritte Grenze ist die Geometrie selbst:
+   die Kappe ist --dc * tan(45deg) hoch, also passt sie nur auf einen Koerper, der mindestens
+   so hoch ist. --dmax kommt aus profile3d und ist (kurzeste gezeichnete Saeulenhoehe /
+   Achsenmaximum) / 1 - als Anteil der Plot-Hoehe, damit die kleinere Mobile-Plot-Hoehe
+   mitgeht.
+   Der fruehere Daten-Deckel (--dcap = kurzste Saeule / Plot-Hoehe, ohne tan) hing an einer
+   linearen Achse bis peak 50: im live gezeichneten 24-h-Profil (Plot 176 px) sank die Tiefe auf
+   3,52 px und die Kappe auf 2,28 px - alle Saeulen flach, ein Prisma als Haarlinie. Die
+   Wurzel-Achse ab peak 25 macht denselben Fall gut: 1 Vorfall ist dort 24,89 px hoch, die
+   Grenze 24,89 px, die Tiefe bleibt bei vollen 6,79 px. Bei peak 5000 (7 Tage, 4.502 Vorfaelle
+   in einem Intervall) ist die kurzeste Saeule 2,49 px und die Grenze 2,49 px - dort wird das
+   Profil duenn, weil die Daten duenn sind. Eine Untergrenze an der
+   Saeulenhoehe selbst (max(--dzc, ...) auf --bh) waere die Alternative gewesen: sie hebt den
+   Balken ueber seinen Achsenwert und macht eine Skala unlesbar, die vergleichen soll.
+   Kein WebGL, keine neue Abhaengigkeit.
    Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
    --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
    Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { container-type: inline-size; --skew: 41deg; --dz-k: 0.86929; --d: clamp(3px, 0.85cqw, 11px); --dz: calc(var(--d) * var(--dz-k)); --gap: clamp(4px, 1.15cqw, 15px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: rgba(12, 12, 14, 0.42); --vt-sheen: rgba(255, 255, 255, 0.45); --vt-edge: rgba(20, 20, 22, 0.24); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
-.vt-plot { position: relative; height: calc(var(--plot-h) + var(--dz)); margin: 0 calc(var(--d) + 3px) 0 var(--gutter); }
-.vt-grid, .vt-bars { position: absolute; left: 0; right: 0; bottom: 0; height: var(--plot-h); }
+.vt-profile { --base-h: 6px; --label-h: 15px; }
+.vt-plot { position: relative; height: calc(var(--plot-h) + var(--dz) + var(--base-h) + var(--label-h)); margin: 0 3px 0 var(--gutter); }
+.vt-grid, .vt-bars { position: absolute; left: 0; right: 0; bottom: var(--base-h); height: var(--plot-h); }
 .vt-gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--a6-graph-grid); }
-/* Null-Linie = Groundline, auf der alle Prismensohlen sitzen. Eine Säule ohne sichtbaren
-   Boden wirkt schwebend, deshalb eine Stufe stärker als die Gitterlinien. */
+/* Null-Linie = Groundline: Oberkante der Bodenplatte, auf der alle Prismensohlen sitzen.
+   Eine Säule ohne sichtbaren Boden wirkt schwebend, deshalb eine Stufe stärker als die
+   Gitterlinien. */
 .vt-gridline.vt-zero { background: var(--a6-graph-line); }
 .vt-gridlabel { position: absolute; right: calc(100% + 6px); top: -6px; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
 .vt-bars { display: flex; align-items: stretch; gap: var(--gap); }
 @keyframes vt-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 .vt-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; animation: vt-rise 300ms ease-out backwards; animation-delay: calc(var(--i, 0) * 16ms); }
-/* Grundriss = Grundfläche des Prismas: Vorderkante auf der Achse, Rückkante um (+dc, -dzc)
-   versetzt. Bei Säulen mit Vorfällen ist er von der Vorderfläche verdeckt (dc <= bh ->
-   dzc < bh) – die Grundfläche eines soliden Prismas ist nicht sichtbar. Sein Zustand ist
-   dort der Kohortenstreifen unter der Achse, dieselben Intervalle, dieselben Farben.
-   Bei Säulen ohne Vorfälle bleibt --d: dort IST der Grundriss die Kachel des Intervalls.
-   Zustände: clean (beobachtet, keine Abweichung), solo / cohort / network (Abweichung, nach
-   Zahl betroffener dUNL-Validatoren), unknown (Abweichung, Kohorte nicht erfasst), none
-   (kein Ledger aufgezeichnet). Ein leeres Intervall bleibt als Kachel stehen, damit die
-   Zeitachse sich durchgehend liest. */
-.vt-foot { position: absolute; left: 0; right: 0; bottom: 0; height: var(--dzc); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
-.vt-col.vt-state-clean .vt-foot { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
-.vt-col.vt-state-solo .vt-foot { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
-.vt-col.vt-state-cohort .vt-foot { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
-.vt-col.vt-state-network .vt-foot { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
-.vt-col.vt-state-unknown .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
-.vt-col.vt-state-none .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
+/* Bodenplatte = Grundfläche des Intervalls: volle Zellenbreite, konstante Höhe, eine Platte
+   unter jeder Säule (sie ragt in den Plattenstreifen unterhalb der Null-Linie). Sie trägt
+   den Intervall-Zustand und ist in jeder Säule gleich sichtbar - nicht nur dort, wo kein
+   Balken steht. Zustände: clean (beobachtet, keine Abweichung), solo / cohort / network
+   (Abweichung, nach Zahl betroffener dUNL-Validatoren), unknown (Abweichung, Kohorte nicht
+   erfasst), none (kein Ledger aufgezeichnet). Ein leeres Intervall bleibt als Platte stehen,
+   damit die Zeitachse sich durchgehend liest. */
+.vt-base { position: absolute; left: 0; right: 0; bottom: calc(-1 * var(--base-h)); height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-clean .vt-base { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-col.vt-state-solo .vt-base { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
+.vt-col.vt-state-cohort .vt-base { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-col.vt-state-network .vt-base { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-col.vt-state-unknown .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-none .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
 .vt-col { --bh: calc(var(--u) * var(--n, 0)); --dc: var(--d); --dzc: calc(var(--dc) * var(--dz-k)); }
-/* Nicht-leere Intervalle bekommen eine Sichtbarkeits-Untergrenze von 2 px: bei einer
-   Wurzel-Achse ueber ein 7-Tage-Fenster (peak 5000) ist ein Intervall mit einem Vorfall
-   2,5 px hoch, mit zwei 3,5 px - unter der Schwelle, ab der eine Kante noch zu sehen ist.
-   Die Untergrenze ist eine Rendering-Regel, keine Achsenregel: sie gilt nur fur Saulen mit
-   Vorfaellen (vt-nonzero) und bleibt weit unter einem Gitterintervall (78 px bei peak 5000,
-   step 1000). Die exakte Zahl steht in Readout und aria-label. */
-.vt-col.vt-nonzero { --bh: max(2px, calc(var(--u) * var(--n, 0))); }
-/* Tiefe folgt der Balkenhoehe (Begruendung im Kopf dieses Blocks): --dc nie ueber --bh,
-   damit Grundriss-Rueckkante und Deckflaeche unter der Balken-Oberkante bleiben. */
-.vt-col.vt-nonzero { --dc: min(var(--d), var(--bh)); --dzc: calc(var(--dc) * var(--dz-k)); }
-/* Unter 460 px Content-Breite wird das Prisma flach. Nachgerechnet (cqw = Content-Breite
-   des Containers; .vt-plot zieht links --gutter und rechts calc(--d + 3px) ab; 24 Säulen und
-   23 gap; gap clamp(4px, 1,15cqw, 15px), Tiefe clamp(3px, 0,85cqw, 11px), Gutter
-   clamp(20px, 4,2cqw, 42px)): die Tiefe erreicht die 4 px Kantenbreite erst bei 470,6 px
-   Content-Breite (4 / 0,0085); bei 480 px ist die Säule 13,58 px breit und die Tiefe 4,08 px -
-   die Tiefenfläche ist eine eigene Kante. Bei 460 px sind es 3,91 px Tiefe an einer 12,98 px-
-   Säule, bei 260 px Content (286 px Aussenbreite, gemessen 2026-10-16 bei 390 px Viewport)
-   3,00 px Tiefe, 2,59 px Deckfläche und eine 5,91 px-Säule an einem 234 px-Plot: die Extrusion
-   war ein Fleck auf der Säule, kein Volumen. Eine schmale Säule ohne Scherflächen ist eine
-   lesbare Spalte; eine breite Säule mit ihnen ist ein Prisma. Die Typ-Farbe bleibt in
-   Vorderfläche, Kohortenstreifen und Legende. */
-@container (max-width: 460px) { .vt-side, .vt-top { display: none; } .vt-col:not(.vt-nonzero) .vt-foot { min-height: 4px; } }
-.vt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--bh); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
+/* Die Invariante "Kappe <= Koerper" wird nicht an der Saeulenhoehe geheilt - ein
+   max(--dzc, ...) auf --bh wuerde den Balken ueber seinen Achsenwert heben und eine Skala
+   unlesbar machen, die vergleichen soll - sondern ueber die Tiefe: --d ist durch
+   Plot-Hoehe * --dmax begrenzt, und --dmax ist genau so gewaehlt, dass die Kappe auf die
+   kurzeste gezeichnete Saeule passt. Die Balkenhoehe bleibt damit exakt der Achsenwert:
+   Gitterlinie und Balken zeigen dieselbe Zahl. Die exakte Zahl steht zusaetzlich als
+   Wertemarke ueber dem Prisma sowie in Readout und aria-label. */
+/* Die Bodenplatte ist keine Achsenregel: sie ist in jeder Säule gleich hoch, ob ein Balken
+   darauf steht oder nicht. Damit entfällt die frühere je Säule verschiedene Grundriss-Höhe
+   (6,81 px gegen 4 px) - der Grund, warum das Profil unten zackig wirkte. */
+/*    Unter 380 px Content-Breite wird das Prisma flach. Nachgerechnet mit den neuen Werten
+   (cqw = Content / 100; .vt-plot zieht --gutter links und 3px rechts ab; 24 Säulen, 23
+   Abstand): bei 380 px greifen --gap 4 px und --gutter 20 px (Untergrenzen), die Zelle ist
+   11,04 px und --dc 4,00 px - gut ein Drittel der Zelle als Tiefe, die Tiefenfläche ist eine
+   eigene Kante. Bei 260 px Content sind es 6,04 px Zelle, 4,00 px Tiefe an einer 2,04 px
+   Vorderfläche und 4,00 px Deckfläche: die Extrusion wäre ein Fleck auf der Säule, kein
+   Volumen, und eine 11-px-Ziffer passt nicht in eine 6-px-Spalte. Eine schmale Säule ohne
+   Scherflächen ist eine lesbare Spalte; eine breite Säule mit ihnen ist ein Prisma. Die
+   Typ-Farbe bleibt in Vorderfläche, Bodenplatte, Kohortenstreifen und Legende. */
+@container (max-width: 380px) { .vt-side, .vt-top, .vt-value { display: none; } .vt-col { --dc: 0px; --dzc: 0px; } }
+/* Wertemarken-Duennung: die Marke sitzt mittig ueber der Zelle (left: 0, right: 0) und ragt bei
+   langen Zahlen ueber die Zelle hinaus. Zwei Nachbarmarken beruehren sich, sobald ihre
+   Textbreite den Abstand ihrer Zentren uebersteigt, und der ist --col-w + --gap. Mono hat
+   0,60 em Ziffernvorschub (gemessen 2026-10-16: zwei Ziffern 12 px bei 10 px Schrift), also
+   sind vier Ziffern bei 11 px 26,4 px breit. Im Band 500..1000 px Content sind --gap 0,8cqw
+   und --gutter 4,2cqw, damit --col-w + --gap = 0,04025 * Content - 0,125: vier Ziffern
+   brauchen ab 659 px Content keinen Verzicht. Unter der Kante faellt jede zweite Marke, der
+   Pitch verdoppelt sich auf 2 * (--col-w + --gap) und traegt vier Ziffern bis 331 px und
+   fuenf Ziffern bis 414 px Content. Bekannte Grenze: fuenfstellige Bucket-Zahlen (33,0 px)
+   beruehren sich unterhalb von etwa 414 px Content auch geduennt. Kein Informationsverlust:
+   jede Spalte traegt tabindex="0", und Readout (aria-live) und aria-label nennen dieselbe
+   Zahl wie die Marke selbst. */
+@container (max-width: 660px) { .vt-col:nth-child(even) .vt-value { display: none; } }
+.vt-bar { position: absolute; left: 0; right: var(--dc); bottom: 0; height: var(--bh); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
 .vt-side { position: absolute; left: 100%; top: 0; width: var(--dc); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
 .vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(var(--vt-sheen), var(--vt-sheen)); box-shadow: inset 0 0 0 1px var(--vt-edge); }
-/* Signatur-Marker: sitzt auf der Oberkante des Prismas (Hoehe --u * --n) und zeigt, dass die
-   Transaktions-Forensik an einem Ausfall-Ledger dieses Intervalls eine Form-Signatur gemessen
-   hat. Er ist schmucklos und absichtlich klein - die Aussage liegt im Readout und im Streifen. */
-.vt-mark { position: absolute; left: 50%; bottom: calc(var(--bh) + var(--dzc) + 1px); width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
-.vt-axis { position: relative; height: 14px; margin: 4px calc(var(--d) + 3px) 0 var(--gutter); }
+/* Wertemarke: die exakte Zahl über dem Prisma. Die Balkenhöhe ist eine Sichtbarkeits-
+   Regelung (Untergrenze 2 px, Achsenrunde), die Zahl ist die Messung - deshalb steht sie
+   dort, wo sie auch bei einem 2-px-Balken lesbar bleibt. Sie ist für Screenreader doppelt
+   (aria-label nennt dieselbe Zahl), also aria-hidden. */
+.vt-value { position: absolute; left: 0; right: 0; bottom: calc(var(--bh) + var(--dzc) + 2px); text-align: center; font-family: var(--a6-mono); font-size: 11px; line-height: 1; color: var(--a6-ink); font-variant-numeric: tabular-nums; pointer-events: none; }
+/* Signatur-Marker: sitzt auf der Oberkante des Prismas (Hoehe --bh) am rechten Zellenrand
+   und zeigt, dass die Transaktions-Forensik an einem Ausfall-Ledger dieses Intervalls eine
+   Form-Signatur gemessen hat. Er ist schmucklos und absichtlich klein - die Aussage liegt
+   im Readout und im Streifen. Am Rand, damit die Wertemarke in derselben Höhe steht. */
+.vt-mark { position: absolute; right: 0; bottom: calc(var(--bh) + var(--dzc) + 1px); width: 6px; height: 6px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
+.vt-axis { position: relative; height: 14px; margin: 4px 3px 0 var(--gutter); }
 .vt-axis span { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); white-space: nowrap; }
 /* Kohortenstreifen: eine Zeile unter der Zeitachse, exakt auf den Intervallen der Säulen
    (gleiche Ränder, gleicher Abstand, gleiche Flex-Basis). Er zeigt, wie viele dUNL-Validatoren
    im selben Intervall ausfielen – die Frage, die zwischen "mein Knoten" und "Netzereignis"
    trennt. Ohne Aufzeichnung ist die Kachel schraffiert, nicht grau. */
-.vt-heat { display: flex; gap: var(--gap); margin: 3px calc(var(--d) + 3px) 0 var(--gutter); }
-.vt-heat-cell { flex: 1 1 0; min-width: 0; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-heat { display: flex; gap: var(--gap); margin: 3px 3px 0 var(--gutter); }
+.vt-heat-cell { flex: 1 1 0; min-width: 0; height: 11px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
 .vt-heat-cell.vt-state-clean { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-heat-cell.vt-state-solo { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
 .vt-heat-cell.vt-state-cohort { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
@@ -3101,8 +3188,8 @@ body[data-a6] {
 /* Signaturstreifen: eine Zeile unter dem Kohortenstreifen, exakt auf denselben Intervallen
    (gleiche Raender, gleicher Abstand, gleiche Flex-Basis). Er zeigt, ob die Transaktions-
    Forensik an den Ausfall-Ledern dieses Validators eine Form-Signatur gemessen hat. */
-.vt-sign { display: flex; gap: var(--gap); margin: 3px calc(var(--d) + 3px) 0 var(--gutter); }
-.vt-sign-cell { flex: 1 1 0; min-width: 0; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-sign { display: flex; gap: var(--gap); margin: 3px 3px 0 var(--gutter); }
+.vt-sign-cell { flex: 1 1 0; min-width: 0; height: 11px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
 .vt-sign-cell.vt-sign-hit { background: var(--a6-accent); }
 .vt-sign-cell.vt-sign-clear { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-sign-cell.vt-sign-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
@@ -3110,21 +3197,21 @@ body[data-a6] {
 .vt-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0 var(--gutter); padding: 0; }
 .vt-heat-legend { margin-top: 4px; }
 .vt-sign-legend { margin-top: 4px; }
-.vt-sign-note { margin: 6px 0 0 var(--gutter); font-size: 10px; }
+.vt-sign-note { margin: 6px 0 0 var(--gutter); font-size: 11px; }
 .vt-legend li { display: flex; align-items: center; gap: 6px; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-body); }
 .vt-swatch { width: 12px; height: 12px; border: 1px solid var(--a6-line-strong); border-radius: var(--a6-r-xs); }
 .vt-swatch.vt-c-missed { background: var(--a6-sev-suspect); }
 .vt-swatch.vt-c-partial { background: var(--a6-sev-info); }
 .vt-swatch.vt-c-wrongHash { background: var(--a6-sev-malicious); }
 .vt-swatch.vt-c-noQuorum { background: var(--a6-sev-neutral); }
-.vt-heat-key { width: 12px; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-heat-key { width: 12px; height: 11px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
 .vt-heat-key.vt-state-clean { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-heat-key.vt-state-solo { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
 .vt-heat-key.vt-state-cohort { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
 .vt-heat-key.vt-state-network { background: var(--a6-accent); }
 .vt-heat-key.vt-state-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
 .vt-heat-key.vt-state-none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); opacity: 0.6; }
-.vt-sign-key { width: 12px; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-sign-key { width: 12px; height: 11px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
 .vt-sign-key.vt-sign-hit { background: var(--a6-accent); }
 .vt-sign-key.vt-sign-clear { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-sign-key.vt-sign-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
@@ -3190,6 +3277,43 @@ body[data-a6] {
 .vt-badge.vt-loadv-always-failing { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
 .vt-badge.vt-loadv-load-resilient { border-color: var(--a6-success); color: var(--a6-success); }
 .vt-badge.vt-loadv-unknown { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+/* Angriffs-Wirkungs-Urteil: dasselbe Farbversprechen wie die anderen Urteils-Badges. */
+.vt-badge.vt-impv-attack-linked { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-impv-no-link { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-impv-thin-overlap, .vt-badge.vt-impv-unknown { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-impv-no-overlap { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-impv-node-driven { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-peerv-peer-baseline { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-peerv-elevated { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-peerv-outlier { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-peerv-insufficient-sample, .vt-badge.vt-peerv-not-observed { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+/* Vote-Timing: "nie signiert" ist der harte Befund, "spaet" einer mit anderer naechster Pruefung,
+   "Netz selbst war spaet" entlastet den Knoten, und "nicht erfasst" darf nie als Entlastung aussehen. */
+.vt-badge.vt-latv-latency-not-the-cause, .vt-badge.vt-latv-no-deviations { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-latv-node-side-late, .vt-badge.vt-latv-mixed { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-latv-never-signed { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-latv-network-side { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-latv-network-only { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-latv-not-recorded, .vt-badge.vt-latv-insufficient-sample { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-divv-clean { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-divv-tip-lag { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-divv-deterministic-divergence, .vt-badge.vt-divv-feature-linked { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-divv-shared-lineage { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-divv-transient-divergence, .vt-badge.vt-divv-insufficient-sample, .vt-badge.vt-divv-not-recorded { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-causek-cause { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-causek-localization { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-causek-consequence, .vt-badge.vt-causek-category { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-causek-exoneration { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-causek-none { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); border-style: dashed; }
+.vt-badge.vt-surfv-quorum-bound, .vt-badge.vt-surfv-node-bound { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-surfv-load-bound { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-surfv-both-bound { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-surfv-mixed, .vt-badge.vt-surfv-unknown { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-table tr.vt-hot th[scope="row"], .vt-table tr.vt-hot td { background: var(--a6-warn-soft); border-bottom-color: var(--a6-sev-suspect); }
+.vt-table tr.vt-thin th[scope="row"], .vt-table tr.vt-thin td { border-bottom-style: dashed; color: var(--a6-muted); }
+.vt-table td.vt-imp-rules { text-align: left; }
+.vt-imp-rules .vt-chip { margin: 0 4px 3px 0; }
+
 .vt-small { display: block; color: var(--a6-muted); font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .vt-atk { display: grid; grid-template-columns: 150px 170px 150px 1fr; gap: 8px; align-items: baseline; }
 .vt-atk-when, .vt-atk-n { color: var(--a6-muted); }
@@ -3199,7 +3323,7 @@ body[data-a6] {
 }
 @media (max-width: 760px) {
   /* Tiefe, Säulenabstand und Achsen-Gutter folgen der Containerbreite (cqw) – hier braucht nur
-     die Plot-Höhe ein Mobilmaß; die Kantenbeziehung dz = d · tan 41° gilt unverändert. */
+     die Plot-Höhe ein Mobilmaß; die Kantenbeziehung dz = d · tan 45° gilt unverändert. */
   .vt-profile { --plot-h: 132px; }
   .vt-rc-metrics { grid-template-columns: 1fr 1fr; }
   .vt-fp { grid-template-columns: 1fr 1fr; }
@@ -3211,7 +3335,7 @@ body[data-a6] {
    In erzwungenen Kontrastfarben bleiben Prismen- und Streifenflächen erhalten, Text und Achsen
    folgen Systemfarben. */
 @media (forced-colors: active) {
-  .vt-bar, .vt-side, .vt-top, .vt-foot, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
+  .vt-bar, .vt-side, .vt-top, .vt-base, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
   .vt-col:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
   .vt-hyp.vt-st-measured { border-color: CanvasText; }
 }

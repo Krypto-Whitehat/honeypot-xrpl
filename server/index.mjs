@@ -41,6 +41,7 @@ import {
 import { normalizeTag } from "../lib/tag-identity.mjs";
 import { validatorView } from "../lib/validator-service.mjs";
 import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
+import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 import {
   loadLocalHistory,
@@ -69,6 +70,9 @@ const ROOT = path.resolve(__dirname, "..");
 const TRACE_DIR = path.join(ROOT, "data", "validator-trace");
 
 const config = JSON.parse(fs.readFileSync(path.join(ROOT, "config.json"), "utf8"));
+// Vercel setzt PORT (3000). Ohne diese Zeile waere config.json der einzige Port - ein
+// lokaler Test-Port im Repo wuerde die Produktion auf einen Port stellen, der dort keiner ist.
+const PORT = Number(process.env.PORT) || config.port;
 
 const DATA_DIR = path.join(ROOT, "data");
 const THREATS_FILE = path.join(DATA_DIR, "threats.json");
@@ -153,6 +157,18 @@ app.get("/api/stats", (req, res) => {
   res.json(computeStats(threatsCache, config.network));
 });
 
+// Die Betrugs-Historie ist die Angriffsseite der Zeit-Ebene. Eine nicht lesbare Historie ist
+// ein anderer Zustand als eine ohne Cluster: als leere Liste erschiene die Antwort als Befund
+// ohne Angriffe. ENOENT ist der Anlege-Fall (leer, kein Fehler), alles andere eine Luecke.
+async function localHistorySide() {
+  try {
+    return { clusters: await loadLocalHistory(HISTORY_FILE), historyError: null };
+  } catch (err) {
+    if (err && err.code === "ENOENT") return { clusters: [], historyError: null };
+    return { clusters: [], historyError: "Betrugs-Historie nicht lesbar - die Angriffsseite (Angriffsstunden) fehlt in dieser Antwort." };
+  }
+}
+
 app.get("/api/validator-trace", async (req, res) => {
   const range = String(req.query.range || "24h");
   const remote = traceTokenConfigured();
@@ -160,8 +176,29 @@ app.get("/api/validator-trace", async (req, res) => {
   try { days = remote ? await loadDaysRemote(range) : loadDays(TRACE_DIR); } catch { return res.status(502).json({ error: "Trace-Speicher nicht lesbar." }); }
   const source = remote ? "github-daten-repo" : "lokal";
   if (!days.length) return res.json({ available: false, source, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
-  const body = req.query.patterns ? crossValidatorPatterns(days, { range }) : traceForValidator(days, String(req.query.master || ""), { range });
-  res.json({ available: true, source, days: days.length, ...body });
+  if (req.query.patterns) {
+    // Angriffsseite der Zeit-Ebene: die Cluster der Betrugs-Historie. Ohne sie ist attackImpact
+    // blind, mit ihnen wird jede Sichtung zu einer belegten Angriffsstunde.
+    const side = await localHistorySide();
+    return res.json({ available: true, source, days: days.length, historyError: side.historyError, ...crossValidatorPatterns(days, { range, clusters: side.clusters }) });
+  }
+  const master = String(req.query.master || "");
+  const format = String(req.query.format || "");
+  const side = await localHistorySide();
+  if (master && (format === "csv" || format === "json")) {
+    const report = validatorReport(days, master, { range, now: Date.now(), clusters: side.clusters });
+    if (format === "json") return res.json(report);
+    const safeRange = REPORT_RANGES.includes(range) ? range : "7d";
+    const name = "validator-report-" + master.slice(0, 8) + "-" + safeRange + ".csv";
+    return res
+      .setHeader("content-type", "text/csv; charset=utf-8")
+      .setHeader("content-disposition", "attachment; filename=\"" + name + "\"")
+      .send(reportCsv(report));
+  }
+  // Die Cluster der Betrugs-Historie sind die eine Angriffsseite der Zeit-Ebene; die andere ist
+  // der Trace selbst. Ohne sie ist die Ursachen-Engine bei attack-window blind - deshalb stehen
+  // die Cluster auch dem Selbst-Report zur Verfuegung.
+  res.json({ available: true, source, days: days.length, historyError: side.historyError, ...traceForValidator(days, master, { range, clusters: side.clusters }) });
 });
 
 app.get("/api/validators", async (req, res) => {
@@ -864,6 +901,6 @@ app.get("/lib/:name", (req, res) => {
 // fehlt das Verzeichnis, geben die statischen Routen einfach 404 zurück).
 app.use(express.static(PUBLIC_DIR));
 
-app.listen(config.port, () => {
-  console.log(`[server] Honeypot XRPL läuft auf http://localhost:${config.port} (Netz: ${config.network})`);
+app.listen(PORT, () => {
+  console.log(`[server] Honeypot XRPL läuft auf http://localhost:${PORT} (Netz: ${config.network})`);
 });

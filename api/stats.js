@@ -4,12 +4,41 @@
 import { getStats } from "../lib/threats-service.mjs";
 import { validatorView } from "../lib/validator-service.mjs";
 import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
+import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
+import { readHistoryGitHub } from "../lib/history.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 const TRACE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "validator-trace");
 
 export const maxDuration = 30;
+
+// Angriffsseite der Zeit-Ebene: die Cluster der History-Persistenz (separates GitHub-Repo).
+// 60-s-Cache wie in api/history.js - der Bestand ist mehrstellig MB gross und wird pro Netz-
+// Anfrage nicht neu geholt. Read-Fehler wird NICHT als leerer Bestand gecacht.
+const CLUSTER_CACHE_MS = 60000;
+let clusterCache = null;
+
+async function impactClusters(now) {
+  if (clusterCache && now - clusterCache.time < CLUSTER_CACHE_MS) return clusterCache.list;
+  try {
+    const { list } = await readHistoryGitHub();
+    clusterCache = { time: now, list: Array.isArray(list) ? list : [] };
+    return clusterCache.list;
+  } catch {
+    // null ist ein eigener Zustand, nicht dasselbe wie []: die Historie ist nicht lesbar,
+    // es gibt also keine Angriffsstunden. Als [] waere das ein Befund ohne Angriffe.
+    return null;
+  }
+}
+
+// Eine nicht lesbare Historie muss in der Antwort stehen, sonst sieht ein Betreiber die
+// fehlende Angriffsseite wie einen sauberen Befund.
+function historyErrorOf(clusters) {
+  return clusters === null
+    ? "Betrugs-Historie aus dem Daten-Repo nicht lesbar - die Angriffsseite (Angriffsstunden) fehlt in dieser Antwort."
+    : null;
+}
 
 export default async function handler(req, res) {
   try {
@@ -22,8 +51,29 @@ export default async function handler(req, res) {
       const days = remote ? await loadDaysRemote(range) : loadDays(TRACE_DIR);
       const source = remote ? "github-daten-repo" : "lokal";
       if (!days.length) return res.status(200).json({ available: false, source, note: remote ? "Noch keine Trace-Daten im Speicher – der Recorder (monitor/validator-trace.mjs) hat noch nicht geschrieben." : "Kein lokaler Trace-Speicher." });
-      const body = req.query.patterns ? crossValidatorPatterns(days, { range }) : traceForValidator(days, String(req.query.master || ""), { range });
-      return res.status(200).json({ available: true, source, days: days.length, ...body });
+      if (req.query.patterns) {
+        const clusters = await impactClusters(Date.now());
+        return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(clusters), ...crossValidatorPatterns(days, { range, clusters: clusters || [] }) });
+      }
+      const master = String(req.query.master || "");
+      const format = String(req.query.format || "");
+      // Maschinenlesbarer Selbst-Report: ein Betreiber soll seinen Knoten per Cron auswerten
+      // koennen, ohne das Overlay zu oeffnen. csv = Tabellenform, json = nur der Report.
+      const attackClusters = await impactClusters(Date.now());
+      if (master && (format === "csv" || format === "json")) {
+        const report = validatorReport(days, master, { range, now: Date.now(), clusters: attackClusters || [] });
+        if (format === "json") return res.status(200).json(report);
+        const safeRange = REPORT_RANGES.includes(range) ? range : "7d";
+        const name = "validator-report-" + master.slice(0, 8) + "-" + safeRange + ".csv";
+        return res.status(200)
+          .setHeader("content-type", "text/csv; charset=utf-8")
+          .setHeader("content-disposition", "attachment; filename=\"" + name + "\"")
+          .send(reportCsv(report));
+      }
+      // Produktions-Paritaet: lokal erhaelt traceForValidator die Cluster, hier bisher nicht.
+      // Ohne sie ist die Angriffs-Wirkungs-Ebene auf Vercel null, waehrend sie lokal urteilt.
+      const body = traceForValidator(days, master, { range, clusters: attackClusters || [] });
+      return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(attackClusters), ...body });
     }
     res.status(200).json(await getStats());
   } catch (err) {

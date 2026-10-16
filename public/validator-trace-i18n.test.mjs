@@ -10,8 +10,22 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { DICT } from "./i18n.mjs";
+import { DICT as CORE_DICT, registerDict } from "./i18n.mjs";
+import { VALIDATOR_DICT } from "./i18n-validator.mjs";
+
+/* Der Guard prueft die Union, genau in der Reihenfolge des echten Betriebs:
+ * erst Kern, dann das Overlay, das beim Laden registerDict(VALIDATOR_DICT) ruft. */
+const DICT = {
+  en: { ...CORE_DICT.en, ...VALIDATOR_DICT.en },
+  de: { ...CORE_DICT.de, ...VALIDATOR_DICT.de },
+};
 import { SERIES_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
+import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
+import { PEER_AUTHORITIES, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
+import { LATENCY_AUTHORITIES, LATENCY_CLASSES, LATENCY_PATTERNS, LATENCY_REASONS, LATENCY_VERDICTS } from "../lib/validator-vote-latency.mjs";
+import { DIVERGENCE_AUTHORITIES, DIVERGENCE_GAPS, DIVERGENCE_GUIDANCE, DIVERGENCE_REASONS, DIVERGENCE_VERDICTS, LINEAGES } from "../lib/validator-divergence.mjs";
+import { CAUSE_CHECKS, CAUSE_CONFIDENCE, CAUSE_GAPS, CAUSE_KINDS, CAUSE_LAYERS, CAUSE_STRENGTHS, CAUSE_TAGS, UNEXPLAINED } from "../lib/validator-cause.mjs";
+import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from "../lib/validator-quorum-surface.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -33,7 +47,12 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
   const EXPECTED_PREFIXES = [
     "vt.datagap.", "vt.fpverdict.", "vt.g.", "vt.k.", "vt.range.", "vt.scope.",
     "vt.series.cause.", "vt.sign.", "vt.state.", "vt.strength.", "vt.type.",
-    "vt.load.verdict.", "vt.verdict.", "vt.win.class.",
+    "vt.impact.authority.", "vt.impact.reason.", "vt.impact.verdict.", "vt.load.verdict.", "vt.verdict.", "vt.win.class.",
+    "vt.peer.authority.", "vt.peer.reason.", "vt.peer.type.", "vt.peer.verdict.",
+    "vt.lat.authority.", "vt.lat.class.", "vt.lat.pattern.", "vt.lat.reason.", "vt.lat.verdict.",
+    "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
+    "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.",
+    "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
   // nicht als h.t("Praefix" + ...) - sie gehoeren deshalb nicht in diese Liste.
@@ -42,7 +61,29 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
 });
 
 test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
-  const groups = [["vt.verdict.", SERIES_VERDICTS], ["vt.fpverdict.", FINGERPRINT_VERDICTS], ["vt.win.class.", WINDOW_CLASSES], ["vt.load.verdict.", LOAD_VERDICTS]];
+  const groups = [["vt.verdict.", SERIES_VERDICTS], ["vt.fpverdict.", FINGERPRINT_VERDICTS], ["vt.win.class.", WINDOW_CLASSES], ["vt.load.verdict.", LOAD_VERDICTS], ["vt.impact.verdict.", IMPACT_VERDICTS],
+  ["vt.impact.authority.", IMPACT_AUTHORITIES], ["vt.impact.reason.", IMPACT_REASONS],
+  ["vt.peer.verdict.", PEER_VERDICTS], ["vt.peer.reason.", PEER_REASONS], ["vt.peer.authority.", PEER_AUTHORITIES], ["vt.peer.type.", PEER_TYPES]];
+  const latPrefix = (suf) => "vt.lat." + suf;
+  groups.push([latPrefix("verdict."), LATENCY_VERDICTS], [latPrefix("reason."), LATENCY_REASONS],
+    [latPrefix("authority."), LATENCY_AUTHORITIES], [latPrefix("class."), LATENCY_CLASSES], [latPrefix("pattern."), LATENCY_PATTERNS]);
+  const divPrefix = (suf) => "vt.div." + suf;
+  // noVote ist keine Linie der Engine-Aufzhlung, aber eine eigene UI-Zeile: ohne Label verschwindet
+  // die Aussage "kein Vote auf diesem Ledger" still aus der Tabelle.
+  groups.push([divPrefix("verdict."), DIVERGENCE_VERDICTS], [divPrefix("reason."), DIVERGENCE_REASONS],
+    [divPrefix("authority."), DIVERGENCE_AUTHORITIES], [divPrefix("gap."), DIVERGENCE_GAPS],
+    [divPrefix("lineage."), [...LINEAGES, "noVote"]], ["vt.g.", DIVERGENCE_GUIDANCE]);
+  // Cause-Engine und Risikoflaeche: jede Menge, die diese Engines erzeugen koennen, hat ein Label.
+  // vt.cause.* ist doppeldeutig (Pruefschritte heissen vt.cause.cause-check-*), deshalb steht die
+  // Pruefschritt-Menge explizit unter dem Praefix "vt.cause.".
+  groups.push(["vt.cause.tag.", [...CAUSE_TAGS, UNEXPLAINED]], ["vt.cause.", CAUSE_CHECKS],
+    ["vt.cause.gap.", CAUSE_GAPS], ["vt.cause.layer.", CAUSE_LAYERS],
+    ["vt.cause.confidence.", CAUSE_CONFIDENCE], ["vt.cause.kind.", [...CAUSE_KINDS, "none"]],
+    ["vt.cause.strength.", CAUSE_STRENGTHS],
+    ["vt.surface.verdict.", SURFACE_VERDICTS], ["vt.surface.reason.", SURFACE_REASONS],
+    ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
+    ["vt.surface.axis.", SURFACE_AXES],
+    ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
   for (const [prefix, values] of groups) {
     assert.ok(Array.isArray(values) && values.length > 0, prefix + " ist leer");
     const missing = values.filter((v) => DICT.en[prefix + v] === undefined || DICT.de[prefix + v] === undefined);
@@ -67,4 +108,24 @@ test("Serien-Zeile: alle drei Erholungs-Ursachen haben einen Text in EN und DE",
 test("Uebersetzte Werte sind keine Schluessel-Replikate", () => {
   const suspects = Object.entries(DICT.en).filter(([k, v]) => typeof v === "string" && v === k);
   assert.deepEqual(suspects.map(([k]) => k), []);
+});
+
+/* Speed-Budget (2026-10-16): alle vt.*-Texte wohnen in public/i18n-validator.mjs und
+ * kommen erst mit dem Overlay hinein. Ein echter Gewinn fuer die Startseite ist das
+ * nur, wenn der Kern sie wirklich nicht enthaelt und das Overlay sie anmeldet. */
+test("Split: der Kern traegt keine vt.*-Texte und das Overlay meldet sein Bundle an", () => {
+  const coreVt = Object.keys(CORE_DICT.en).filter((k) => k.startsWith("vt."));
+  assert.deepEqual(coreVt, [], "Kern-Woerterbuch traegt Overlay-Texte: " + coreVt.slice(0, 5).join(", "));
+  const enKeys = Object.keys(VALIDATOR_DICT.en);
+  const deKeys = Object.keys(VALIDATOR_DICT.de);
+  assert.ok(enKeys.length > 200, "Overlay-Bundle fuehrt die erwarteten vt.*-Texte (gefunden: " + enKeys.length + ")");
+  assert.ok(enKeys.every((k) => k.startsWith("vt.")), "Bundle ist ausschliesslich vt.*");
+  assert.equal(enKeys.length, deKeys.length, "EN und DE haben dieselbe Zahl von Schluesseln (" + enKeys.length + " / " + deKeys.length + ")");
+  assert.ok(src.includes("import { registerDict } from './i18n.mjs';"), "Overlay importiert registerDict");
+  assert.ok(src.includes("import { VALIDATOR_DICT } from './i18n-validator.mjs';"), "Overlay importiert das Bundle");
+  assert.ok(src.includes("registerDict(VALIDATOR_DICT);"), "Overlay meldet das Bundle an");
+  const added = registerDict(VALIDATOR_DICT);
+  assert.equal(added, enKeys.length + deKeys.length, "registerDict fuellt beide Sprachen vollstaendig");
+  const missing = [...new Set(literals)].filter((k) => CORE_DICT.en[k] === undefined || CORE_DICT.de[k] === undefined);
+  assert.deepEqual(missing, [], "nach der Anmeldung fehlt weiterhin nichts");
 });

@@ -7,16 +7,26 @@
 // 3D ist CSS-Geometrie (kein WebGL, keine neue Abhängigkeit). Je Zeitintervall ein Prisma aus
 // Vorder-, Seiten- und Deckelfläche, gestapelt nach Vorfallstyp. Der Tiefenvektor ist (+d, -dz);
 // Seitenfläche skewY, Deckelfläche skewX mit demselben Winkel, damit die Kanten zusammenlaufen
-// (tan 41° ≈ dz/d). Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum,
+// (tan 45° ≈ dz/d). Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum,
 // ein Balken mit --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
-const RANGES = ["1h", "24h", "7d", "all"];
+import { registerDict } from './i18n.mjs';
+import { VALIDATOR_DICT } from './i18n-validator.mjs';
+
+// Die vt.*-Texte liegen in public/i18n-validator.mjs und werden erst hier angemeldet.
+// Dieses Modul laedt live-monitor.mjs dynamisch - die Startseite zahlt sie nicht.
+registerDict(VALIDATOR_DICT);
+
+const RANGES = ["1h", "24h", "7d", "30d", "all"];
 const BUCKETS = 24;
 const AXIS_TICKS = [0, 6, 12, 18];
 const PROFILE_TYPES = ["missed", "partial", "wrongHash", "noQuorum"];
 const TYPE_KEY = { missed: "missed", partial: "partial", "wrong-hash": "wrongHash", "no-quorum": "noQuorum" };
-const SPAN_MS = { "1h": 3600000, "24h": 86400000, "7d": 7 * 86400000, all: null };
+const SPAN_MS = { "1h": 3600000, "24h": 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000, all: null };
 const RETRACE_SHOWN = 12;
 const RISK_ROWS = 12;
+// Ursache-Tabelle: die Vorfaelle mit Urteil, nicht die rohe Zeitleiste. 12 Zeilen sind auf einem
+// Bildschirm lesbar; die Zahl der erklaerten Vorfaelle steht in der Reduktions-Zeile.
+const CAUSE_ROWS = 12;
 
 // Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
 // NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
@@ -71,19 +81,34 @@ export function axisScale(max) {
 // sichtbar; die Gitterlinien bleiben die wahren Zahlen, nur ihre Abstaende folgen derselben Skala.
 // Die Abbildung selbst ist ohne Untergrenze: sonst werden 1 und 2 auf derselben Hoehe gleich
 // (eine flache Stelle in einer Skala, die vergleichen soll). Die Sichtbarkeit kleiner Werte ist
-// eine Rendering-Regel und steht in CSS (--bh, max 2 px fur nicht-leere Saulen); die Achse bleibt
-// exakt. Die wahren Zahlen stehen in Readout und aria-label.
+// eine Rendering-Regel und steht in CSS (--bh, Untergrenze --dzc fur nicht-leere Saulen); die
+// Achse bleibt exakt. Die wahren Zahlen stehen in Readout und aria-label.
 //
-// Die Wurzel-Skala gilt ab peak 50. Darunter ist sie eine Verschlechterung: gemessen
+// Die Wurzel-Skala gilt ab peak 25. Darunter ist sie eine Verschlechterung: gemessen
 // 2026-10-16 (7-Tage-Fenster, peak 4, Plot-Hoehe 176 px) standen 1 / 2 / 3 / 4 Vorfaelle auf
 // 88,0 / 124,4 / 152,4 / 176,0 px - ein einziger Vorfall auf der halben Plot-Hoehe, die
 // Stufen auf 36 px zusammengeschoben, und das Profil las sich als Kamm lauter halbhher Saeulen.
 // Linear sind es 44,0 / 88,0 / 132,0 / 176,0 px: jede Stufe genau ein Gitterintervall.
-// Die Schwelle ist nachgerechnet, nicht gefuehlt: linear bleibt sichtbar, solange plotH / peak
-// nicht unter die Kanten-Untergrenze faellt (176 / 50 = 3,52 px). Ab peak 150 waere ein
-// Vorfall linear 1,17 px (unsichtbar, 2-px-Untergrenze griffe fuer fast jede Saeule) - dort
-// ist die Wurzel noetig (14,43 px).
-export const LINEAR_PEAK = 50;
+//
+// Die Schwelle ist nachgerechnet, nicht gefuehlt. Linear ist ehrlich, solange der kurzeste
+// gezeichnete Koerper (plotH / peak) mindestens so hoch ist wie die eigene Kappe --dzc; sonst
+// hebt die CSS-Untergrenze die Saeule und die Achse zeigt eine andere Hoehe als der Balken.
+// Die groesste Kappe ist durch den Tiefen-Deckel gegeben: --d <= 8,5 px, also
+// --dzc <= 8,5 * 1 = 8,50 px. Linear verlangt damit 176 / peak >= 8,50, also peak <= 20,71.
+// Der Achsleiter (axisScale) liefert in diesem Bereich peak 20 (176 / 20 = 8,80 px, 3,5 % Luft
+// gegen die Kappe) und peak 25 (176 / 25 = 7,04 px - unter der Kappe, dort darf die Achse nicht
+// linear sein). peak 20 ist der letzte Achssprung, der die groesste Kappe noch zulaesst. Ab
+// peak 25 ist die Wurzel am kurzesten Koerper 176 * sqrt(1 / 25) = 35,20 px - weit ueber jeder
+// Kappe, die Untergrenze greift nie.
+export const LINEAR_PEAK = 20;
+
+// Dasselbe tan(45deg) wie CSS --dz-k: die Kappe ist --dc * 1 hoch, also ist die groesste Tiefe,
+// die auf einen Koerper von einer gegebenen Hoehe passt, genau diese Hoehe / 1. Eine waagerechte
+// Deckflaeche kann in einer Ansicht von oben nie hoeher sein als sie tief ist (tan <= 1); bei
+// tan 1 sind Kappe und Tiefe derselbe Wert - kanonische Kavaliere-Projektion und die obere
+// Grenze dessen, was eine Ansicht von oben ueberhaupt zeigen kann.
+// Ein Wertepaar wie 15/13 ware nur fuer eine einzige Breite geschlossen - hier ist es eine Zahl.
+export const DEPTH_SKEW_K = 1;
 
 export function axisUnit(value, peak) {
   const v = Number(value) || 0;
@@ -212,6 +237,16 @@ export function createValidatorTrace(h) {
     body.innerHTML = keyLine + refLine + coverageLine + scopeTag
       + '<div class="vt-cards">' + cards + "</div>" + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.causeTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.causeNote")) + "</p>"
+      + causeBlock(d.cause)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.surfaceTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.surfaceNote")) + "</p>"
+      + surfaceBlock(d.surface)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.peerTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.peerNote")) + "</p>"
+      + peerBlock(d.peer)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.latTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.latNote")) + "</p>"
+      + latencyBlock(d.diagnosis && d.diagnosis.latency)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.divTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.divNote")) + "</p>"
+      + divergenceBlock(d.divergence)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.retraceTitle")) + "</h3>"
       + '<p class="vt-sub">' + h.esc(h.t("vt.retraceNote")) + "</p>" + retraceBlock(d.retrace)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.fpTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.fpNote")) + "</p>"
@@ -230,7 +265,7 @@ export function createValidatorTrace(h) {
   // Achsenbeschriftung je Intervall: Stunden/Minuten bei kurzen Fenstern, Datum bei langen.
   function bucketLabel(from, width, i, range) {
     const iso = new Date(from + (i / BUCKETS) * width).toISOString();
-    return range === "7d" || range === "all" ? iso.slice(5, 10) : iso.slice(11, 16);
+    return range === "7d" || range === "30d" || range === "all" ? iso.slice(5, 10) : iso.slice(11, 16);
   }
 
   // 3D-Profil: ein Prisma je Zeitintervall auf eigenem Grundriss. Höhe = eigene Abweichungen,
@@ -272,8 +307,9 @@ export function createValidatorTrace(h) {
   //
   // Ebenen des Profils:
   //   Balkenhoehe        = eigene Abweichungen (Achsenmass --u, identisch zu den Gitterlinien)
+  //   Wertemarke         = dieselbe Zahl als Text (die Balkenhoehe ist eine Sichtbarkeitsregel)
   //   Stapelfarben       = Vorfallstyp
-  //   Grundriss + Streifen = Intervall-Zustand (clean / solo / cohort / network / unknown / none)
+  //   Bodenplatte + Streifen = Intervall-Zustand (clean / solo / cohort / network / unknown / none)
   //   Marker + Signaturstreifen = Transaktions-Signatur an den Ausfall-Ledern dieses Validators
   function profile3d(incidents, range, profile, coverage) {
     const list = (incidents || []).filter((i) => Number.isFinite(i.timeMs) && TYPE_KEY[i.type]);
@@ -297,6 +333,18 @@ export function createValidatorTrace(h) {
       signs[signStateOf(cell, shapeLayer)] += 1;
     }
     const { peak, step } = axisScale(Math.max(...cells.map((x) => x.total)));
+    // Die Kappe muss auf ihren Koerper passen, und zwar fuer die kurzeste Saeule des Profils.
+    // --dzc = --dc * tan(45deg), also ist die groesste zeichnbare Tiefe die kurzeste
+    // Saeulenhoehe / tan. Angegeben als Anteil der Plot-Hoehe, damit sie mit der kleineren
+    // Mobile-Plot-Hoehe mitgeht. Ohne diese Grenze wird aus einem 1-Vorfall-Intervall neben
+    // einem 4.502-Vorfall-Intervall eine Kappe, die hoeher ist als ihr eigener Koerper, und die
+    // scheinbare Hoehe ist dann ein Vielfaches des wahren Wertes - in einer Skala, die
+    // Vergleichen soll. Die Grenze ist je Profil eine Zahl, nicht je Saeule eine Klammer:
+    // alle 24 Intervalle behalten dieselbe Projektion.
+    const heights = cells.map((cell) => axisUnit(cell.total, peak));
+    const drawn = heights.filter((u) => u > 0);
+    const smallestUnit = drawn.length ? Math.min(...drawn) : peak;
+    const depthRatio = (smallestUnit / peak) / DEPTH_SKEW_K;
     const grid = [];
     for (let v = 0; v <= peak; v += step) {
       grid.push('<div class="vt-gridline' + (v === 0 ? " vt-zero" : "") + '" style="bottom:'
@@ -329,10 +377,11 @@ export function createValidatorTrace(h) {
       return '<div class="vt-col vt-state-' + state + (cell.total ? " vt-nonzero" : "") + '" tabindex="0" role="group" style="' + style + '" data-tip="'
         + h.esc(h.t("vt.bucketReadout", args) + (topTags ? " . " + topTags : "")) + '" aria-label="'
         + h.esc(h.t("vt.bucketAria", args)) + '">'
-        + '<span class="vt-foot" aria-hidden="true"></span>'
+        + '<span class="vt-base" aria-hidden="true"></span>'
         + '<div class="vt-bar">'
         + (cell.total ? '<span class="vt-side" aria-hidden="true"></span><span class="vt-top" aria-hidden="true"></span>' : "")
         + "</div>"
+        + (cell.total ? '<span class="vt-value" aria-hidden="true">' + h.esc(String(cell.total)) + "</span>" : "")
         + (sign === "hit" ? '<span class="vt-mark" aria-hidden="true"></span>' : "")
         + "</div>";
     }).join("");
@@ -352,7 +401,7 @@ export function createValidatorTrace(h) {
     const shapeNote = shapeLayer
       ? h.t("vt.signCoverage", { seen: num(coverage.shapeSeen), missing: num(coverage.shapeMissing) })
       : h.t("vt.signAbsent");
-    return '<div class="vt-profile" style="--peak:' + peak + '">'
+    return '<div class="vt-profile" style="--peak:' + peak + ';--dmax:' + depthRatio.toFixed(4) + '">'
       + '<div class="vt-profile-top"><p class="vt-profile-meta">' + h.esc(meta) + "</p>"
       + '<p class="vt-readout" id="vt-readout" aria-live="polite">' + h.esc(h.t("vt.profileHint")) + "</p></div>"
       + '<div class="vt-plot"><div class="vt-grid" aria-hidden="true">' + grid.join("") + "</div>"
@@ -382,6 +431,7 @@ export function createValidatorTrace(h) {
     if (hy.tag === "sweep-window") return h.t("vt.evSweep", { destinations: num(e.sweepDestinations), ledgers: num(e.sweepLedgers), txs: num(e.sweepTxs) });
     if (hy.tag === "account-create-burst" || hy.tag === "offer-flood" || hy.tag === "nft-spam") return h.t("vt.evCount", { count: num(e.count), baseline: num(e.baseline) });
     if (String(hy.tag).startsWith("type-burst:")) return h.t("vt.evRatio", { count: num(e.count), baseline: num(e.baseline), ratio: fac(e.ratio) });
+    if (hy.tag === "vote-late") return h.t("vt.evLate", { delay: sec(e.voteDelayMs), grace: sec(e.graceMs) });
     return "";
   }
 
@@ -590,9 +640,499 @@ export function createValidatorTrace(h) {
   }
 
   // Netz-Sicht: erst die Trennung Netzereignis / privat, dann Kandidaten fuer geteilte
+  // Peer-Benchmark: eine Ausfallrate ohne Vergleich ist keine Diagnose. Dieser Block rechnet
+  // die eigenen Ausfaelle auf die Ledger, die dieser Knoten wirklich beobachtet hat, und stellt
+  // sie gegen dieselbe Messung aller anderen dUNL-Knoten desselben Fensters. Getrennt nach
+  // Zustaendigkeit: missed / partial / wrong-hash sind knotenzurechenbar, no-quorum ist
+  // Netz-Aussetzung und laeuft ausserhalb der Rate, nach der das Urteil gefaellt wird.
+  function peerBlock(peer) {
+    if (!peer || !peer.sample) return '<p class="vt-empty">' + h.esc(h.t("vt.peer.none")) + "</p>";
+    const s = peer.sample;
+    const hourLabel = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(5, 16).replace("T", " ") : "–");
+    // Kleine Raten duerfen nicht zu 0 werden: der Peer-Median liegt bei 0,0014 %, und "0,0 %"
+    // laest den Befund verschwinden, der den Unterschied macht (Ausreisser gegen Grundrate).
+    const rate = (v) => {
+      if (!Number.isFinite(v)) return "–";
+      const pct = v * 100;
+      if (pct === 0) return "0";
+      if (pct < 0.01) return pct.toPrecision(2);
+      if (pct < 1) return pct.toFixed(3);
+      return pcn(pct);
+    };
+    const verdictLine = '<p class="vt-scope"><span class="vt-badge vt-peerv-' + h.esc(peer.verdict) + '">'
+      + h.esc(h.t("vt.peer.verdict." + peer.verdict)) + "</span> · " + h.esc(h.t("vt.peer.reason." + peer.verdictReason))
+      + " · " + h.esc(h.t("vt.peer.authority." + peer.verdictAuthority)) + "</p>";
+    if (!peer.own) return verdictLine;
+    if (peer.verdict === "insufficient-sample") {
+      return verdictLine + '<p class="vt-note">' + h.esc(h.t("vt.peer.sampleLine", {
+        observed: num(s.observed), minLedgers: num(s.minLedgers), peers: num(s.peers), minPeers: num(s.minPeers),
+      })) + "</p>";
+    }
+    const head = ["vt.peer.hType", "vt.peer.hOwn", "vt.peer.hRate", "vt.peer.hMedian", "vt.peer.hP90", "vt.peer.hRatio", "vt.peer.hFlag"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rows = (peer.types || []).map((t) => "<tr>"
+      + '<th scope="row">' + h.esc(h.t("vt.peer.type." + t.type)) + "</th>"
+      + "<td>" + h.esc(num(t.own)) + "</td>"
+      + "<td>" + h.esc(rate(t.ownRate)) + "</td>"
+      + "<td>" + h.esc(rate(t.peerMedianRate)) + "</td>"
+      + "<td>" + h.esc(rate(t.peerP90Rate)) + "</td>"
+      + "<td>" + h.esc(fac(t.ratio)) + "</td>"
+      + "<td>" + h.esc(h.t(t.abovePeerP90 ? "vt.peer.above" : "vt.peer.within")) + "</td></tr>").join("");
+    const cmp = peer.comparison || {};
+    const pr = peer.peers || {};
+    const co = peer.cohort || {};
+    const nq = peer.network || {};
+    const lines = [h.t("vt.peer.summary", {
+      observed: num(s.observed), own: num(peer.own.failures), ownRate: rate(peer.own.rate),
+      peers: num(pr.count), median: rate(pr.medianRate), p90: rate(pr.p90Rate), pooled: rate(pr.pooledRate),
+    })];
+    lines.push(h.t("vt.peer.rank", {
+      percentile: pcn(cmp.percentile * 100), above: num(cmp.peersAbove), excess: num(cmp.excessFailures),
+    }));
+    if (Number.isFinite(cmp.z)) lines.push(h.t("vt.peer.z", { z: fac(cmp.z), p: Number.isFinite(cmp.pValue) ? cmp.pValue.toFixed(4) : "–" }));
+    lines.push(h.t("vt.peer.cohort", {
+      solo: num(co.solo), shared: num(co.shared), unrecorded: num(co.unrecorded),
+      share: Number.isFinite(co.soloShare) ? pcn(co.soloShare * 100) : "–",
+      max: Number.isFinite(co.maxCohort) ? num(co.maxCohort) : "–",
+    }));
+    lines.push(h.t("vt.peer.network", { own: num(nq.ownNoQuorum), ownRate: rate(nq.ownNoQuorumRate), peerMedian: rate(nq.peerMedianNoQuorumRate) }));
+    if (s.estimated) lines.push(h.t("vt.peer.estimated", { days: num(s.daysDaily) }));
+    const alone = (peer.aloneHours || []).slice(0, 6).map((a) => "<li>" + h.esc(h.t("vt.peer.aloneLine", {
+      hour: hourLabel(a.hourMs), own: num(a.ownFailures), peers: num(a.observedPeers), ledgers: num(a.ledgers),
+    })) + "</li>").join("");
+    const aloneBlock = '<h4 class="vt-h4">' + h.esc(h.t("vt.peer.aloneTitle")) + "</h4>"
+      + (alone ? "<ul class=\"vt-list\">" + alone + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.peer.aloneNone")) + "</p>");
+    return verdictLine
+      + '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + '<p class="vt-note">' + h.esc(lines.join(" · ")) + "</p>"
+      + aloneBlock;
+  }
+
+  // Timing-Ebene: die Klassifizierung sagt, WELCHER Fehler passierte. Diese Ebene sagt, ob dieser
+  // Knoten fuer diesen Ledger ueberhaupt abgestimmt hat - nur zu spaet - oder gar nicht, und stellt
+  // beides gegen den ersten Vote des Netzes. Ohne diese Gegenprobe ist "mein Vote war spaet" eine
+  // Zahl ohne Bedeutung; mit ihr ist sie eine Zustandsdiagnose (Knotenpfad oder Netzstockung).
+  function latencyBlock(lat) {
+    if (!lat || !lat.verdict) return '<p class="vt-empty">' + h.esc(h.t("vt.lat.none")) + "</p>";
+    const th = lat.thresholds || {};
+    const cov = lat.coverage || {};
+    const pct = (v) => (Number.isFinite(v) ? pcn(v * 100) : "–");
+    const verdictLine = '<p class="vt-scope"><span class="vt-badge vt-latv-' + h.esc(lat.verdict) + '">'
+      + h.esc(h.t("vt.lat.verdict." + lat.verdict)) + "</span> · " + h.esc(h.t("vt.lat.reason." + lat.verdictReason))
+      + " · " + h.esc(h.t("vt.lat.authority." + lat.verdictAuthority)) + "</p>";
+    const ringLine = '<p class="vt-note">' + h.esc(h.t("vt.lat.ringLine", {
+      ring: num(th.ringLedgers), truncated: num(cov.truncatedDays),
+    })) + "</p>";
+    if (lat.verdict === "no-deviations") return verdictLine;
+    if (lat.verdict === "not-recorded" || lat.verdict === "insufficient-sample") {
+      return verdictLine + '<p class="vt-note">' + h.esc(h.t("vt.lat.coverageLine", {
+        recorded: num(cov.daysRecorded), days: num(cov.days),
+        incidents: num((lat.counts || {}).incidents), minIncidents: num(th.minIncidents),
+      })) + "</p>" + ringLine;
+    }
+    const cls = lat.classes || {};
+    const head = ["vt.lat.hClass", "vt.lat.hCount", "vt.lat.hShare"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rows = [["late", cls.late, cls.lateShare], ["never", cls.never, cls.neverShare],
+      ["inWindow", cls.inWindow, cls.inWindowShare], ["unknown", cls.unknown, cls.unknownShare]]
+      .map(([k, n, s]) => "<tr>"
+        + '<th scope="row">' + h.esc(h.t("vt.lat.class." + k)) + "</th>"
+        + "<td>" + h.esc(num(n)) + "</td>"
+        + "<td>" + h.esc(Number.isFinite(s) ? pct(s) : "–") + "</td></tr>").join("");
+    const own = (lat.own && lat.own.delay) || {};
+    const net = lat.network || {};
+    const onOwn = net.onOwnIncidentLedgers || {};
+    const onPeer = net.onPeerIncidentLedgers || {};
+    const cmp = lat.comparison || {};
+    const beh = cmp.behind || {};
+    const hr = net.hourly || {};
+    const pat = lat.pattern || {};
+    const lines = [];
+    if (own.n) lines.push(h.t("vt.lat.ownLine", { median: sec(own.median), p90: sec(own.p90), max: sec(own.max), n: num(own.n) }));
+    if (onOwn.n || onPeer.n) lines.push(h.t("vt.lat.networkLine", { median: sec(onOwn.median), p90: sec(onOwn.p90), n: num(onOwn.n), other: sec(onPeer.median) }));
+    if (beh.n) lines.push(h.t("vt.lat.behindLine", { median: sec(beh.median), p90: sec(beh.p90), ratio: fac(cmp.ratioOwnToNetworkMedian) }));
+    if (hr.ledgers) lines.push(h.t("vt.lat.hourlyLine", {
+      ledgers: num(hr.ledgers), hours: num(hr.hours), mean: sec(hr.meanFvMs), max: sec(hr.maxFvMs),
+      late: num(hr.lateLedgers), lateShare: pct(hr.lateShare),
+    }));
+    if (pat.kind) lines.push(h.t("vt.lat.patternLine", { kind: h.t("vt.lat.pattern." + pat.kind), spread: sec(pat.spreadMs), samples: num(pat.samples) }));
+    const late = (lat.lateVotes || []).slice(0, 8).map((r) => "<li>" + h.esc(h.t("vt.lat.lateLine", {
+      ledger: num(r.ledgerIndex), own: sec(r.ownMs), net: sec(r.networkFirstMs), behind: sec(r.behindMs),
+    })) + "</li>").join("");
+    const lateBlock = '<h4 class="vt-h4">' + h.esc(h.t("vt.lat.lateTitle")) + "</h4>"
+      + (late ? '<ul class="vt-list">' + late + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.lat.lateNone")) + "</p>");
+    return verdictLine
+      + '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + '<p class="vt-note">' + h.esc(lines.join(" · ")) + "</p>"
+      + lateBlock + ringLine;
+  }
+
+  // Divergenz-Ebene: die Latenz sagt, ob ein Vote zu spaet war. Diese Ebene sagt, WAS dieser
+  // Knoten ueberhaupt signiert hat - die Linie der Netzmehrheit, die Runner-Up-Linie oder eine
+  // eigene dritte Linie. Ein Knoten, der zeitig auf einer falschen Linie stimmt, hat ein Stand-
+  // problem, kein Pfadproblem; die Latenz-Ebene kann das nicht unterscheiden, weil ihr dafuer
+  // der Inhalt des Votes fehlt.
+  // Feature-Ledger (Amendment / UNLModify) sind die Ledger, auf denen das Netz seine eigenen
+  // Bewertungsregeln aendert. Faellen Ausfaelle dort haeufiger aus als ohne dieses Feature, ist
+  // die naechste Pruefung die Version und die Amendment-Unterstützung - nicht das Peering.
+  function divergenceBlock(div) {
+    if (!div || !div.verdict) return '<p class="vt-empty">' + h.esc(h.t("vt.div.none")) + "</p>";
+    const cov = div.coverage || {};
+    const short = (x) => (typeof x === "string" && x.length >= 8 ? x.slice(0, 8).toLowerCase() : "–");
+    const rate = (v) => (Number.isFinite(v) ? pcn(v * 100) : "–");
+    const verdictLine = '<p class="vt-scope"><span class="vt-badge vt-divv-' + h.esc(div.verdict) + '">'
+      + h.esc(h.t("vt.div.verdict." + div.verdict)) + "</span> · " + h.esc(h.t("vt.div.reason." + div.verdictReason))
+      + " · " + h.esc(h.t("vt.div.authority." + div.verdictAuthority)) + "</p>";
+    const covLine = '<p class="vt-note">' + h.esc(h.t("vt.div.coverageLine", {
+      incidents: num(cov.incidents), withHash: num(cov.incidentsWithVoteHash),
+      accepted: num(cov.ledgersWithAcceptedHash), ledgers: num(cov.totalLedgers),
+    })) + "</p>";
+    // Ohne aufgezeichnete Hashes ist jede Zahl darunter eine Luecke, kein Befund: die Zeile bleibt,
+    // die Tabellen darunter bleiben weg, damit keine leere Tabelle wie ein Null-Befund wirkt.
+    if (div.verdict === "not-recorded") return verdictLine + covLine;
+    const counts = div.lineageCounts || {};
+    const head = ["vt.div.hLineage", "vt.div.hCount"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rows = ["accepted", "runner", "own", "unknown", "noVote"].map((k) => "<tr>"
+      + '<th scope="row">' + h.esc(h.t("vt.div.lineage." + k)) + "</th>"
+      + "<td>" + h.esc(num(counts[k])) + "</td></tr>").join("");
+    const losing = (div.losingLineages || []).slice(0, 6).map((r) => "<li>" + h.esc(h.t("vt.div.losingLine", {
+      hash: short(r.hash), mine: num(r.mineCount), masters: num(r.masterCount), count: num(r.count),
+      ledgers: (r.ledgers || []).slice(0, 4).map((l) => num(l)).join(", "),
+      features: (r.featureLabels || []).join(", ") || "–",
+    })) + "</li>").join("");
+    const losingBlock = '<h4 class="vt-h4">' + h.esc(h.t("vt.div.losingTitle")) + "</h4>"
+      + (losing ? '<ul class="vt-list">' + losing + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.div.losingNone")) + "</p>");
+    const feats = div.features || [];
+    const fhead = ["vt.div.hFeature", "vt.div.hFeatLedgers", "vt.div.hFeatFails", "vt.div.hRateWith", "vt.div.hRateWithout", "vt.div.hLift", "vt.div.hMine"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const frows = feats.slice(0, 6).map((f) => "<tr>"
+      + '<th scope="row">' + h.esc(f.label) + (f.reliable ? "" : " · " + h.esc(h.t("vt.div.thin"))) + "</th>"
+      + "<td>" + h.esc(num(f.ledgers)) + "</td>"
+      + "<td>" + h.esc(num(f.failLedgers)) + "</td>"
+      + "<td>" + h.esc(rate(f.rateWith)) + "</td>"
+      + "<td>" + h.esc(rate(f.rateWithout)) + "</td>"
+      + "<td>" + h.esc(fac(f.lift)) + "</td>"
+      + "<td>" + h.esc(num(f.mineDivergences)) + "</td></tr>").join("");
+    const featureBlock = feats.length
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.div.featureTitle")) + '</h4><table class="vt-table"><thead><tr>' + fhead + "</tr></thead><tbody>" + frows + "</tbody></table>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.div.featureNone")) + "</p>";
+    const late = div.lateLineage || {};
+    const lateLine = late.recorded && late.total
+      ? '<p class="vt-note">' + h.esc(h.t("vt.div.lateLine", {
+        total: num(late.total), accepted: num(late.accepted), divergent: num(late.divergent), unknown: num(late.unknown),
+      })) + "</p>"
+      : "";
+    const gaps = (div.dataGaps || []).map((g) => h.t("vt.div.gap." + g)).join(" · ");
+    const gapLine = gaps ? '<p class="vt-note">' + h.esc(gaps) + "</p>" : "";
+    const guide = (div.guidance || []).map((g) => "<li>" + h.esc(h.t("vt.g." + g)) + "</li>").join("");
+    const guideBlock = guide ? '<h4 class="vt-h4">' + h.esc(h.t("vt.div.guideTitle")) + '</h4><ul class="vt-list">' + guide + "</ul>" : "";
+    return verdictLine + covLine
+      + '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + losingBlock + featureBlock + lateLine + gapLine + guideBlock;
+  }
+
+  // Tag-Namen haben drei moegliche Home-Registrierungen: die neuen Tags der Cause-Engine, die
+  // Serien-Urteile (vt.verdict.*) und die Forensik-Tags (vt.tag.*). Ein Vorfall darf nicht zwei
+  // Namen bekommen - deshalb wird in dieser Reihenfolge nachgeschlagen, nie erfunden.
+  function causeTagLabel(tag) {
+    const base = String(tag).split(":")[0];
+    const ck = "vt.cause.tag." + base;
+    const ct = h.t(ck);
+    if (ct && ct !== ck) {
+      return base === "type-burst" || base === "new-tx-type" ? ct + " " + String(tag).slice(base.length + 1) : ct;
+    }
+    const vk = "vt.verdict." + base;
+    const vs = h.t(vk);
+    if (vs && vs !== vk) return vs;
+    return tl(tag);
+  }
+
+  // Ursache je Vorfall: die selbstaendigen Ebenen (Ledger-Forensik, Serie, Quorum-Bandbreite,
+  // Last, Kohorte, UTC-Stunde, Angriffs-Ledger, Vote-Linie, Vote-Zeit) werden pro Vorfall zu
+  // Kandidaten gewichtet und nach Beobachtungsstaerke sortiert. Das ist die Ebene, mit der ein
+  // Validator fuer sich selbst nachvollziehen kann, woran ein missed / partial / no-quorum /
+  // wrong-hash gelegen haben kann - nicht nur, dass einer der vier Faelle vorliegt.
+  function causeBlock(c) {
+    if (!c || !Array.isArray(c.rows)) return '<p class="vt-empty">' + h.esc(h.t("vt.cause.empty")) + "</p>";
+    const cov = c.coverage || {};
+    const red = c.reduction || {};
+    const share = (v) => (Number.isFinite(v) ? pcn(v * 100) : "–");
+    const pct = (v) => (Number.isFinite(v) ? pc(v * 100) : "–");
+    const reductionLine = '<p class="vt-scope vt-cause-reduction">' + h.esc(h.t("vt.cause.reductionLine", {
+      raw: num(red.rawNoCause), total: num(cov.incidents), rawShare: share(red.rawNoCauseShare),
+      resolved: num(red.resolvedByCauseEngine), remaining: num(red.remainingRawNoCause),
+      unexplained: num(red.unexplainedTotal), explained: share(red.explainedShare),
+    })) + "</p>";
+    const covLine = '<p class="vt-note">' + h.esc(h.t("vt.cause.coverageLine", {
+      incidents: num(cov.incidents), matched: num(cov.matchedIncidents), unmatched: num(cov.unmatchedIncidents),
+      ledger: num(cov.withLedgerMeasurement), band: num(cov.withQuorumBandRate),
+      bandRate: pct(cov.quorumBandRate), bandLedgers: num(cov.quorumBandLedgers),
+      load: num(cov.withLoadAxis), lineage: num(cov.withVoteLineage), timing: num(cov.withVoteTiming),
+      hours: num(cov.hoursRecorded), thinHours: num(cov.hoursThin),
+      attackHours: num(cov.attackHours), attackUnknown: num(cov.attackHoursUnknown),
+    })) + "</p>";
+    const vhead = ["vt.cause.hTag", "vt.cause.hIncidents", "vt.cause.hShare"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const vrows = (c.verdicts || []).slice(0, 8).map((v) => "<tr>"
+      + '<th scope="row">' + h.esc(causeTagLabel(v.tag)) + "</th>"
+      + "<td>" + h.esc(num(v.incidents)) + "</td>"
+      + "<td>" + h.esc(share(v.share)) + "</td></tr>").join("");
+    const verdictTable = vrows
+      ? '<table class="vt-table"><thead><tr>' + vhead + "</tr></thead><tbody>" + vrows + "</tbody></table>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.cause.none")) + "</p>";
+    const primaryLine = c.primary
+      ? '<p class="vt-note">' + h.esc(h.t("vt.cause.primaryLine", {
+        tag: causeTagLabel(c.primary.tag), incidents: num(c.primary.incidents), share: share(c.primary.share),
+      })) + "</p>"
+      : "";
+    const checks = (c.checklist || []).map((x) => "<li>" + h.esc(h.t("vt.cause." + x.tag))
+      + ' <small>' + h.esc(h.t("vt.cause.checkMeta", {
+        incidents: num(x.incidents), share: share(x.share),
+        verdicts: (x.verdicts || []).map(causeTagLabel).join(", ") || "–",
+      })) + "</small></li>").join("");
+    const checkBlock = checks
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.cause.checkTitle")) + '</h4><ul class="vt-list vt-checklist">' + checks + "</ul>"
+      : "";
+    const rhead = ["vt.cause.hLedger", "vt.cause.hType", "vt.cause.hVerdict", "vt.cause.hConfidence",
+      "vt.cause.hLayers", "vt.cause.hCheck"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rrows = c.rows.slice(0, CAUSE_ROWS).map((r) => "<tr>"
+      + '<th scope="row">#' + h.esc(num(r.ledgerIndex)) + "</th>"
+      + "<td>" + h.esc(h.t("vt.k." + r.type)) + "</td>"
+      + '<td><span class="vt-badge vt-causek-' + h.esc(r.verdictKind) + '">' + h.esc(causeTagLabel(r.verdict)) + "</span>"
+      + " <small>" + h.esc(h.t("vt.cause.confidence." + r.verdictConfidence)) + "</small></td>"
+      + "<td>" + h.esc((r.verdictLayers || []).map((l) => h.t("vt.cause.layer." + l)).join(", ") || "–") + "</td>"
+      + "<td>" + h.esc((r.nextCheck || []).slice(0, 2).map((k) => h.t("vt.cause." + k)).join(" · ") || "–") + "</td>"
+      + "</tr>").join("");
+    const rowsBlock = c.rows.length
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.cause.rowsTitle")) + '</h4><table class="vt-table vt-cause-rows"><thead><tr>'
+        + rhead + "</tr></thead><tbody>" + rrows + "</tbody></table>"
+        + (c.rows.length > CAUSE_ROWS ? '<p class="vt-note">' + h.esc(h.t("vt.cause.rowsMore", { shown: CAUSE_ROWS, total: c.rows.length })) + "</p>" : "")
+      : '<p class="vt-empty">' + h.esc(h.t("vt.cause.rowsNone")) + "</p>";
+    const gaps = Object.keys(c.gapTally || {}).sort().map((g) => h.t("vt.cause.gap." + g) + " (" + num(c.gapTally[g]) + ")").join(" · ");
+    const gapLine = gaps ? '<p class="vt-note">' + h.esc(gaps) + "</p>" : "";
+    return reductionLine + covLine + verdictTable + primaryLine + checkBlock + rowsBlock + gapLine;
+  }
+
+  // Risikoflaeche: an welcher Achse die eigenen Ausfaelle wirklich haengen - Quorum-Reserve,
+  // Ledger-Last, beide zusammen, oder der eigene Knoten. Beide Achsen sind auf denselben Ledgern
+  // gemessen, die Interaktion Last x Quorum ist deshalb eine Messung und keine Vermutung.
+  function surfaceBlock(s) {
+    if (!s || !s.verdict) return '<p class="vt-empty">' + h.esc(h.t("vt.surface.empty")) + "</p>";
+    const cov = s.coverage || {};
+    const th = s.thresholds || {};
+    const sh = s.shares || {};
+    const share = (v) => (Number.isFinite(v) ? pcn(v * 100) : "–");
+    const pct = (v) => (Number.isFinite(v) ? pc(v * 100) : "–");
+    const verdictLine = '<p class="vt-scope"><span class="vt-badge vt-surfv-' + h.esc(s.verdict) + '">'
+      + h.esc(h.t("vt.surface.verdict." + s.verdict)) + "</span> · " + h.esc(h.t("vt.surface.reason." + s.verdictReason))
+      + " · " + h.esc(h.t("vt.surface.authority." + s.verdictAuthority)) + "</p>";
+    const covLine = '<p class="vt-note">' + h.esc(h.t("vt.surface.coverageLine", {
+      days: num(cov.days), axisDays: num(cov.daysWithQuorumAxis), q: num(cov.ledgersQuorum),
+      l: num(cov.ledgersLoad), mineQ: num(cov.ownFailLedgersByQuorum), mineL: num(cov.ownFailLedgersByLoad),
+      cells: num(cov.cellsRecorded), minBand: num(th.minBandLedgers), minMine: num(th.minBandMine),
+    })) + "</p>";
+    const sharesLine = '<p class="vt-note">' + h.esc(h.t("vt.surface.sharesLine", {
+      quorum: share(sh.quorumShare), comfort: share(sh.comfortableShare), load: share(sh.loadShare),
+      normal: share(sh.normalLoadShare), rate: pct(s.overallMineRate),
+    })) + "</p>";
+    // Die Share ist eine Relation, kein Beweis. Neben das Urteil gehoert deshalb die Zahl der
+    // Ledgers und der eigenen Ausfaelle, auf der die jeweilige Aussage steht.
+    const groups = cov.bandGroups || {};
+    const groupText = (key) => h.t("vt.surface.group." + key) + " " + num(groups[key].ledgers) + "/"
+      + num(groups[key].mineFails) + " " + h.t(groups[key].measurable ? "vt.surface.groupMeasurable" : "vt.surface.groupThin");
+    const groupKeys = ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"].filter((k) => groups[k]);
+    const groupLine = groupKeys.length
+      ? '<p class="vt-note">' + h.esc(h.t("vt.surface.groupLine", {
+        qThin: groupText("quorumThin"), qComfort: groupText("quorumComfort"),
+        lHigh: groupText("loadHigh"), lNormal: groupText("loadNormal"),
+      })) + "</p>"
+      : "";
+    const head = ["vt.surface.hAxis", "vt.surface.hBand", "vt.surface.hLedgers", "vt.surface.hFails",
+      "vt.surface.hRate", "vt.surface.hMine", "vt.surface.hMineRate", "vt.surface.hShare", "vt.surface.hConc"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const visibleBands = (s.bands || []).filter((b) => b.ledgers > 0 || b.mineFails > 0);
+    const body = visibleBands.map((b) => "<tr" + (b.hot ? ' class="vt-hot"' : "") + ">"
+      + '<th scope="row">' + h.esc(h.t("vt.surface.axis." + b.axis)) + " · " + h.esc(b.label)
+      + (b.reliable ? "" : " · " + h.esc(h.t("vt.surface.thin"))) + "</th>"
+      + "<td>" + h.esc(num(b.ledgers)) + "</td>"
+      + "<td>" + h.esc(num(b.failLedgers)) + "</td>"
+      + "<td>" + h.esc(pct(b.networkRate)) + "</td>"
+      + "<td>" + h.esc(num(b.mineFails)) + "</td>"
+      + "<td>" + h.esc(pct(b.mineRate)) + "</td>"
+      + "<td>" + h.esc(share(b.shareOfMine)) + "</td>"
+      + "<td>" + h.esc(fac(b.concentration)) + "</td></tr>").join("");
+    const table = visibleBands.length
+      ? '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.surface.bandsNone")) + "</p>";
+    const hot = (s.hotspots || []).map((b) => "<li>" + h.esc(h.t("vt.surface.hotLine", {
+      axis: h.t("vt.surface.axis." + b.axis), band: b.label, mine: num(b.mineFails),
+      mineRate: pct(b.mineRate), conc: fac(b.concentration), netRate: pct(b.networkRate),
+    })) + "</li>").join("");
+    const hotBlock = hot
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.surface.hotTitle")) + '</h4><ul class="vt-list">' + hot + "</ul>"
+      : "";
+    const ihead = ["vt.surface.hCell", "vt.surface.hCellLedgers", "vt.surface.hCellFails",
+      "vt.surface.hObserved", "vt.surface.hExpected", "vt.surface.hLift"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const inter = (s.interactions || []).filter((x) => x.ledgers > 0).slice(0, 8).map((x) => "<tr"
+      + (x.reliable ? "" : ' class="vt-thin"') + ">"
+      + '<th scope="row">' + h.esc(x.loadLabel) + " × " + h.esc(x.marginLabel)
+      + (x.reliable ? "" : " · " + h.esc(h.t("vt.surface.thin"))) + "</th>"
+      + "<td>" + h.esc(num(x.ledgers)) + "</td>"
+      + "<td>" + h.esc(num(x.failLedgers)) + "</td>"
+      + "<td>" + h.esc(pct(x.rate)) + "</td>"
+      + "<td>" + h.esc(pct(x.expected)) + "</td>"
+      + "<td>" + h.esc(fac(x.interaction)) + "</td></tr>").join("");
+    const interBlock = inter
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.surface.interTitle")) + '</h4><table class="vt-table"><thead><tr>' + ihead
+        + "</tr></thead><tbody>" + inter + "</tbody></table>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.surface.interNone")) + "</p>";
+    const gapLine = (s.gaps || []).length
+      ? '<p class="vt-note">' + h.esc(s.gaps.map((g) => h.t("vt.surface.gap." + g)).join(" · ")) + "</p>"
+      : "";
+    return verdictLine + covLine + sharesLine + groupLine + table + hotBlock + interBlock + gapLine;
+  }
+
+  // Netz-Sicht: erst die Trennung Netzereignis / privat, dann Kandidaten fuer geteilte
   // Infrastruktur (nur privat), dann die Fenster je Validator. Ohne diese Trennung zaehlt man
   // ein Netzereignis als Infrastruktur - der Messfehler, den diese Ebene zuerst selbst hatte.
-  function networkBlock(split, clusters, windows) {
+  // Zeit-Ebene: Honeypot-Sichtungen gegen die Ausfallserien aller dUNL-Knoten. Das Urteil hängt
+  // an der gepaarten Gegenprobe (Angriffsstunde gegen dieselbe UTC-Stunde an ruhigen Tagen),
+  // nicht am rohen Lift - der rohe Lift ist in einem Netz mit Stoßzeiten meist die Uhrzeit.
+  // Beides bleibt sichtbar: der rohe Wert, damit die Falle erkennbar bleibt, die Gegenprobe,
+  // damit das Urteil an ihr hängt und nicht an der Zahl, die am schönsten aussieht.
+  // Die Vergleichs-Details werden nur gezeigt, wenn es Überlappungsstunden gibt. Eine Tabelle
+  // voller Nullen wirkt wie ein Befund, ist aber nur eine Lücke - und Lücken haben hier schon
+  // eine eigene Zeile (Aufzeichnungs-Abdeckung).
+  function impactBlock(imp) {
+    if (!imp || !imp.verdict) return '<p class="vt-empty">' + h.esc(h.t("vt.impact.empty")) + "</p>";
+    const cov = imp.coverage || {};
+    const net = imp.network || {};
+    const mt = imp.matched || {};
+    const lag = imp.lag || {};
+    const th = imp.thresholds || {};
+    // null ist hier "nicht gemessen", nicht 0. num() würde null zu "0" machen.
+    const nz = (v) => (Number.isFinite(v) ? String(v) : "–");
+    // Kleine Raten duerfen nicht wie Null aussehen. 0,015 % als "0,0 %" zu zeigen ist eine
+    // Luege durch Rundung - und genau die Raten der ruhigen Gegenprobe liegen in diesem Bereich.
+    const rate = (v) => {
+      if (!Number.isFinite(v)) return "–";
+      const p = v * 100;
+      if (p >= 10) return p.toFixed(1) + " %";
+      if (p >= 0.1) return p.toFixed(2) + " %";
+      if (p > 0) return p.toFixed(3) + " %";
+      return "0 %";
+    };
+    const share = (v) => (Number.isFinite(v) ? Math.round(v * 100) + " %" : "–");
+    const has = Number.isFinite(cov.overlapCells) && cov.overlapCells > 0;
+    const cards = [["vt.impact.k.clusters", nz(cov.clustersInWindow)],
+      ["vt.impact.k.overlap", nz(cov.overlapCells) + " / " + nz(cov.attackCells)],
+      ["vt.impact.k.attackLedgers", nz(cov.attackLedgers)],
+      ["vt.impact.k.quietLedgers", nz(cov.quietLedgers)],
+      ["vt.impact.k.rateWith", rate(net.rateWith)],
+      ["vt.impact.k.rateMatched", rate(mt.rateMatched)]]
+      .map(([k, v]) => '<div class="vt-card"><small>' + h.esc(h.t(k)) + "</small><b>" + h.esc(v) + "</b></div>").join("");
+    const badge = '<p class="vt-scope"><span class="vt-badge vt-impv-' + h.esc(imp.verdict) + '">'
+      + h.esc(h.t("vt.impact.verdict." + imp.verdict)) + "</span> <small>"
+      + h.esc(h.t("vt.impact.scope", { measured: nz(cov.measuredCells), attack: nz(cov.attackCells), thin: nz(cov.thinCells) }))
+      + "</small> <small>"
+      + h.esc(h.t("vt.impact.authority", {
+        authority: h.t("vt.impact.authority." + imp.verdictAuthority), reason: h.t("vt.impact.reason." + imp.verdictReason),
+      })) + "</small></p>";
+    const head = (keys) => keys.map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const table = (keys, rows) => '<table class="vt-table"><thead><tr>' + head(keys) + "</tr></thead><tbody>" + rows + "</tbody></table>";
+    const wRows = (imp.windows || []).map((w) => "<tr>"
+      + '<th scope="row">' + h.esc(stamp(w.timeMs)) + "</th>"
+      + "<td>" + nz(w.clusters) + "</td><td>" + nz(w.txCount) + "</td><td>" + nz(w.ledgerTxMax) + "</td>"
+      + "<td>" + nz(w.accounts) + "</td><td>" + nz(w.drops) + "</td>"
+      + "<td>" + nz(w.ledgers) + "</td><td>" + nz(w.incidentLedgers) + "</td>"
+      + "<td>" + rate(w.rate) + "</td>"
+      + '<td class="vt-imp-rules">' + (w.rules || []).map((r) => '<span class="vt-chip">' + h.esc(tl(r.rule))
+      + " × " + h.esc(String(r.count)) + "</span>").join("") + "</td></tr>").join("");
+    const rRows = (imp.rules || []).map((r) => "<tr>"
+      + '<th scope="row">' + h.esc(tl(r.rule)) + "</th>"
+      + "<td>" + nz(r.clustersSeen) + "</td><td>" + nz(r.clustersInRecording) + "</td>"
+      + "<td>" + share(r.share) + "</td></tr>").join("");
+    const vRows = (imp.validators || []).map((v) => "<tr>"
+      + '<th scope="row">' + h.esc(String(v.master).slice(0, 12)) + "…"
+      + (v.reliable ? "" : '<small class="vt-small">' + h.esc(h.t("vt.impact.reliableNo")) + "</small>") + "</th>"
+      + "<td>" + nz(v.ledgersWith) + "</td><td>" + rate(v.rateWith) + "</td>"
+      + "<td>" + rate(v.rateMatched) + "</td>"
+      + "<td>" + (Number.isFinite(v.liftMatched) ? "×" + fac(v.liftMatched) : "–") + "</td>"
+      + "<td>" + (Number.isFinite(v.zMatched) ? v.zMatched.toFixed(2) : "–") + "</td></tr>").join("");
+    // Zwei Autoritaeten, eine Tabelle: die History ist die Behauptung des Clients, der Trace die
+    // eigene Messung. Beide Zeilen stehen nebeneinander, damit ein Widerspruch sichtbar bleibt,
+    // statt dass eine einzelne Zahl das Urteil traegt. Eine fehlende Ebene zeigt "–", nicht 0.
+    const src = imp.sources || {};
+    const srcRow = (label, s) => {
+      const an = (s && s.analysis) || {};
+      const basis = label === "trace" ? (s ? s.signatureCells : null) : (s ? s.attackCells : null);
+      return "<tr>"
+        + '<th scope="row">' + h.esc(h.t("vt.impact.authority." + label))
+        + (s && s.available ? "" : '<small class="vt-small">' + h.esc(h.t("vt.impact.srcOff")) + "</small>") + "</th>"
+        + "<td>" + nz(basis) + "</td><td>" + nz(s ? s.overlapCells : null) + "</td>"
+        + "<td>" + rate(an.rateWith) + "</td><td>" + rate(an.rateMatched) + "</td>"
+        + "<td>" + nz(an.contributingValidators) + "</td></tr>";
+    };
+    const sourcesBlock = (src.history || src.trace)
+      ? '<p class="vt-note">' + h.esc(h.t("vt.impact.srcTitle", {
+        threshold: nz(th.minTraceSignatureLedgers), hours: nz(cov.traceForensicsHours), cells: nz(cov.signatureCells),
+      })) + "</p>"
+      + table(["vt.impact.hSource", "vt.impact.hBasis", "vt.impact.hOverlap", "vt.impact.hRateWith",
+        "vt.impact.hRateMatched", "vt.impact.hContrib"], srcRow("history", src.history) + srcRow("trace", src.trace))
+      : "";
+    const tw = net.typesWith || {};
+    const tq = net.typesWithout || {};
+    const compare = has
+      ? '<p class="vt-note">' + h.esc(h.t("vt.impact.rawLift", { lift: fac(net.lift), z: nz(net.zRaw) })) + "</p>"
+        + '<p class="vt-note">' + h.esc(h.t("vt.impact.matched", {
+          cells: nz(mt.cells), matched: nz(mt.matchedCells), uncontrolled: nz(mt.uncontrolledCells),
+          attack: rate(mt.rateAttack), quiet: rate(mt.rateMatched), ratio: fac(mt.ratio), z: nz(mt.z),
+        })) + "</p>"
+        + '<p class="vt-note">' + h.esc(h.t("vt.impact.pairNote", {
+          fails: nz(net.pairFailsWith), pairs: nz(net.pairsWith),
+          quietFails: nz(net.pairFailsWithout), quietPairs: nz(net.pairsWithout),
+          ledgerWith: rate(net.ledgerRateWith), ledgerWithout: rate(net.ledgerRateWithout),
+        })) + "</p>"
+        + (Number.isFinite(lag.cells) && lag.cells > 0
+          ? '<p class="vt-note">' + h.esc(h.t("vt.impact.lag", {
+            before: rate(lag.before), during: rate(lag.during), after: rate(lag.after), cells: nz(lag.cells),
+          })) + "</p>" : "")
+        + (wRows ? table(["vt.impact.hTime", "vt.impact.hClusters", "vt.impact.hTx", "vt.impact.hTxPeak", "vt.impact.hAccounts",
+          "vt.impact.hDrops", "vt.impact.hLedgers", "vt.impact.hFails", "vt.impact.hRate", "vt.impact.hRules"], wRows)
+          : '<p class="vt-empty">' + h.esc(h.t("vt.impact.noWindows")) + "</p>")
+        + '<p class="vt-note">' + h.esc(h.t("vt.impact.typesNote", {
+          missed: nz(tw.missed), partial: nz(tw.partial), wrongHash: nz(tw.wrongHash), noQuorum: nz(tw.noQuorum),
+          qMissed: nz(tq.missed), qPartial: nz(tq.partial), qWrongHash: nz(tq.wrongHash), qNoQuorum: nz(tq.noQuorum),
+        })) + "</p>"
+        + (vRows ? table(["vt.impact.hValidator", "vt.impact.hLedgersWith", "vt.impact.hRateWith",
+          "vt.impact.hRateMatched", "vt.impact.hLiftMatched", "vt.impact.hZ"], vRows)
+          : '<p class="vt-empty">' + h.esc(h.t("vt.impact.noValidators")) + "</p>")
+      : '<p class="vt-empty">' + h.esc(h.t("vt.impact.noWindows")) + "</p>";
+    // Ohne Uberlappungsstunde gibt es keinen Effekt, dessen Trager man zahlen koennte.
+    const contrib = has && Number.isFinite(net.observedValidators) && net.observedValidators > 0
+      ? '<p class="vt-note">' + h.esc(h.t("vt.impact.contrib", {
+        contributing: nz(net.contributingValidators), observed: nz(net.observedValidators),
+        min: nz(th.minContributingValidators),
+      })) + "</p>" : "";
+    const gap = Number.isFinite(cov.clustersOutsideRecording) && cov.clustersOutsideRecording > 0
+      ? '<p class="vt-note">' + h.esc(h.t("vt.impact.gapNote", {
+        outside: nz(cov.clustersOutsideRecording), total: nz(cov.clustersInWindow),
+      })) + "</p>" : "";
+    const thresholds = '<p class="vt-note">' + h.esc(h.t("vt.impact.thresholdNote", {
+      cell: nz((cov.cellMs || 0) / 60000), cellMin: nz(th.minCellLedgers), attackMin: nz(th.minAttackCells),
+      groupMin: nz(th.minGroupPairs), z: nz(th.zThreshold), contribMin: nz(th.minContributingValidators),
+    })) + "</p>";
+    return badge
+      + '<div class="vt-cards">' + cards + "</div>"
+      + contrib + gap + sourcesBlock + compare
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.impact.rulesTitle")) + "</h3>"
+      + (rRows ? table(["vt.impact.hRule", "vt.impact.hSeen", "vt.impact.hInRecording", "vt.impact.hShare"], rRows)
+        : '<p class="vt-empty">' + h.esc(h.t("vt.impact.noRules")) + "</p>")
+      + thresholds;
+  }  function networkBlock(split, clusters, windows) {
     const parts = [];
     if (split && Array.isArray(split.rows) && split.rows.length) {
       const head = ["vt.net.hValidator", "vt.net.hTotal", "vt.net.hNetwork", "vt.net.hOwn", "vt.net.hShare"]
@@ -638,6 +1178,7 @@ export function createValidatorTrace(h) {
     const per = Object.entries(d.perValidator || {}).sort((a, b) => (b[1].missed + b[1].wrongHash) - (a[1].missed + a[1].wrongHash))
       .map(([k, v]) => '<li class="vt-row"><span class="vt-key">' + h.esc(k.slice(0, 12)) + "…</span><span>missed " + h.esc(String(v.missed)) + " · no-quorum " + h.esc(String(v.noQuorum ?? 0)) + " · partial " + h.esc(String(v.partial)) + " · wrong-hash " + h.esc(String(v.wrongHash)) + "</span></li>").join("");
     body.innerHTML = '<p class="vt-h">' + h.esc(h.t("vt.incidentsTotal", { n: d.incidents })) + "</p>"
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.impactTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.impactNote")) + "</p>" + impactBlock(d.impact)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.recurring")) + "</h3>" + (rec ? '<ul class="vt-list">' + rec + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.noRecurring")) + "</p>")
       + '<h3 class="vt-h">' + h.esc(h.t("vt.attackTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.attackNote")) + "</p>" + attackBlock(d.attacks)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.sigTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.sigNote")) + "</p>" + signatureBlock(d.signatures)
