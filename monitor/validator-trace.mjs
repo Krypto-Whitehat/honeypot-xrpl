@@ -95,6 +95,10 @@ function emptyDay(date) {
     // viele erwartet, aber nicht erfasst wurden. Ohne diese Zähler wäre "keine Signatur" nicht
     // von "keine Beobachtung" zu trennen.
     shapeSeen: 0, shapeMissing: 0,
+    // Netz-Anker des Endpunkts, an dem dieser Rekorder haengt (server_info -> validations.quorum).
+    // Ohne diesen Wert ist 'Stimmen / needed' eine eigene Zielgroesse und darf nie als Netz-Quorum
+    // gelesen werden. Fehlend bleibt fehlend: null heisst 'nicht erfasst', nicht 'kein Quorum'.
+    networkQuorum: null, networkQuorumSamples: 0, networkQuorumAttempts: 0,
     // Spaet-Validierungen je Tag: { l: Ledger, m: Master, ms: Latenz nach dem Close, t: Ankunft }.
     // Ohne diese Liste ist die Frage "zu spaet abgestimmt oder nie abgestimmt?" aus der
     // Aufzeichnung nicht beantwortbar.
@@ -224,7 +228,17 @@ function recordResult(r, detailNote) {
     d.ledgerStats.push({
       l: r.ledgerIndex, t: r.closeMs,
       v: f.votes ?? 0, need: f.needed ?? 0, top: f.topVotes ?? 0, mg: f.margin ?? 0,
+      // mm: die dUNL-Groesse, aus der 'need' gerechnet wurde (need = ceil(mm * quorumFrac)).
+      // Ohne sie ist 'need' eine Zahl ohne Herleitung und die Quorum-Reserve nicht nachrechenbar.
+      mm: Number.isFinite(f.members) ? f.members : null,
       sp: f.runnerVotes ?? 0, gap: r.closeGapMs ?? null, gmed: r.medianGap ?? null,
+      // Schliess-Beweis dieses Ledgers: ch ist der Hash aus dem validierten Stream (die Autoritaet,
+      // an der jede Zeile nachpruefbar ist), cl sagt, dass das Netz geschlossen hat, cg markiert die
+      // Erfassungs-Luecke dieses Rekorders, ov zaehlt alle gesehenen Validierungen inklusive der
+      // Signierer ausserhalb der beobachteten dUNL. Ohne diese vier Felder waere 'no vote' eine
+      // Behauptung ueber das Netz statt eine Aussage ueber die eigene Beobachtung.
+      ch: f.closedHash ?? null, cl: f.closed === true, cg: f.captureGap === true,
+      ov: Number.isFinite(f.observedValidations) ? f.observedValidations : null,
       tx: r.txCount ?? 0, med: r.medianTx ?? 0,
       c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
       // Tx-Form und die Belege der Signaturen, die in diesem Ledger feuerten. Die Konto-Adresse
@@ -357,6 +371,15 @@ function featureEntry(idx) {
 const HEX64 = /^[0-9A-Fa-f]{64}$/;
 const hexOrNull = (x) => (typeof x === "string" && HEX64.test(x) ? x.toUpperCase() : null);
 const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0 };
+// Anzeigetext fuer die Netz-Quorum-Achse: 'nicht erfasst' ist eine Aussage ueber den Rekorder,
+// 'kein Quorum' waere eine Aussage ueber das Netz und wird hier nie erzeugt.
+const quorumSampleState = () => {
+  const d = days.get(dayOf(Date.now()));
+  const nq = d?.networkQuorum;
+  if (nq && Number.isFinite(nq.quorum)) return `${nq.quorum} (${nq.endpoint})`;
+  const a = d?.networkQuorumAttempts ?? 0;
+  return a > 0 ? `nicht meldbar (${a} Versuche)` : "nicht erfasst";
+};
 let detailQueue = [];
 let detailBusy = false;
 
@@ -402,6 +425,77 @@ async function drainDetails() {
   }
   detailBusy = false;
 }
+
+// Netz-Anker: der Quorum-Wert, den der Endpunkt selbst meldet. Er wird aufgezeichnet, damit die
+// beobachteten Stimmen eine Vergleichsgroesse haben, die nicht aus der eigenen Mitgliederliste
+// kommt. Ein Fehler hier fuehrt zu keiner Aussage, sondern laesst den Wert fehlen.
+// Geprueft am 2026-10-16 an den echten Endpunkten: xrplcluster.com (rippled 3.4.1) liefert
+// validation_quorum 0 und gar kein validations-Objekt, s1.ripple.com und s2.ripple.com melden 28.
+// Ein 0 ist dort "dieser Endpunkt meldet keinen Quorum", nicht "der Quorum ist 0" - die zweite
+// Lesart wuerde jedes Ledger zur Quorum-Erfuellung machen. Deshalb: 0 und fehlend sind
+// dasselbe (kein Wert), und der Versuch selbst wird im Tag gespeichert. Abwesenheit ist dann
+// ein belegter Zustand, keine stille Luecke.
+const QUORUM_PROBE_WSS = (process.env.TRACE_QUORUM_WSS ?? "wss://s1.ripple.com,wss://s2.ripple.com")
+  .split(",").map((s) => s.trim()).filter(Boolean);
+const readQuorum = (info) => {
+  const q = Number(info?.validations?.quorum ?? info?.validation_quorum);
+  return Number.isFinite(q) && q > 0 ? q : null;
+};
+// Einmal-Abfrage eines Ersatz-Endpunkts in einem eigenen kurzen Socket: der Stream-Endpunkt
+// muss dafuer nicht umgestellt werden, und die Antwort bleibt dem meldenden Endpunkt zugeordnet.
+function probeQuorum(url, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let ws;
+    try { ws = new WebSocket(url); } catch { return resolve(null); }
+    let pending = null;
+    const done = (v) => { clearTimeout(t); try { ws.close(); } catch {} resolve(v); };
+    const t = setTimeout(() => done(null), timeoutMs);
+    ws.onopen = () => { pending = 1; ws.send(JSON.stringify({ command: "server_info", id: 1 })); };
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.id === pending) done(readQuorum(m.result?.info ?? m.result?.server_info ?? {}));
+    };
+    ws.onerror = () => done(null);
+    ws.onclose = () => done(null);
+  });
+}
+// attempts zaehlt jeden Versuch, samples nur die mit einem Wert. attempts > 0 und samples = 0
+// ist die Aufzeichnung "dieser Tag hat keinen Netz-Quorum erfassen koennen".
+async function recordQuorumAttempt(q, endpoint) {
+  const d = dayObj(dayOf(Date.now()));
+  d.networkQuorumAttempts = (d.networkQuorumAttempts ?? 0) + 1;
+  if (q !== null) {
+    d.networkQuorumSamples = (d.networkQuorumSamples ?? 0) + 1;
+    if (!d.networkQuorum || d.networkQuorum.quorum !== q) {
+      d.networkQuorum = { quorum: q, atMs: Date.now(), endpoint };
+      log("Netz-Quorum:", q, "gemeldet von", endpoint);
+    }
+    // Der Marker steht schon in der Datei, nicht erst in der Lese-Angleichung: ein Tag mit
+    // Wert ist ein erfasster Tag, auch ohne den Store dazwischen.
+    d.networkQuorumSampled = true;
+  }
+  dirty.add(d.date);
+  return q !== null;
+}
+async function sampleNetworkQuorum() {
+  let q = null;
+  try {
+    q = readQuorum((await rpc({ command: "server_info" }))?.info ?? {});
+    if (q === null) stats.quorumNoReport = (stats.quorumNoReport ?? 0) + 1;
+  } catch (e) {
+    stats.quorumSamplesFailed = (stats.quorumSamplesFailed ?? 0) + 1;
+    log("server_info nicht lesbar:", String(e?.message ?? e).slice(0, 80));
+  }
+  if (q !== null) return recordQuorumAttempt(q, WSS[0]);
+  for (const url of QUORUM_PROBE_WSS) {
+    const alt = await probeQuorum(url);
+    if (alt !== null) return recordQuorumAttempt(alt, url);
+  }
+  await recordQuorumAttempt(null, WSS[0]);
+  log("Netz-Quorum nicht meldbar: Stream-Endpunkt", WSS[0], "und Ersatz",
+    QUORUM_PROBE_WSS.length ? QUORUM_PROBE_WSS.join(",") : "keiner konfiguriert");
+}
+
 
 function onLedgerClosed(m) {
   const idx = Number(m.ledger_index);
@@ -455,6 +549,7 @@ function connect(urlIdx = 0, backoff = 1000) {
     const streams = ["validations", "ledger"];
     if (TX_SHAPE) streams.push("transactions");
     ws.send(JSON.stringify({ id: 1, command: "subscribe", streams }));
+    sampleNetworkQuorum();
   };
   ws.onmessage = onMessage;
   ws.onclose = () => {
@@ -497,15 +592,16 @@ async function main() {
   }, 5000);
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const pruneTimer = setInterval(() => { if (REMOTE) pruneRemote().catch(() => {}); else pruneLocal(); }, 86400000);
+  const quorumTimer = setInterval(() => { sampleNetworkQuorum().catch(() => {}); }, 3600000);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
   }, 60000);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer);
+    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer);
     await flush();
     if (ws) ws.close();
     log("beendet", dirty.size ? "(" + dirty.size + " Tage nicht gespeichert)" : ", gespeichert");

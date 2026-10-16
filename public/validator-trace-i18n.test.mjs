@@ -19,7 +19,7 @@ const DICT = {
   en: { ...CORE_DICT.en, ...VALIDATOR_DICT.en },
   de: { ...CORE_DICT.de, ...VALIDATOR_DICT.de },
 };
-import { SERIES_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
+import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
 import { PEER_AUTHORITIES, PEER_DIRECTIONS, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
 import { LATENCY_AUTHORITIES, LATENCY_CLASSES, LATENCY_PATTERNS, LATENCY_REASONS, LATENCY_VERDICTS } from "../lib/validator-vote-latency.mjs";
@@ -52,7 +52,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.peer.authority.", "vt.peer.direction.", "vt.peer.reason.", "vt.peer.type.", "vt.peer.verdict.",
     "vt.lat.authority.", "vt.lat.class.", "vt.lat.pattern.", "vt.lat.reason.", "vt.lat.verdict.",
     "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
-    "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.",
+    "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.", "vt.cq.verdict.",
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
   ];
@@ -87,6 +87,7 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.cause.strength.", CAUSE_STRENGTHS],
     ["vt.surface.verdict.", SURFACE_VERDICTS], ["vt.surface.reason.", SURFACE_REASONS],
     ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
+    ["vt.cq.verdict.", CQ_VERDICTS],
     ["vt.surface.axis.", SURFACE_AXES],
     ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
   // Empfindlichkeit: das Urteil beantwortet, ob DICH diese Signatur ueberproportional trifft.

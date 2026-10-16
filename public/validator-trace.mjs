@@ -477,6 +477,11 @@ export function createValidatorTrace(h) {
   function evidenceText(hy) {
     const e = hy.evidence || {};
     if (hy.tag === "quorum-thin") return h.t("vt.evMargin", { top: num(e.topVotes), needed: num(e.needed), margin: num(e.margin) });
+    if (hy.tag === "vote-coverage-thin") return h.t("vt.evCoverage", {
+      top: num(e.topVotes), needed: num(e.needed), observed: num(e.observedValidations),
+      hash: e.closedHash ? h.esc(String(e.closedHash).slice(0, 12)) + "…" : h.t("vt.cq.hashMissing"),
+      gap: e.captureGap ? h.t("vt.cq.captureGap") : h.t("vt.cq.noCaptureGap"),
+    });
     if (hy.tag === "hash-split") return h.t("vt.evSplit", { runner: num(e.runnerVotes), votes: num(e.votes) });
     if (hy.tag === "load-spike" || hy.tag === "load-extreme") return h.t("vt.evLoad", { tx: num(e.txCount), med: num(e.medianTx), ratio: fac(e.ratio) });
     if (hy.tag === "close-gap") return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) });
@@ -728,21 +733,48 @@ export function createValidatorTrace(h) {
   }
 
   // Quorum-Kritikalitaet: die Frage, die jeder Betreiber stellt und die kein Dashboard liefert.
+  // Die Spalte 'Schliess-Beweis' ist der Grund, warum diese Zeile ueberhaupt etwas behaupten darf:
+  // der Recorder wertet nur Ledger aus dem validierten Stream aus. Ein bewiesen geschlossener
+  // Ledger hat das Netz-Quorum erreicht - eine Marge unter null beschreibt dann nur, wie viele
+  // Stimmen dieser Rekorder selbst sah, niemals ein fehlendes Quorum.
   function criticalityBlock(cq) {
     if (!cq || !Number.isFinite(cq.checked)) return "";
     if (!cq.checked) return '<p class="vt-empty">' + h.esc(h.t("vt.cq.none")) + "</p>";
-    const head = ["vt.cq.hLedger", "vt.cq.hType", "vt.cq.hVotes", "vt.cq.hTop", "vt.cq.hMargin", "vt.cq.hEffect"]
+    const head = ["vt.cq.hLedger", "vt.cq.hType", "vt.cq.hVotes", "vt.cq.hTop", "vt.cq.hMargin", "vt.cq.hClosure", "vt.cq.hEffect"]
       .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const closureCell = (r) => {
+      const c = r.closure ?? { closed: null, basis: "validated-ledger-stream", hash: null };
+      const hash = c.hash ? h.esc(String(c.hash).slice(0, 12)) + "…" : h.esc(h.t("vt.cq.hashMissing"));
+      const gap = r.captureGap ? " · " + h.esc(h.t("vt.cq.captureGap")) : "";
+      return hash + gap;
+    };
+    // Betroffenheit als eigene Zeile unter dem Ledger, nicht als achte Spalte: die Namen sind
+    // lang, die Tabelle ist es schon. Ohne affectedCount (aeltere Antwort) bleibt die Zeile weg -
+    // "nicht erfasst" ist hier besser als eine gemutmasste Kohorte.
+    const affectedRow = (r) => {
+      if (!Number.isFinite(r.affectedCount)) return "";
+      const others = Array.isArray(r.affectedMasters) ? r.affectedMasters : [];
+      const body = others.length
+        ? peerChips(others)
+        : '<span class="vt-peer vt-peer-none">' + h.esc(h.t("vt.cq.affectedSolo")) + "</span>";
+      return '<tr class="vt-cq-affected"><td colspan="7">'
+        + '<span class="vt-cq-affected-label">'
+        + h.esc(h.t("vt.cq.affected", { n: num(r.affectedCount), others: num(others.length) }))
+        + "</span>" + body + "</td></tr>";
+    };
     const rows = cq.rows.map((r) => "<tr>"
       + '<th scope="row">#' + h.esc(num(r.ledgerIndex)) + "</th>"
       + "<td>" + h.esc(h.t("vt.type." + (DIAG_TYPE[r.type] || r.type))) + "</td>"
       + "<td>" + h.esc(num(r.votes) + " / " + num(r.needed)) + "</td>"
       + "<td>" + h.esc(num(r.topVotes)) + "</td>"
       + "<td>" + h.esc(num(r.margin)) + "</td>"
-      + "<td>" + h.esc(h.t(r.critical ? "vt.cq.critical" : "vt.cq.followOn")) + "</td></tr>").join("");
+      + "<td>" + closureCell(r) + "</td>"
+      + "<td>" + h.esc(h.t("vt.cq.verdict." + r.verdict)) + "</td></tr>"
+      + affectedRow(r)).join("");
     const summary = h.t("vt.cq.summary", {
       checked: num(cq.checked), absent: num(cq.checked + cq.unanswered),
       critical: num(cq.critical), followOn: num(cq.followOn),
+      closed: num(cq.closed ?? 0), captureGaps: num(cq.captureGaps ?? 0),
     });
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
       + '<p class="vt-note">' + h.esc(summary) + "</p>";

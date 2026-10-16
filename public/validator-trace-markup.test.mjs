@@ -898,3 +898,15 @@ test('Peer-Listen: die gekuerzte Liste laesst sich aufdecken', () => {
   assert.match(src, /class="vt-peer-rest" hidden/, 'die restlichen Keys sind nicht vorgemerkt');
   assert.match(src, /querySelectorAll\("\[data-peer-more\]"\)/, 'der Handler fehlt');
 });
+
+// Guard: die Betroffenheits-Zeile muss dieselbe Breite haben wie die Tabelle. Ein colspan,
+// der nicht mit der Zahl der Spaltenkoepfe uebereinstimmt, verschiebt die ganze Tabelle.
+test("Kritikalitaets-Tabelle: Betroffenheits-Zeile deckt genau die Spalten der Kopfzeile", () => {
+  const head = traceJs.match(/const head = \[([^\]]*vt\.cq\.hLedger[^\]]*)\]/);
+  assert.ok(head, "Kopfzeile der Kritikalitaets-Tabelle nicht gefunden");
+  const cols = head[1].split(",").filter((x) => x.trim() !== "").length;
+  const colspan = [...traceJs.matchAll(/colspan="(\d+)"/g)].map((m) => Number(m[1]));
+  assert.ok(colspan.includes(cols), 'Betroffenheits-Zeile braucht colspan="' + cols + '" (Spalten: ' + cols + ")");
+  assert.ok(/vt-cq-affected/.test(traceJs), "die Betroffenheits-Zeile fehlt im Overlay");
+  assert.ok(/affectedCount/.test(traceJs), "ohne affectedCount darf keine Kohorte behauptet werden");
+});

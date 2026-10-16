@@ -3272,6 +3272,9 @@ body[data-a6] {
 .vt-peer { display: inline-block; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 2px 6px; margin: 3px 4px 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-ink); }
 .vt-peer-more { display: inline-block; border: 1px dashed var(--a6-line); border-radius: var(--a6-r-sm); background: none; padding: 2px 6px; margin: 3px 0 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); cursor: pointer; }
 .vt-peer-more:hover, .vt-peer-more:focus-visible { color: var(--a6-ink); border-color: var(--a6-ink); outline: none; }
+.vt-peer-none { color: var(--a6-muted); border-style: dashed; }
+.vt-cq-affected td { text-align: left; background: var(--a6-surface-alt); }
+.vt-cq-affected-label { display: inline-block; margin-right: 6px; color: var(--a6-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-est-note { color: var(--a6-muted); }
 .vt-atk-peers { display: block; }
 /* Breite Tabellen: auf schmalen Screens quetscht nichts die Zellen, es wird horizontal gelesen. */
