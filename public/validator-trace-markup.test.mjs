@@ -967,3 +967,15 @@ test('null ist nicht 0: eine nicht erfasste Zahl darf nicht als Messwert erschei
   assert.match(src, /v === null \|\| v === undefined/, 'num() unterscheidet null nicht von 0');
   assert.doesNotMatch(src, /const num = \(v\) => \(Number\.isFinite\(Number\(v\)\)/, 'num() prueft zuerst die Zahl, nicht die Erfassung');
 });
+
+test("Gegenprobe-Text: das Fenster wird benannt, nicht als 24 h gesetzt", () => {
+  assert.match(src, /function truthWindowLabel\(/, "die Fensterzahl hat keine gemeinsame Quelle im Overlay");
+  assert.match(src, /vt\.truth\.window30d/, "das 30-Tage-Fenster hat keine Beschriftung");
+  assert.match(src, /min: n\(t\.falsePositiveMin\), window \}\)/, "der Widerspruchstext kennt keine Fensterzahl");
+  assert.match(src, /window: truthWindowLabel\(cq\.affectedTruth\.windowHours\)/, "die Kohorten-Bilanz nennt ihr Fenster nicht");
+  assert.match(src, /vt\.truth\.outside/, "consistent ohne die offene Zahl ausserhalb des Fensters ist ein Halbfreispruch");
+  const i18n = read("i18n-validator.mjs");
+  assert.equal((i18n.match(/vt\.truth\.contradicted.*\{window\}/g) || []).length, 2, "der Widerspruchstext nennt das Fenster nicht in beiden Sprachen");
+  assert.equal((i18n.match(/vt\.cq\.truth\.summary.*\{window\}/g) || []).length, 2, "die Kohorten-Bilanz nennt das Fenster nicht in beiden Sprachen");
+  assert.doesNotMatch(i18n, /im selben 24-h-Fenster|in the same 24 h window/, "ein Fenster steht fest im Text, obwohl die Auswahl an der eigenen Spanne haengt");
+});

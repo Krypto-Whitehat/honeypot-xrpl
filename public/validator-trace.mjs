@@ -277,17 +277,34 @@ export function createValidatorTrace(h) {
 // Netz fuer denselben Knoten im selben Fenster nennt. Die Differenz ist eine nachrechenbare
 // Untergrenze fuer die eigene Erfassung - keine Deutung, keine Schaetzung. Ohne Referenz
 // steht die Frage offen; sie wird nie als Entlastung gelesen.
+// Die Fensterzahl der Gegenprobe ist eine Auswahl, keine Konstante: sie haengt an der eigenen
+// Spanne (1 h / 24 h / 30 d). Der Text muss sie nennen, sonst ist "dasselbe Fenster" eine
+// Behauptung statt eine nachrechenbare Angabe.
+function truthWindowLabel(hours) {
+  const span = Number.isFinite(hours) ? hours : null;
+  if (span === null) return "–";
+  return span >= 720 ? h.t("vt.truth.window30d") : span <= 1 ? h.t("vt.truth.window1h") : h.t("vt.truth.window24h");
+}
+
 function truthBlock(t) {
   if (!t) return "";
   const n = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "–");
   const state = TRUTH_STATES.has(t.verdict) ? t.verdict : "none";
+  // Das Fenster ist keine Konstante mehr: die Gegenprobe rechnet gegen das Fenster, das die
+  // eigene Spanne deckt (1 h / 24 h / 30 d). Ohne die Zahl im Text waere "dasselbe Fenster"
+  // eine Behauptung statt eine nachrechenbare Angabe.
+  const window = truthWindowLabel(t.window?.hours);
+  // consistent mit Behauptungen nur ausserhalb des Fensters ist kein Freispruch: die Zahl sagt
+  // nur, dass in diesem Fenster nichts steht. Das muss dabeistehen.
+  const outside = Number.isFinite(t.claimsOutside) && t.claimsOutside > 0
+    ? " " + h.esc(h.t("vt.truth.outside", { outside: n(t.claimsOutside) })) : "";
   const body = state === "contradicted"
-    ? h.t("vt.truth.contradicted", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal), min: n(t.falsePositiveMin) })
+    ? h.t("vt.truth.contradicted", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal), min: n(t.falsePositiveMin), window })
     : state === "consistent"
       ? h.t("vt.truth.consistent", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal) })
       : h.t("vt.truth.none");
   return '<p class="vt-truth vt-truth-' + state + '"><small>' + h.esc(h.t("vt.truth.title")) + "</small> "
-    + h.esc(body) + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
+    + h.esc(body) + outside + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
 }
 
   function renderValidator(body, d) {
@@ -891,7 +908,9 @@ function truthBlock(t) {
       ? '<p class="vt-cq-peer-truth"><small>' + h.esc(h.t("vt.cq.truth.summary", {
           nodes: num(cq.affectedTruth.nodes), contradicted: num(cq.affectedTruth.contradicted),
           consistent: num(cq.affectedTruth.consistent), open: num(cq.affectedTruth.notComparable),
-          min: num(cq.affectedTruth.falsePositiveMin) })) + "</small></p>"
+          min: num(cq.affectedTruth.falsePositiveMin),
+          window: truthWindowLabel(cq.affectedTruth.windowHours),
+        })) + "</small></p>"
       : "";
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
       + '<p class="vt-note">' + h.esc(summary) + "</p>" + peerTruth;
