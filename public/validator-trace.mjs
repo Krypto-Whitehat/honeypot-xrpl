@@ -20,7 +20,7 @@ const RANGES = ["1h", "24h", "7d", "30d", "all"];
 const BUCKETS = 24;
 const AXIS_TICKS = [0, 6, 12, 18];
 const PROFILE_TYPES = ["missed", "partial", "wrongHash", "noQuorum"];
-const TYPE_KEY = { missed: "missed", partial: "partial", "wrong-hash": "wrongHash", "no-quorum": "noQuorum" };
+const TYPE_KEY = { missed: "missed", partial: "partial", "wrong-hash": "wrongHash", "no-quorum": "noQuorum", "vote-not-observed": "noQuorum" };
 const SPAN_MS = { "1h": 3600000, "24h": 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000, all: null };
 const RETRACE_SHOWN = 12;
 const RISK_ROWS = 12;
@@ -39,6 +39,7 @@ const CAPTURE_EVENT_KINDS = new Set(["open", "close", "stall"]);
 // Gegenprobe-Zustaende mit denselben Namen wie TRUTH_VERDICTS in lib/validator-truth.mjs:
 // die UI zeigt genau die drei Urteile, die die Lib rechnen kann - kein eigener Zustand, keine
 // eigene Deutung, kein zusaetzlicher Puffer zwischen Messung und Text.
+const TRUTH_STATES = new Set(["consistent", "contradicted", "not-comparable"]);
 
 // Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
 // NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
@@ -221,7 +222,10 @@ export function createValidatorTrace(h) {
     return Math.floor(m / 60) + " h " + (m % 60) + " min";
   };
   // Die Diagnose-Engine nennt Typen in camelCase, die Uebersetzung fuehrt sie in kebab-case.
-  const DIAG_TYPE = { missed: "missed", partial: "partial", wrongHash: "wrong-hash", noQuorum: "no-quorum" };
+  const DIAG_TYPE = { missed: "missed", partial: "partial", wrongHash: "wrong-hash", noQuorum: "no-quorum", "vote-not-observed": "vote-not-observed", "no-quorum": "no-quorum" };
+  // Die Schliess-Autoritaet gehoert zum Urteil, nicht in eine Fussnote: eigener Strom, validierter
+  // Ledger-Strom und die Fremdquelle xrpscan sind verschiedene Belege und werden benannt.
+  const CLOSURE_BASIS_KEY = { recorder: "vt.lat.basis.recorder", "validated-ledger-stream": "vt.lat.basis.stream", xrpscan: "vt.lat.basis.xrpscan" };
 
   // Kohorten-Zahl lesbar machen. Ohne Messung steht die Lücke da, nicht "0" – eine 0 wäre
   // die Aussage "kein anderer Validator", die aus Altdaten nicht folgt.
@@ -269,7 +273,7 @@ export function createValidatorTrace(h) {
       if (data.available === false) { body.innerHTML = '<p class="vt-empty">' + h.esc(h.t("vt.unavailable")) + "</p>"; return; }
       if (current.mode === "patterns") renderPatterns(body, data); else renderValidator(body, data);
       wire(body);
-    } catch {
+    } catch (err) { console.error("validator-trace render failed:", err);
       body.innerHTML = '<p class="vt-empty">' + h.esc(h.t("vt.error")) + "</p>";
     }
   }
@@ -1057,6 +1061,17 @@ function truthBlock(t) {
         recorded: num(cov.daysRecorded), days: num(cov.days),
         incidents: num((lat.counts || {}).incidents), minIncidents: num(th.minIncidents),
       })) + "</p>" + ringLine;
+    }
+    // Erfassungs-Urteil: keine Latenz-Tabelle, sondern der eigene Beleg. Ohne diese Zeile waere
+    // "Ledger geschlossen, Stimme nicht gesehen" eine Behauptung ohne Zahl und ohne Quelle.
+    if (lat.verdict === "capture-only" || lat.verdict === "closure-unproven" || lat.verdict === "partially-proven") {
+      const cl = lat.closure || {};
+      const bases = Object.keys(cl.bases || {}).sort()
+        .map((b) => (CLOSURE_BASIS_KEY[b] ? h.t(CLOSURE_BASIS_KEY[b]) : b) + " " + num(cl.bases[b])).join(", ");
+      const closureLine = '<p class="vt-note">' + h.esc(h.t("vt.lat.closureLine", {
+        incidents: num(cl.incidents), proven: num(cl.proven), denied: num(cl.denied), unknown: num(cl.unknown),
+      })) + (bases ? " - " + h.t("vt.lat.closureBases", { bases }) : "") + "</p>";
+      return verdictLine + closureLine + ringLine;
     }
     const cls = lat.classes || {};
     const head = ["vt.lat.hClass", "vt.lat.hCount", "vt.lat.hShare"]

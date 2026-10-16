@@ -206,17 +206,24 @@ Endpunkte wie honeycluster liefern **keine** Validations und würden einen
 vollständigen Ausfall vortäuschen.
 
 **Ebene 1 — Validations-Ebene (was passierte):** je Validator und je Ledger
-`missed` / `partial` / `wrong-hash` / `no-quorum`, plus die **Ledger-Kohorte**
+`missed` / `partial` / `wrong-hash` / `vote-not-observed` (Bestand vor 2026-10-17:
+`no-quorum`), plus die **Ledger-Kohorte**
 (wie viele dUNL-Validatoren denselben Ledger gleichzeitig falsch standen),
 Quorum-Rand (Top-Stimmen vs. benötigte Stimmen), Hash-Split, Last
 (Tx vs. Median) und Takt-Lücke (Ledger-Abstand vs. Median).
 
 **Schliess-Beweis vor jedem Stimmen-Zähler (Akkuratz-Regel, 2026-10-16):** der abonnierte
 `ledger`-Stream liefert ausschließlich **validierte** Ledger — jeder aufgezeichnete Ledger ist
-damit bewiesen geschlossen, das Netz hat sein Quorum erreicht. `no-quorum` beschreibt deshalb
+damit bewiesen geschlossen, das Netz hat sein Quorum erreicht. `vote-not-observed` beschreibt deshalb
 **nur die eigene Beobachtung** („kein Vote dieses Recorders erfasst“), nie ein zu kleines
 Netz-Quorum; `network-stall` darf nur dort stehen, wo die Schließung ausdrücklich verneint wird
-(`cl === false`). Definiert ist das an genau einer Stelle: `ledgerClosure` in
+(`cl === false`). Seit 2026-10-17 heißt auch der Typname selbst den Befund und nicht die
+Ursache: auf einem bewiesen geschlossenen Ledger schreibt der Recorder `vote-not-observed`, und
+`no-quorum` bleibt ausschließlich dem Fall vorbehalten, dessen Schließung nicht belegt ist. Der
+Bestand vor diesem Datum behält seinen Typ in den Bytes der Tagesdateien und zählt in dasselbe Feld
+`noQuorum`; die UI liest ihn über dieselbe Vokabel wie `vote-not-observed`, und `no-quorum` hat seit
+2026-10-17 ein eigenes Label: „kein Quorum erfasst (Schließung nicht belegt)“ — ein Name, der eine
+Schließung behauptet, darf nicht auf einer Zeile stehen, deren Schließung verneint ist. Definiert ist das an genau einer Stelle: `ledgerClosure` in
 `lib/validator-trace.mjs` — Diagnose, Retrace und Ursachen-Ebene lesen dieselbe Funktion. Die
 Verdikte der Kritikalitäts-Zelle sind eine Kette mit Vorrang: `not-closed` →
 `closed-capture-gap` → `closed-quorum-observed` → `closed-reception-thin` →
@@ -238,6 +245,54 @@ Serie, deren Ledger alle als geschlossen belegt sind (`closedLedgers == ledgers`
 `applySeries` empfiehlt dann `capture-window` statt `network-stall`. Ohne Schließ-Beweis
 bleibt die Klasse `network-window` stehen — die Frage bleibt offen, sie wird nicht zur
 Entlastung umgeschrieben.
+
+**Die Latenz-Ebene spricht dieselbe Sprache (2026-10-17, nachgerechnet an #107695059 /
+#107694001 / #107690236):** wo kein Vorfall knotenzurechenbar war, stand früher `network-only`
+(„Nur Netzstockungen“). Diese Aussage ist aus dem eigenen Mithören nie belegbar: der Rekorder
+wertet ausschließlich Ledger aus dem validierten Strom aus (`evaluate()` sieht nur Ledger, die
+`onLedger` aus diesem Strom erhalten hat) — ein fehlendes Netz-Quorum kann er damit nicht
+beobachten. Die Ebene entscheidet jetzt über den Schließ-Beleg und weist ihn offen aus
+(`closure`: `proven` / `denied` / `unknown` mit der Quelle jedes Close-Hash):
+`capture-only` (alle bewiesen geschlossen → Erfassungs-Lücke dieses Recorders, Autorität
+`trace-closure-proof`), `closure-unproven` (kein Close-Beleg → weder Knotenfehler noch
+Netzstockung ist belegt) und `partially-proven` (gemischte Beleglage). `network-only` ist aus
+dem Vokabular entfernt, weil nichts in dieser Engine eine Netzstockung beweist.
+
+**Invariante der Schreibpfade (2026-10-17):** `cl` und `ch` entstehen aus derselben Zeile des
+Recorders (`monitor/validator-trace.mjs`: `ch = closedHash`, `cl = closed === true`, und `closed`
+heißt `closedHash !== null`). Eine Forensik-Zeile mit `cl: true` ohne 64-Hex-Hash ist deshalb
+kein Schließ-Beweis, sondern ein zerstörter Nachweis. `normalizeDay` setzt sie auf `null` zurück
+— "nicht erfasst"; `false` wäre die Gegenbehauptung, der Ledger sei nicht geschlossen, und die
+ist gegenüber einem validierten Stream nicht belegbar. `npm run audit:truth` zählt genau das als
+eigene Invariantzeile. Nachgetragen wird nur über denselben Zwei-Quellen-Nachweis:
+`scripts/backfill-closure.mjs` schreibt `ch` nur, wenn `api.xrpscan.com` und die JSON-RPC-
+Schnittstelle von `xrplcluster.com` denselben Hash für genau diesen Index melden (`chSource`,
+`chVerifiedBy`, `xc`). #107696565 vom 2026-10-16 war genau so ein zerstörter Nachweis und ist am
+2026-10-17 auf diesem Weg repariert: Hash deckungsgleich, Tx 49 und Close-Zeit beider Quellen
+gleich.
+
+**Nachführung beim Lesen: keine Quorum-Behauptung ohne Schließ-Beweis (2026-10-17):** Der Typname
+allein reicht nicht. Der Bestand behauptete weiterhin `no-quorum` für Ledger, deren Schließung längst
+belegt war — #107695059, #107694001 und #107690236, für die `api.xrpscan.com` und `xrplcluster.com`
+denselben validierten Hash melden (986E8D51…34602, 20444972…8736, FB3ABE4A…5962), während dieselbe
+Datei ihre Forensik-Zeile schon mit genau diesem Hash führte. `normalizeDay` stellt deshalb **beim
+Lesen** um: `no-quorum` → `vote-not-observed`, außer die Schließung ist ausdrücklich verneint
+(`nc: true` am Incident oder `cl === false` in der Forensik-Zeile). Der gespeicherte Typ bleibt als
+`ts` erhalten, `cb` nennt die Autorität der Schließ-Aussage (`xrpscan`, `recorder` oder
+`validated-ledger-stream`), `ch`/`chv` tragen Hash und Gegenprüfung an die Zeile, die sie braucht.
+Die API gibt das als `typeStored`, `closureBasis` und `closureHash` zurück — die Umstellung ist
+nachprüfbar, nicht bloß ein anderes Etikett. Die Zähler bleiben unangetastet: umgestellt wird die
+Aussage, nicht die Zahl.
+
+**Schließ-Beweis bis in die Incident-Zeile (`closureProofs`):** Eine Incident-Zeile ohne Forensik-Zeile
+war bisher eine offene Frage — die Behauptung stand, der Beleg fehlte. `scripts/backfill-closure.mjs`
+prüft deshalb seit 2026-10-17 auch über die Incidents: jeder Ledger, der eine Quorum-Behauptung
+trägt und keine Forensik-Zeile hat, bekommt seinen Hash in `closureProofs`, wieder nur nach dem
+Zwei-Quellen-Nachweis. Der Lauf über den Bestand: 412 Forensik-Zeilen nachgeprüft (0 Abweichung bei
+Hash, Tx-Zahl und Close-Zeit), 70 Claim-Ledger ohne Forensik-Zeile, alle 70 mit Zwei-Quellen-Beweis,
+0 ohne Nachweis. `npm run audit:truth` meldet diese Deckung als eigene Zeile und jede
+Quorum-Behauptung ohne Beweis als Befund. `mergeClosureAddendum` trägt `closureProofs` durch jeden
+Flush — sonst würde der nächste Schreibvorgang des Recorders die nachgetragenen Beweise löschen.
 
 **Was eine Erfassungs-Lücke belegt — und was nicht:** Beleg ist die **Index-Folge dieses
 Recorders** (`pg` in `ledgerStats`: die Lücke gilt genau dann, wenn `l !== pg + 1`) und der
@@ -271,6 +326,18 @@ liegen 17 Ledger, die dieser Rekorder nie sah (Lücken-Log `gaps` bei 107693984)
 war dort also keine Messung, sondern ein Lesefehler über die eigene Lücke.
 `npm run backfill:closure` trägt fehlende Hashes von außen nach; so ein Hash steht als
 Fremdquelle (`chSource: "xrpscan"`) mit benannter Gegenprüfung (`chVerifiedBy`) in der Datei.
+**Der Nachtrag überlebt den Flush (2026-10-17):** Nachtrag und Rekorder schreiben dieselbe
+Tagesdatei. Der Rekorder hält das Tag im Speicher und schreibt es alle 30 s (lokal) bzw. alle
+5 min (remote) neu - der Nachtrag war bisher beim nächsten Flush weg, weil beide Schreibpfade
+das eigene Tag zurückgaben statt des frisch gelesenen Bestands. Damit war auf diesen Zeilen
+plötzlich wieder keine Autorität für „Ledger geschlossen", und die Diagnose konnte unbemerkt auf
+die alte Netzstockungs-Deutung zurückfallen. Beide Pfade lesen jetzt den Bestand und führen die
+Nachweis-Felder zurück (`mergeClosureAddendum` / `writeDayLocal` in `lib/validator-trace-store.mjs`).
+Uebernommen werden ausschliesslich `ch`, `chSource`, `chVerifiedBy`, `chAt` und `xc` einer Zeile
+mit gleichem Ledger-Index; Zaehler, Incidents und Luecken bleiben, was dieser Rekorder sah. Ein
+eigener Hash aus dem validierten Stream wird nie durch den Fremd-Hash ersetzt - die Fremdquelle
+kann ihn nur als Gegenpruefer bestaetigen. Am echten Tag vom 16.10.2026 sind es 290 Zeilen, die
+sonst ihren Nachweis verloren haetten.
 
 **Close-Abstand braucht die Index-Folge (2026-10-17):** `close-gap` misst die Zeit zwischen zwei
 **bewerteten** Ledgern. Fehlt dazwischen ein Index, ist der Abstand die Summe der Ledger, die dieser

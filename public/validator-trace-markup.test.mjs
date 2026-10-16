@@ -32,6 +32,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { PEER_VERDICTS } from '../lib/validator-peer-benchmark.mjs';
+import { TRUTH_VERDICTS } from '../lib/validator-truth.mjs';
 import { LATENCY_VERDICTS } from '../lib/validator-vote-latency.mjs';
 import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
@@ -696,6 +697,11 @@ test('Latenz-Ebene: Block, Label-Präfixe und jede Urteil-Farbe sind verdrahtet'
   for (const v of LATENCY_VERDICTS) assert.ok(cssRules.has('.vt-badge.vt-latv-' + v), 'Badge-Farbe fehlt: ' + v);
   // Die Ring-Grenze ist Teil der Aussage: Spaetvotes gibt es nur innerhalb des Bewertungs-Rings.
   assert.match(src, /vt\.lat\.ringLine/, 'Ring-Grenze der Spaetaufzeichnung fehlt');
+  // Das Erfassungs-Urteil zeigt seinen Beleg in der Zahl, nicht als Behauptung: proven / denied /
+  // unknown und die Quelle des Close-Hash stehen in der Zeile.
+  assert.match(src, /lat\.verdict === "capture-only"/, 'Erfassungs-Urteil hat keinen eigenen Pfad');
+  assert.match(src, /vt\.lat\.closureLine/, 'Schliess-Beleg der Latenz-Ebene fehlt');
+  assert.match(src, /CLOSURE_BASIS_KEY/, 'Quelle des Close-Hash wird nicht benannt');
   assert.match(src, /lat\.verdict === "not-recorded" \|\| lat\.verdict === "insufficient-sample"/, 'fehlende Aufzeichnung und duenne Stichprobe sind eine Aussage');
 });
 
@@ -1007,4 +1013,22 @@ test('Scope-Label: die Netz-Formel ist durch die Erfassungs-Formel ersetzt', () 
   assert.doesNotMatch(i18n, /cohortEventNetwork.*?(whole cohort fell|ganze Kohorte fiel)/s, 'die Kohorten-Formel behauptet ein Fallen, gemessen ist Unerfasstsein');
   assert.equal((i18n.match(/'vt\.scope\.network'/g) || []).length, 2, 'das Scope-Label fehlt in einer Sprache');
   assert.equal((i18n.match(/'vt\.tag\.cohortEventNetwork'/g) || []).length, 2, 'die Kohorten-Formel fehlt in einer Sprache');
+});
+
+/* Deklarations-Guard (2026-10-17): TRUTH_STATES wurde im Code benutzt, die Deklaration ging in
+ * 47a5583 verloren - der Overlay warf bei jedem Offnen und zeigte nur 'Trace could not be
+ * loaded.'. Eine Zustands-Menge, die der Code als Wert anfasst, muss im Modul stehen. */
+test('Overlay: jede als Wert benutzte Zustands-Menge ist deklariert', () => {
+  const used = [...new Set([...src.matchAll(/\b([A-Z][A-Z0-9_]{2,})\s*(?:\.has\(|\.map\(|\.filter\(|\.includes\(|\[)/g)].map((m) => m[1]))];
+  const undeclared = used.filter((n) => !new RegExp('(?:export\\s+)?(?:const|let|var)\\s+' + n + '\\b').test(src)
+    && !new RegExp('import[^\\n]*\\b' + n + '\\b').test(traceJs));
+  assert.deepEqual(undeclared, [], 'benutzt ohne Deklaration: ' + undeclared.join(', '));
+});
+
+test('Gegenprobe: die Zustands-Menge ist deklariert, gleich der Lib, jeder Status mit Form', () => {
+  const m = src.match(/const TRUTH_STATES = new Set\(\[([^\]]*)\]\)/);
+  assert.ok(m, 'TRUTH_STATES ist nicht deklariert - die UI kann kein Gegenurteil faerben');
+  const states = m[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  assert.deepEqual(states.slice().sort(), [...TRUTH_VERDICTS].sort(), 'UI-Zustande weichen von TRUTH_VERDICTS der Lib ab');
+  for (const s of [...states, 'none']) assert.ok(cssRules.has('.vt-truth-' + s), 'Status ohne Form: vt-truth-' + s);
 });

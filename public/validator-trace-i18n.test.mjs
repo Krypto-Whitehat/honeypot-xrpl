@@ -19,6 +19,9 @@ const DICT = {
   en: { ...CORE_DICT.en, ...VALIDATOR_DICT.en },
   de: { ...CORE_DICT.de, ...VALIDATOR_DICT.de },
 };
+/* Kern-Woerterbuch im Zustand VOR jeder Anmeldung: statisches HTML wird uebersetzt, bevor das
+ * Overlay registerDict ruft. Ein Key, der hier fehlt, steht roh in der Seite. */
+const CORE_AT_LOAD = { en: { ...CORE_DICT.en }, de: { ...CORE_DICT.de } };
 import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
 import { CAPTURE_GAP_BASES, CAPTURE_EVENT_KINDS } from "../lib/validator-trace.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
@@ -107,6 +110,9 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
   // Empfindlichkeit: das Urteil beantwortet, ob DICH diese Signatur ueberproportional trifft.
   // Ohne Label stünde der rohe Schluessel genau dort, wo Betreiber entscheiden.
+  // Typ-Namen der Vorfaelle: die Ursache-Tabelle schreibt den Typ in eine vt.k.-Zelle. Ohne
+  // Label steht dort der rohe Schluessel - genau dort, wo der Betreiber liest.
+  groups.push(["vt.k.", ["ok", "partial", "missed", "no-quorum", "wrong-hash", "observed", "vote-not-observed"]]);
   groups.push(["vt.sens.verdict.", SENSITIVITY_VERDICTS], ["vt.sens.gap.", SENSITIVITY_GAPS],
     ["vt.sens.head.", SENSITIVITY_HEADLINES], ["vt.sens.family.", SENSITIVITY_FAMILIES]);
   for (const [prefix, values] of groups) {
@@ -176,4 +182,25 @@ test("Labels: der Erfassungs-Zaehler darf kein Netz-Quorum absprechen", () => {
       assert.ok(!/no quorum|kein Quorum|ohne Quorum/i.test(label), k + " (" + lang + ") spricht ein Quorum ab: " + label);
     }
   }
+});
+
+/* Statische Seiten laufen index.html -> app.js -> i18n.mjs. Das Overlay (und damit jedes vt.*)
+ * ist in diesem Moment noch nicht angemeldet, also darf data-i18n auf einer statischen Seite nur
+ * Kern-Keys nennen. vt.openPatterns auf dem Muster-Knopf von index.html zeigte genau deshalb den
+ * rohen Schluessel im Knopftext. */
+test("Statisches HTML: jedes data-i18n nennt einen Kern-Key, kein Overlay-Key", () => {
+  const pages = ["index.html", "about.html", "history-host.html"];
+  const ATTR = /data-i18n(?:-[a-z]+)?="([^"]+)"/g;
+  let seen = 0;
+  for (const page of pages) {
+    const html = readFileSync(path.join(here, page), "utf8");
+    const keys = [...new Set([...html.matchAll(ATTR)].map((m) => m[1]))];
+    assert.ok(keys.length > 10, page + " bringt keine data-i18n-Schluessel zur Pruefung");
+    seen += keys.length;
+    const lazy = keys.filter((k) => k.startsWith("vt."));
+    assert.deepEqual(lazy, [], page + " nennt Overlay-Schluessel an statischem Markup: " + lazy.join(", "));
+    const missing = keys.filter((k) => CORE_AT_LOAD.en[k] === undefined || CORE_AT_LOAD.de[k] === undefined);
+    assert.deepEqual(missing, [], page + " referenziert fehlende Kern-Schluessel: " + missing.join(", "));
+  }
+  assert.ok(seen > 100, "Der Guard sieht die statischen Seiten nicht vollstaendig (gesehen: " + seen + ")");
 });

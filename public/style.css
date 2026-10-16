@@ -3000,7 +3000,7 @@ body[data-a6] {
 .vt-truth small { color: var(--a6-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
 .vt-truth-contradicted { border-color: var(--a6-error); background: var(--a6-error-soft); }
 .vt-truth-consistent { border-color: var(--a6-success); background: var(--a6-success-soft); }
-.vt-truth-none { border-style: dashed; background: var(--a6-surface-alt); }
+.vt-truth-none, .vt-truth-not-comparable { border-style: dashed; background: var(--a6-surface-alt); }
 .vt-scope { color: var(--a6-muted); }
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
@@ -3369,7 +3369,8 @@ body[data-a6] {
 .vt-badge.vt-latv-node-side-late, .vt-badge.vt-latv-mixed { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
 .vt-badge.vt-latv-never-signed { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
 .vt-badge.vt-latv-network-side { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
-.vt-badge.vt-latv-network-only { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-latv-capture-only { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-latv-closure-unproven, .vt-badge.vt-latv-partially-proven { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-badge.vt-latv-not-recorded, .vt-badge.vt-latv-insufficient-sample { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-badge.vt-divv-clean { border-color: var(--a6-success); color: var(--a6-success); }
 .vt-badge.vt-divv-tip-lag { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }

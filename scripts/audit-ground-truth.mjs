@@ -95,6 +95,11 @@ let rows = 0, claims = 0, checked = 0, unreachable = 0;
 let invNeed = 0, invMargin = 0, invLoop = 0, invTop = 0, invHash = 0, staleXc = 0;
 let agree = 0, disagree = 0, openRows = 0, artifactMinSum = 0, incomplete = 0, openNotes = 0;
 let unchecked = 0, singleSource = 0;
+// SCHLIES-BEWEIS JE BEHAUPTUNG. Eine Incident-Zeile ohne Forensik-Zeile war bisher eine offene
+// Frage. Seit dem Claim-Nachtrag (backfill-closure.mjs) hat jede dieser Zeilen einen Hash, den
+// zwei Autoritaeten melden. Gezaehlt wird beides: gedeckt und ungedeckt. Eine Behauptung ohne
+// Schliess-Beweis ist ein Befund, keine Luecke.
+let openLedgers = 0, openProven = 0;
 const openChecks = [];
 
 for (const file of files) {
@@ -105,10 +110,25 @@ for (const file of files) {
   const auditRows = ALL ? stats : claimRows;
   rows += stats.length;
   claims += claimRows.length;
-  openRows += [...flagged].filter((l) => !stats.some((st) => st.l === l)).length;
+  const provenLedgers = new Set();
+  for (const cp of Array.isArray(day.closureProofs) ? day.closureProofs : []) {
+    if (cp && Number.isFinite(cp.l) && typeof cp.ch === "string" && HEX64.test(cp.ch)) provenLedgers.add(cp.l);
+  }
+  const missingLedgers = [...flagged].filter((l) => !stats.some((st) => st.l === l));
+  openRows += missingLedgers.length;
+  // Nur die Quorum-Behauptung braucht den Schliess-Beweis: 'missed' und 'partial' beschreiben
+  // einen Knoten auf einem Ledger, dessen Quorum stand. 'no-quorum' behauptet etwas uebers Netz.
+  const claimFlagged = new Set((Array.isArray(day.incidents) ? day.incidents : [])
+    .filter((i) => i && i.type === "no-quorum").map((i) => i.l));
+  const claimMissing = [...claimFlagged].filter((l) => !stats.some((st) => st.l === l));
+  openLedgers += claimMissing.length;
+  openProven += claimMissing.filter((l) => provenLedgers.has(l)).length;
   say("");
   say("== " + file + " | Forensik-Zeilen " + stats.length + " | Vote-Anspruch (top < need) " + claimRows.length
-    + " | Vorfaelle ohne Forensik-Zeile " + [...flagged].filter((l) => !stats.some((st) => st.l === l)).length);
+    + " | Vorfaelle ohne Forensik-Zeile " + missingLedgers.length
+    + " | Quorum-Behauptungen ohne Forensik-Zeile " + claimMissing.length
+    + " (Schliess-Beweis benannt " + claimMissing.filter((l) => provenLedgers.has(l)).length
+    + ", ohne Beweis " + claimMissing.filter((l) => !provenLedgers.has(l)).length + ")");
 
   // ---------- A) INVARIANZ ----------
   for (const st of stats) {
@@ -225,7 +245,8 @@ console.log("  Invariantzen: need", invNeed, "| Marge", invMargin, "| Rekorder-I
 console.log("  Quellen-Deckung (xrpscan + xrplcluster, Hash/Tx/Close):", agree, "deckungsgleich,", disagree, "abweichend,",
   checked, "geprueft,", singleSource, "einquellig gedeckt,", unchecked, "ungeprueft (Quelle nicht erreichbar)");
 console.log("  Veraltete Gegenpruef-Vermerke (xc):", staleXc, "| offene Vermerke, die live jetzt beantwortet sind:", openNotes);
-console.log("  Vorfaelle ohne Forensik-Zeile (Frage offen, nicht beantwortet):", openRows);
+console.log("  Quorum-Behauptungen ohne Forensik-Zeile:", openLedgers, "| davon mit benanntem Schliess-Beweis (zwei Autoritaeten):", openProven,
+  "| ohne Schliess-Beweis:", openLedgers - openProven);
 console.log("  Nachrechenbare Erfassungs-Luecke ueber alle geschlossenen Zeilen:", artifactMinSum, "Knoten-Ledger");
 console.log("  Zeilen mit gesehenen Stimmen unter Ziel:", incomplete);
 if (problems.length) {

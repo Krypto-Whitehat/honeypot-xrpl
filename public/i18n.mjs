@@ -565,6 +565,7 @@ export const DICT = {
     'pattern.title': 'Network load patterns',
     'validator.title': 'Validator health',
 
+    'validator.patterns': 'Patterns across validators',
     'validator.coverage': 'dUNL coverage: {matched} of {listed} validators from the Ripple validator list (sequence {seq})',
     'validator.coverageFallback': 'dUNL list unavailable – showing {n} validators from registry tags (not verified against the signed list)',
     'validator.hint': 'Agreement scores of the public UNL validators, refreshed every minute',
@@ -1173,6 +1174,7 @@ export const DICT = {
     'pattern.title': 'Netzwerk-Lastmuster',
     'validator.title': 'Validator-Gesundheit',
 
+    'validator.patterns': 'Muster über alle Validatoren',
     'validator.coverage': 'dUNL-Abdeckung: {matched} von {listed} Validatoren aus der Ripple-Validator-Liste (Sequenz {seq})',
     'validator.coverageFallback': 'dUNL-Liste nicht erreichbar – {n} Validatoren aus Registry-Tags (nicht gegen die signierte Liste geprüft)',
     'validator.hint': 'Agreement-Werte der öffentlichen UNL-Validatoren, jede Minute aktualisiert',

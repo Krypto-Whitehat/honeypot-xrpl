@@ -183,8 +183,10 @@ check("need ist nachrechenbar: need = ceil(mm * 0.8)",
 check("Netz-Anker geschrieben: networkQuorum = 28 vom Fixture-Endpunkt",
   dayA.networkQuorum?.quorum === FIX_QUORUM && dayA.networkQuorum?.endpoint === WSS_URL,
   JSON.stringify(dayA.networkQuorum ?? null));
-check("L2 hat no-quorum-Vorfalle bei geschlossenem Ledger",
-  (dayA.incidents ?? []).some((x) => x.l === idx2 && x.type === "no-quorum"));
+check("L2 hat vote-not-observed-Vorfalle bei geschlossenem Ledger (kein Netz-Urteil)",
+  (dayA.incidents ?? []).some((x) => x.l === idx2 && x.type === "vote-not-observed")
+  && !(dayA.incidents ?? []).some((x) => x.l === idx2 && x.type === "no-quorum"),
+  "Typen auf L2: " + [...new Set((dayA.incidents ?? []).filter((x) => x.l === idx2).map((x) => x.type))].join(", "));
 check("L1 hat missed-Vorfall des fehlenden Knotens",
   (dayA.incidents ?? []).some((x) => x.l === idx1 && x.type === "missed" && x.m === missing.master),
   "Knoten " + (missing.domain || missing.master.slice(0, 10)));
