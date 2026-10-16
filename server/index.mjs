@@ -184,6 +184,11 @@ app.get("/api/validator-trace", async (req, res) => {
   }
   const master = String(req.query.master || "");
   const format = String(req.query.format || "");
+  // Die Netz-Referenz je Knoten kommt aus der bereits gecachten Validator-Ansicht: dieselbe
+  // Zahl, die das Panel zeigt, wird gegen die eigene Erfassung gerechnet. Ohne Referenz bleibt
+  // die Gegenprobe offen - sie wird nicht als Entlastung gelesen.
+  const groundMap = await groundTruthMap();
+  const ground = master && groundMap ? groundMap.get(master) ?? null : null;
   const side = await localHistorySide();
   if (master && (format === "csv" || format === "json")) {
     const report = validatorReport(days, master, { range, now: Date.now(), clusters: side.clusters });
@@ -198,8 +203,24 @@ app.get("/api/validator-trace", async (req, res) => {
   // Die Cluster der Betrugs-Historie sind die eine Angriffsseite der Zeit-Ebene; die andere ist
   // der Trace selbst. Ohne sie ist die Ursachen-Engine bei attack-window blind - deshalb stehen
   // die Cluster auch dem Selbst-Report zur Verfuegung.
-  res.json({ available: true, source, days: days.length, historyError: side.historyError, ...traceForValidator(days, master, { range, clusters: side.clusters }) });
+  res.json({ available: true, source, days: days.length, historyError: side.historyError, ...traceForValidator(days, master, { range, clusters: side.clusters, ground, groundPeers: groundMap }) });
 });
+
+// Die Referenz je Knoten aus der Validator-Ansicht (60 s Cache). Fehlend oder ohne Zahl ist
+// kein Befund: die Gegenprobe bleibt offen und wird im Overlay als offen ausgewiesen.
+async function groundTruthMap() {
+  try {
+    const view = await validatorView();
+    const asOfMs = view.updatedAt ?? null;
+    const map = new Map();
+    for (const v of view.validators ?? []) {
+      const a = v.agreement24h ?? {};
+      map.set(v.key, { missed: a.missed ?? null, total: a.total ?? null, score: a.score ?? null,
+        incomplete: a.incomplete === true, asOfMs });
+    }
+    return map;
+  } catch { return null; }
+}
 
 app.get("/api/validators", async (req, res) => {
   try {

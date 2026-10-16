@@ -36,6 +36,9 @@ const CAPTURE_BASES = new Set(["ledger-index", "stream-gap"]);
 // Typ, den dieses Overlay nicht kennt: ohne sie waere ein unbekanntes Ereignis als 'Stream neu
 // aufgebaut' dargestellt - eine Aussage, die nicht belegt ist.
 const CAPTURE_EVENT_KINDS = new Set(["open", "close", "stall"]);
+// Gegenprobe-Zustaende mit denselben Namen wie TRUTH_VERDICTS in lib/validator-truth.mjs:
+// die UI zeigt genau die drei Urteile, die die Lib rechnen kann - kein eigener Zustand, keine
+// eigene Deutung, kein zusaetzlicher Puffer zwischen Messung und Text.
 
 // Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
 // NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
@@ -165,9 +168,19 @@ export function createValidatorTrace(h) {
   const shortKey = (m) => String(m).slice(0, 10) + "…" + String(m).slice(-6);
   const nameOf = (m) => nameMap.get(m) || shortKey(m);
   const PEER_SHOWN = 12;
-  const peerChips = (keys) => {
+  // truth (optional, indexgleich zu keys): das Gegenurteil je Knoten aus der Lib. Ohne es
+  // bleibt der Chip eine reine Namensnennung - mit ihm steht an jedem Knoten, ob die Referenz
+  // seine Abwesenheit traegt oder widerlegt. Der Titel ist der Text, den die Lib rechnet.
+  const peerChips = (keys, truth) => {
     const list = Array.isArray(keys) ? keys : [];
-    const chip = (m) => '<span class="vt-peer">' + h.esc(nameOf(m)) + "</span>";
+    const chip = (m, i) => {
+      const t = Array.isArray(truth) ? truth[i] : null;
+      if (!t) return '<span class="vt-peer">' + h.esc(nameOf(m)) + "</span>";
+      const verdict = TRUTH_STATES.has(t.verdict) ? t.verdict : "not-comparable";
+      const tip = h.t("vt.cq.truth." + verdict, { claims: num(t.claims), ground: num(t.groundMissed),
+        total: num(t.groundTotal), min: num(t.falsePositiveMin) });
+      return '<span class="vt-peer vt-peer-' + verdict + '" title="' + h.esc(tip) + '">' + h.esc(nameOf(m)) + "</span>";
+    };
     const shown = list.slice(0, PEER_SHOWN).map(chip).join("");
     if (list.length <= PEER_SHOWN) return shown;
     const rest = list.slice(PEER_SHOWN).map(chip).join("");
@@ -260,6 +273,23 @@ export function createValidatorTrace(h) {
       body.innerHTML = '<p class="vt-empty">' + h.esc(h.t("vt.error")) + "</p>";
     }
   }
+// Ground-Truth-Gegenprobe je Knoten: die eigene Abwesenheits-Zahl gegen die Zahl, die das
+// Netz fuer denselben Knoten im selben Fenster nennt. Die Differenz ist eine nachrechenbare
+// Untergrenze fuer die eigene Erfassung - keine Deutung, keine Schaetzung. Ohne Referenz
+// steht die Frage offen; sie wird nie als Entlastung gelesen.
+function truthBlock(t) {
+  if (!t) return "";
+  const n = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "–");
+  const state = TRUTH_STATES.has(t.verdict) ? t.verdict : "none";
+  const body = state === "contradicted"
+    ? h.t("vt.truth.contradicted", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal), min: n(t.falsePositiveMin) })
+    : state === "consistent"
+      ? h.t("vt.truth.consistent", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal) })
+      : h.t("vt.truth.none");
+  return '<p class="vt-truth vt-truth-' + state + '"><small>' + h.esc(h.t("vt.truth.title")) + "</small> "
+    + h.esc(body) + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
+}
+
   function renderValidator(body, d) {
     overlay.querySelector("#vt-title").textContent = current.title;
     // xrpscan-Referenz (Agreement-Scores aus der Liste) + Master-Key, damit klar ist,
@@ -293,7 +323,7 @@ export function createValidatorTrace(h) {
     const noData = !d.summary.observed && !(d.incidents || []).length
       ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
       : "";
-    body.innerHTML = keyLine + refLine + coverageLine + scopeTag
+    body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + scopeTag
       + '<div class="vt-cards">' + cards + "</div>" + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.causeTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.causeNote")) + "</p>"
@@ -831,7 +861,7 @@ export function createValidatorTrace(h) {
       if (!Number.isFinite(r.affectedCount)) return "";
       const others = Array.isArray(r.affectedMasters) ? r.affectedMasters : [];
       const body = others.length
-        ? peerChips(others)
+        ? peerChips(others, r.affectedTruth)
         : '<span class="vt-peer vt-peer-none">' + h.esc(h.t("vt.cq.affectedSolo")) + "</span>";
       return '<tr class="vt-cq-affected"><td colspan="7">'
         + '<span class="vt-cq-affected-label">'
@@ -855,8 +885,16 @@ export function createValidatorTrace(h) {
       receptionThin: num(cq.receptionThin ?? 0),
       captureEvents: num(cq.captureEvents ?? 0),
     });
+    // Die Kohorten-Bilanz: benannte Knoten sind nur so viel wert wie die Referenz, die ihre
+    // Abwesenheit traegt. Ohne diese Zeile waere die Namenliste eine Aufzaehlung von Beschuldigten.
+    const peerTruth = cq.affectedTruth && cq.affectedTruth.nodes
+      ? '<p class="vt-cq-peer-truth"><small>' + h.esc(h.t("vt.cq.truth.summary", {
+          nodes: num(cq.affectedTruth.nodes), contradicted: num(cq.affectedTruth.contradicted),
+          consistent: num(cq.affectedTruth.consistent), open: num(cq.affectedTruth.notComparable),
+          min: num(cq.affectedTruth.falsePositiveMin) })) + "</small></p>"
+      : "";
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
-      + '<p class="vt-note">' + h.esc(summary) + "</p>";
+      + '<p class="vt-note">' + h.esc(summary) + "</p>" + peerTruth;
   }
 
   // Last-Ausfall-Kurve: ab welcher Tx-Last dieser Knoten zurueckfaellt und ab welcher die

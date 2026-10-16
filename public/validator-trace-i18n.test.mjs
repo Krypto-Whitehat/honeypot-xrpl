@@ -28,6 +28,7 @@ import { DIVERGENCE_AUTHORITIES, DIVERGENCE_GAPS, DIVERGENCE_GUIDANCE, DIVERGENC
 import { CAUSE_CHECKS, CAUSE_CONFIDENCE, CAUSE_GAPS, CAUSE_KINDS, CAUSE_LAYERS, CAUSE_STRENGTHS, CAUSE_TAGS, UNEXPLAINED } from "../lib/validator-cause.mjs";
 import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from "../lib/validator-quorum-surface.mjs";
 import { SENSITIVITY_FAMILIES, SENSITIVITY_GAPS, SENSITIVITY_HEADLINES, SENSITIVITY_VERDICTS } from "../lib/validator-sensitivity.mjs";
+import { TRUTH_VERDICTS } from "../lib/validator-truth.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -55,7 +56,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
     "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.", "vt.cq.verdict.",
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
-    "vt.cq.basis.", "vt.cq.event.",
+    "vt.cq.basis.", "vt.cq.event.", "vt.cq.truth.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
@@ -90,6 +91,9 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.surface.verdict.", SURFACE_VERDICTS], ["vt.surface.reason.", SURFACE_REASONS],
     ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
     ["vt.cq.verdict.", CQ_VERDICTS],
+    // Die Gegenprobe je Kohorten-Knoten ist ein Urteil, kein Schmuck der Namenliste: jedes
+    // der drei Urteile der Lib muss in beiden Sprachen lesbar sein.
+    ["vt.cq.truth.", [...TRUTH_VERDICTS]],
     // Die Erfassungs-Basis ist Teil des Urteils, nicht eine FuSSnote: 'gemessen an der Index-Folge'
     // und 'gemessen am Luecken-Log' sind verschiedene Belege, und 'not-recorded' hat keinen Beleg -
     // deshalb bekommt dieser Wert bewusst kein Label.

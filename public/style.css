@@ -2994,6 +2994,13 @@ body[data-a6] {
 .vt-key-full { margin: 0 0 6px; font-size: 11px; color: var(--a6-muted); word-break: break-all; }
 .vt-key-full small, .vt-ref small, .vt-coverage small, .vt-scope small { color: var(--a6-muted); text-transform: uppercase; letter-spacing: .06em; margin-right: 6px; font-size: 10px; }
 .vt-ref, .vt-coverage, .vt-scope { margin: 0 0 6px; font-size: 12px; color: var(--a6-ink); }
+/* Ground-Truth-Zeile: das Urteil ueber die eigene Erfassung, nicht ueber den Knoten.
+   Richtung der Gegenprobe als Vollrahmen-Farbe (Design P2: kein Linksbändchen). */
+.vt-truth { margin: 0 0 8px; font-size: 12px; line-height: 1.45; padding: 7px 10px; border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-md); color: var(--a6-body); }
+.vt-truth small { color: var(--a6-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+.vt-truth-contradicted { border-color: var(--a6-error); background: var(--a6-error-soft); }
+.vt-truth-consistent { border-color: var(--a6-success); background: var(--a6-success-soft); }
+.vt-truth-none { border-style: dashed; background: var(--a6-surface-alt); }
 .vt-scope { color: var(--a6-muted); }
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
@@ -3282,6 +3289,13 @@ body[data-a6] {
 .vt-peer-more { display: inline-block; border: 1px dashed var(--a6-line); border-radius: var(--a6-r-sm); background: none; padding: 2px 6px; margin: 3px 0 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); cursor: pointer; }
 .vt-peer-more:hover, .vt-peer-more:focus-visible { color: var(--a6-ink); border-color: var(--a6-ink); outline: none; }
 .vt-peer-none { color: var(--a6-muted); border-style: dashed; }
+/* Kohorten-Chips mit Gegenurteil: ein widerlegter Knoten darf nicht wie ein betroffener
+   aussehen. Der Titel tragt die Zahl, die das Urteil belegt. */
+.vt-peer-contradicted { border-color: var(--a6-error); color: var(--a6-error); background: var(--a6-error-soft); }
+.vt-peer-consistent { border-color: var(--a6-success); color: var(--a6-success); background: var(--a6-success-soft); }
+.vt-peer-not-comparable { border-style: dashed; color: var(--a6-muted); }
+.vt-cq-peer-truth { margin: 6px 0 0; font-size: 12px; line-height: 1.45; padding: 7px 10px; border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-md); color: var(--a6-body); }
+.vt-cq-peer-truth small { color: var(--a6-body); }
 .vt-cq-affected td { text-align: left; background: var(--a6-surface-alt); }
 .vt-cq-affected-label { display: inline-block; margin-right: 6px; color: var(--a6-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-est-note { color: var(--a6-muted); }
