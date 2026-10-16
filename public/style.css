@@ -2979,9 +2979,12 @@ body[data-a6] {
 .vt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .vt-chip { font-size: 11px; padding: 3px 8px; border: 1px solid var(--a6-line-strong); border-radius: var(--a6-r-xs); font-family: var(--a6-mono); }
 .vt-timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.vt-ev { display: grid; grid-template-columns: 180px 150px 130px 1fr; gap: 8px; padding: 6px 8px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); font-size: 12px; font-family: var(--a6-mono); }
-.vt-ev.vt-missed { border-color: var(--a6-sev-suspect); }
-.vt-ev.vt-wrong-hash, .vt-ev.vt-partial { border-color: var(--a6-sev-malicious); }
+/* vt-ev ist zwei Dinge: eine Timeline-Zeile mit vier Spalten und ein Belegtext in einer
+   Hypothese. Ohne Trennung bekam der Belegtext das Spaltenraster der Timeline - seine
+   Zeile stand in einer 180-px-Spalte, während 763 px daneben leer blieben. */
+.vt-timeline .vt-ev { display: grid; grid-template-columns: 180px 150px 130px 1fr; gap: 8px; padding: 6px 8px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); font-size: 12px; font-family: var(--a6-mono); }
+.vt-timeline .vt-ev.vt-missed { border-color: var(--a6-sev-suspect); }
+.vt-timeline .vt-ev.vt-wrong-hash, .vt-timeline .vt-ev.vt-partial { border-color: var(--a6-sev-malicious); }
 .vt-reasons { display: flex; flex-wrap: wrap; gap: 4px; }
 .vt-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .vt-row, .vt-rec { display: flex; justify-content: space-between; gap: 10px; padding: 6px 8px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); font-size: 12px; font-family: var(--a6-mono); }
@@ -2994,7 +2997,7 @@ body[data-a6] {
 .vt-scope { color: var(--a6-muted); }
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
-@media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-ev { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-timeline .vt-ev { grid-template-columns: 1fr 1fr; } .vt-note.vt-table-hint { display: block; } .vt-table { font-size: 10px; } .vt-table th, .vt-table td { padding: 5px 6px; } }
 /* Incident-Profil (3D): ein Prisma je Zeitintervall.
    Geometrie ist abgeleitet statt paarweise gesetzt: --skew = 45deg, --d = max. Tiefe des
    Profils, --dz = --d * tan 45deg (1) = Höhenversatz dieser Tiefe. Die Tiefenfläche ist
@@ -3130,7 +3133,13 @@ body[data-a6] {
    die saemtlichen Kappen sind gleich grosse Flecken ueber unterschiedlich hohen Koerpern. Mit ihr
    sitzt jede Saeule auf einem Koerper, und die Luecken zwischen den Saeulen zeigen, wie weit die
    Ebene nach hinten reicht. Die Zustand-Farbe der Ebene ist dieselbe wie die des Streifens. */
-.vt-base::after { content: ""; position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+/* Die Deckflaeche der Bodenplatte gibt es nur, wo ein Koerper steht. Eine leere Platte mit
+   Scherflaeche ist 6 px Platte + 6,78 px Scherung = 12,78 px hoch, davon 53 % reine Scherung:
+   24 solcher Platten nebeneinander sind kein Grund, sondern ein durchgehender schraeger Band
+   - das war der "schrage" Eindruck im 24-h-Fenster (23 leere Platten, eine Saeule). Tiefe ist
+   hier eine Datenaussage, keine Oberflaechenbehandlung: sie erscheint, wo ein Vorfall steht.
+   Die Platte selbst bleibt in jeder Saule gleich (Farbe = Intervall-Zustand, Zeitachse durchgehend). */
+.vt-col.vt-nonzero .vt-base::after { content: ""; position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-clean .vt-base::after { background: color-mix(in srgb, var(--a6-success) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 55%, transparent); }
 .vt-col.vt-state-solo .vt-base::after { background: color-mix(in srgb, var(--a6-ink) 8%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
 .vt-col.vt-state-cohort .vt-base::after { background: color-mix(in srgb, var(--a6-accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-accent) 70%, transparent); }
@@ -3237,6 +3246,10 @@ body[data-a6] {
 .vt-col:focus-visible { outline: 2px solid var(--a6-focus); outline-offset: 2px; }
 .vt-sub { margin: 0 0 8px; font-size: 11px; color: var(--a6-muted); }
 .vt-rc-list { display: grid; gap: 8px; }
+.vt-rc-rest { display: grid; gap: 8px; margin-top: 8px; }
+.vt-rc-rest[hidden] { display: none; }
+.vt-rc-more { margin-top: 8px; padding: 6px 12px; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: transparent; color: var(--a6-ink); font-family: var(--a6-mono); font-size: 11px; cursor: pointer; }
+.vt-rc-more:hover { border-color: var(--a6-accent); color: var(--a6-accent-text); }
 .vt-rc { border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 10px 12px; background: var(--a6-surface-alt); }
 .vt-rc-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--a6-mono); font-size: 12px; }
 .vt-rc-led { color: var(--a6-ink); font-weight: 650; }
@@ -3251,11 +3264,34 @@ body[data-a6] {
 .vt-rc-metrics li { border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 6px 8px; }
 .vt-rc-metrics small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a6-muted); }
 .vt-rc-metrics b { font-family: var(--a6-mono); font-size: 12px; font-weight: 600; }
+/* Mit-Betroffene je Ledger: erst die Namen machen die Kohorten-Zahl nachvollziehbar. */
+.vt-rc-peers { margin: 8px 0 0; font-size: 11px; color: var(--a6-muted); }
+.vt-rc-peers small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+.vt-peer-group { display: block; }
+.vt-peer-group + .vt-peer-group { margin-top: 6px; }
+.vt-peer { display: inline-block; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 2px 6px; margin: 3px 4px 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-ink); }
+.vt-peer-more { display: inline-block; border: 1px dashed var(--a6-line); border-radius: var(--a6-r-sm); background: none; padding: 2px 6px; margin: 3px 0 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); cursor: pointer; }
+.vt-peer-more:hover, .vt-peer-more:focus-visible { color: var(--a6-ink); border-color: var(--a6-ink); outline: none; }
+.vt-est-note { color: var(--a6-muted); }
+.vt-atk-peers { display: block; }
+/* Breite Tabellen: auf schmalen Screens quetscht nichts die Zellen, es wird horizontal gelesen. */
+.vt-tablewrap { overflow-x: auto; }
+.vt-table-hint { display: none; }
+.vt-sens-head { margin: 0 0 8px; font-size: 12px; }
+.vt-sens-fam { margin: 8px 0 0; font-size: 11px; color: var(--a6-muted); }
+.vt-sensv { font-weight: 600; }
+.vt-sensv-signature-specific { color: var(--a6-sev-suspect); }
+.vt-sensv-signature-network { color: var(--a6-sev-info); }
+.vt-sensv-signature-blind { color: var(--a6-success); }
+.vt-sensv-no-link { color: var(--a6-muted); }
+.vt-sensv-thin-sample, .vt-sensv-no-exposure { color: var(--a6-muted); font-style: italic; }
 .vt-h4 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--a6-muted); font-weight: 650; }
 .vt-hyps, .vt-next { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .vt-hyp { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: 4px 10px; align-items: baseline; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 6px 8px; font-size: 12px; }
 .vt-strength { font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a6-muted); }
 .vt-ev, .vt-lift { grid-column: 1 / -1; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-body); }
+.vt-hyp .vt-ev { display: block; }
+.vt-ev-peers { margin-top: 3px; }
 .vt-hyp.vt-st-measured { border-color: var(--a6-line-strong); background: var(--a6-surface); }
 .vt-hyp.vt-st-measured .vt-strength { color: var(--a6-accent-text); }
 .vt-hyp.vt-st-none { border-style: dashed; }

@@ -53,8 +53,16 @@ export function breadthOf(cohort) {
 export function tagLabel(h, tag) {
   const base = String(tag).split(":")[0];
   const key = "vt.tag." + base;
-  const txt = h.t(key);
-  if (!txt || txt === key) return String(tag);
+  let txt = h.t(key);
+  if (!txt || txt === key) {
+    // Serien-Tags (offline-window, brief-outage, cohort-window) haben ihr Label in der
+    // Urteils-Namensraum-Gruppe vt.verdict.* - ohne diesen Griff stand der Rohname in der
+    // Hypothesenliste, obwohl beide Sprachen lang laengst ein Label fuer genau diesen Tag haben.
+    const alt = "vt.verdict." + base;
+    const altTxt = h.t(alt);
+    txt = altTxt && altTxt !== alt ? altTxt : null;
+  }
+  if (!txt) return String(tag);
   // new-tx-type:<TYP> und type-burst:<TYP> tragen den Typ im Tag - ohne ihn waere die Anzeige
   // eine allgemeine Floskel ohne den eigentlichen Transaktionstyp.
   return base === "new-tx-type" || base === "type-burst" ? txt + " " + String(tag).slice(base.length + 1) : txt;
@@ -137,7 +145,28 @@ export function axisUnit(value, peak) {
 export function createValidatorTrace(h) {
   let overlay = null;
   const tl = (tag) => tagLabel(h, tag);
+  // "1 others" ist kein Deutsch und kein Englisch. Das Zahlwort haengt an der Zahl, nicht an
+  // der Sprache des Lesers - beide Sprachen haben dafuer eigene Schluessel.
+  const otherWord = (n) => h.t(n === 1 ? "vt.otherOne" : "vt.otherMany");
   let current = { mode: "validator", master: null, title: "", range: "24h" };
+  // Master-Key -> Domain. Die Namen kommen aus der bereits gezeichneten Validatorenliste
+  // (live-monitor.mjs): kein zusätzlicher Request, keine erfundene Bezeichnung. Ohne Eintrag
+  // steht der gekuerzte Key da - ein Key ist kein Name.
+  let nameMap = new Map();
+  const shortKey = (m) => String(m).slice(0, 10) + "…" + String(m).slice(-6);
+  const nameOf = (m) => nameMap.get(m) || shortKey(m);
+  const PEER_SHOWN = 12;
+  const peerChips = (keys) => {
+    const list = Array.isArray(keys) ? keys : [];
+    const chip = (m) => '<span class="vt-peer">' + h.esc(nameOf(m)) + "</span>";
+    const shown = list.slice(0, PEER_SHOWN).map(chip).join("");
+    if (list.length <= PEER_SHOWN) return shown;
+    const rest = list.slice(PEER_SHOWN).map(chip).join("");
+    return shown
+      + '<span class="vt-peer-rest" hidden>' + rest + "</span>"
+      + '<button type="button" class="vt-peer-more" data-peer-more>'
+      + h.esc(h.t("vt.peersMore", { n: list.length - PEER_SHOWN })) + "</button>";
+  };
 
   const num = (v) => (Number.isFinite(Number(v)) ? String(Number(v)) : "–");
   const sec = (ms) => (Number.isFinite(ms) ? (Math.round(ms / 100) / 10).toFixed(1) : "–");
@@ -240,7 +269,8 @@ export function createValidatorTrace(h) {
     const w = d.inWindow;
     const src = w || d.summary;
     const scopeTag = w
-      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.inWindow")) + (w.estimated ? " · " + h.esc(h.t("vt.estimated")) : "") + "</small></p>"
+      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.inWindow")) + (w.estimated ? " · " + h.esc(h.t("vt.estimated")) : "")
+        + (w.observedDayOnly > 0 ? " · " + h.esc(h.t("vt.inWindowDayOnly", { ledgers: w.observedDayOnly, days: w.daysPartial ?? 0 })) : "") + "</small></p>"
       : '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small></p>";
     const cards = [["ok", src.ok], ["partial", src.partial], ["missed", src.missed], ["no-quorum", src.noQuorum ?? 0], ["wrong-hash", src.wrongHash], ["observed", src.observed]]
       .map(([k, v]) => '<div class="vt-card vt-' + k + '"><small>' + h.esc(h.t("vt.k." + k)) + "</small><b>" + h.esc(String(v)) + "</b></div>").join("");
@@ -264,7 +294,7 @@ export function createValidatorTrace(h) {
       + '<h3 class="vt-h">' + h.esc(h.t("vt.divTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.divNote")) + "</p>"
       + divergenceBlock(d.divergence)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.retraceTitle")) + "</h3>"
-      + '<p class="vt-sub">' + h.esc(h.t("vt.retraceNote")) + "</p>" + retraceBlock(d.retrace)
+      + '<p class="vt-sub">' + h.esc(h.t("vt.retraceNote")) + "</p>" + retraceBlock(d.retrace, d.retraceTotal)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.fpTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.fpNote")) + "</p>"
       + fingerprintBlock(d.diagnosis && d.diagnosis.fingerprint)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.cqTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.cqNote")) + "</p>"
@@ -273,6 +303,8 @@ export function createValidatorTrace(h) {
       + loadCurveBlock(d.diagnosis && d.diagnosis.load, true)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.riskTitle")) + "</h3>"
       + '<p class="vt-sub">' + h.esc(h.t("vt.riskNote")) + "</p>" + riskBlock(d.risk)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.sensTitle")) + "</h3>"
+      + '<p class="vt-sub">' + h.esc(h.t("vt.sensIntro")) + "</p>" + sensitivityBlock(d.sensitivity)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.patterns")) + "</h3>" + chips(d.patterns)
       + gapsBlock(d.gaps)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.timeline")) + "</h3>" + timeline(d.incidents);
@@ -392,9 +424,12 @@ export function createValidatorTrace(h) {
       const style = "--n:" + axisUnit(cell.total, peak).toFixed(3) + ";--i:" + i
         + (stops.length ? ";--vt-grad:linear-gradient(to top," + stops.join(",") + ")" : "")
         + (cap ? ";--vt-cap:var(--vt-" + cap + ")" : "");
+      const est = cell.ledgersEstimated > 0
+        ? " . " + h.t(cell.ledgers > 0 ? "vt.bucketLedgersEstimated" : "vt.bucketLedgersOnlyEstimated",
+          { n: num(cell.ledgersEstimated) }) : "";
       return '<div class="vt-col vt-state-' + state + (cell.total ? " vt-nonzero" : "") + '" tabindex="0" role="group" style="' + style + '" data-tip="'
-        + h.esc(h.t("vt.bucketReadout", args) + (topTags ? " . " + topTags : "")) + '" aria-label="'
-        + h.esc(h.t("vt.bucketAria", args)) + '">'
+        + h.esc(h.t("vt.bucketReadout", args) + (topTags ? " . " + topTags : "") + est) + '" aria-label="'
+        + h.esc(h.t("vt.bucketAria", args) + est) + '">'
         + '<span class="vt-base" aria-hidden="true"></span>'
         + '<div class="vt-bar">'
         + (cell.total ? '<span class="vt-side" aria-hidden="true"></span><span class="vt-top" aria-hidden="true"></span>' : "")
@@ -419,6 +454,10 @@ export function createValidatorTrace(h) {
     const shapeNote = shapeLayer
       ? h.t("vt.signCoverage", { seen: num(coverage.shapeSeen), missing: num(coverage.shapeMissing) })
       : h.t("vt.signAbsent");
+    // Der Nenner des Profils ist nicht ueberall gemessen: Tage ohne Stunden-Buckets liefern
+    // Ledger auf Tages-Koernung. Diese Zahl gehoert unters Profil, nicht in eine Fussnote.
+    const estNote = profile.estimatedLedgers > 0
+      ? h.t("vt.profileLedgersEstimated", { n: num(profile.estimatedLedgers) }) : "";
     return '<div class="vt-profile" style="--peak:' + peak + ';--dmax:' + depthRatio.toFixed(4) + '">'
       + '<div class="vt-profile-top"><p class="vt-profile-meta">' + h.esc(meta) + "</p>"
       + '<p class="vt-readout" id="vt-readout" aria-live="polite">' + h.esc(h.t("vt.profileHint")) + "</p></div>"
@@ -430,7 +469,9 @@ export function createValidatorTrace(h) {
       + '<ul class="vt-legend">' + legendHtml + "</ul>"
       + '<ul class="vt-legend vt-heat-legend">' + stateLegend + "</ul>"
       + '<ul class="vt-legend vt-sign-legend">' + signLegend + "</ul>"
-      + '<p class="vt-note vt-sign-note">' + h.esc(shapeNote) + "</p></div>";
+      + '<p class="vt-note vt-sign-note">' + h.esc(shapeNote) + "</p>"
+      + (estNote ? '<p class="vt-note vt-est-note">' + h.esc(estNote) + "</p>" : "")
+      + "</div>";
   }
 
   function evidenceText(hy) {
@@ -439,7 +480,16 @@ export function createValidatorTrace(h) {
     if (hy.tag === "hash-split") return h.t("vt.evSplit", { runner: num(e.runnerVotes), votes: num(e.votes) });
     if (hy.tag === "load-spike" || hy.tag === "load-extreme") return h.t("vt.evLoad", { tx: num(e.txCount), med: num(e.medianTx), ratio: fac(e.ratio) });
     if (hy.tag === "close-gap") return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) });
-    if (hy.tag === "cohort-event") return h.t("vt.evCohort", { n: num(e.affectedValidators), others: num(e.others) });
+    if (hy.tag === "cohort-event") {
+      // "19 andere" ist nur die Hälfte der Aussage: erst der gleiche Vorfallstyp zeigt, ob
+      // dieselben Knoten auf demselben Ledger dasselbe Problem hatten.
+      const same = Array.isArray(e.sameTypeMasters) ? e.sameTypeMasters.length : null;
+      const word = otherWord(e.others || 0);
+      if (same === null) return h.t("vt.evCohort", { n: num(e.affectedValidators), others: num(e.others), otherWord: word });
+      return same === (e.others || 0)
+        ? h.t("vt.evCohortAll", { n: num(e.affectedValidators), others: num(e.others), otherWord: word })
+        : h.t("vt.evCohortSame", { n: num(e.affectedValidators), others: num(e.others), same: num(same), otherWord: word });
+    }
     if (hy.tag === "drainer-fanout") return h.t("vt.evFanout", { fanout: num(e.fanoutAccounts), txs: num(e.fanoutTxs), ledgerTx: num(e.ledgerTx) });
     if (hy.tag === "sender-burst") return h.t("vt.evBurst", { accountTx: num(e.accountTx), share: pcn(e.share * 100) });
     if (hy.tag === "failure-spike") return h.t("vt.evFailure", { failed: num(e.failed), share: pcn(e.share * 100) });
@@ -456,7 +506,9 @@ export function createValidatorTrace(h) {
   // Ein Retrace-Karton: Messwerte, gereihte Hypothesen mit Stärke, Prüfschritte, Datenlücken.
   function retraceCard(r) {
     const a = r.affected || {};
-    const cohort = (a.missed || 0) + (a.partial || 0) + (a.wrongHash || 0);
+    // noQuorum mitzählen: auf einem Netz-Ledger ist "nicht abgestimmt" die Abweichung
+    // der anderen Knoten. Ohne sie steht "0 Validatoren betroffen" neben "19 andere".
+    const cohort = (a.missed || 0) + (a.partial || 0) + (a.wrongHash || 0) + (a.noQuorum || 0);
     const q = r.quorum || null;
     const l = r.load || null;
     const metrics = [];
@@ -464,16 +516,41 @@ export function createValidatorTrace(h) {
     if (q && Number.isFinite(q.runnerVotes) && q.runnerVotes > 0) metrics.push(["vt.metric.split", h.t("vt.mSplit", { runner: num(q.runnerVotes), votes: num(q.votes) })]);
     if (l && Number.isFinite(l.txCount)) metrics.push(["vt.metric.load", h.t("vt.mLoad", { tx: num(l.txCount), med: num(l.medianTx), ratio: fac(l.ratio) })]);
     if (Number.isFinite(r.closeGapMs)) metrics.push(["vt.metric.gap", h.t("vt.mGap", { gap: sec(r.closeGapMs) })]);
-    metrics.push(["vt.metric.cohort", h.t("vt.mCohort", { n: num(cohort), others: num(a.others) })]);
+    metrics.push(["vt.metric.cohort", h.t("vt.mCohort", { n: num(cohort), others: num(a.others), otherWord: otherWord(a.others) })]);
     const metricHtml = metrics.map(([labelKey, value]) => '<li><small>' + h.esc(h.t(labelKey)) + "</small><b>" + h.esc(value) + "</b></li>").join("");
+    // Wer sonst auf diesem Ledger fiel: erst die Keys machen die Zahl nachvollziehbar.
+    // Gleichfallende Knoten sind die Spur auf gemeinsame Infrastruktur, denselben Anbieter oder
+    // dieselben Knoten, die immer zusammen ausfallen - das ist der Retrace-Anfang.
+    const peers = Array.isArray(a.peerMasters) ? a.peerMasters : [];
+    const samePeers = Array.isArray(a.sameTypeMasters) ? a.sameTypeMasters : [];
+    const otherPeers = Array.isArray(a.otherTypeMasters) ? a.otherTypeMasters : [];
+    const peerGroup = (labelKey, list) => '<span class="vt-peer-group"><small>' + h.esc(h.t(labelKey, { n: num(list.length) })) + "</small> " + peerChips(list) + "</span>";
+    const groups = [];
+    if (samePeers.length) groups.push(peerGroup("vt.peersLineSame", samePeers));
+    if (otherPeers.length) groups.push(peerGroup("vt.peersLineOther", otherPeers));
+    const peerLine = !peers.length ? "" : groups.length
+      ? '<p class="vt-rc-peers">' + groups.join("") + "</p>"
+      : '<p class="vt-rc-peers"><small>' + h.esc(h.t("vt.peersLine", { n: peers.length })) + "</small> " + peerChips(peers) + "</p>";
     const hyps = (r.hypotheses || []).map((hy) => {
       const lift = hy.lift && hy.lift.reliable && Number.isFinite(hy.lift.lift)
         ? h.t("vt.liftVal", { lift: fac(hy.lift.lift), with: pcn(hy.lift.rateWith * 100), without: pcn(hy.lift.rateWithout * 100) })
         : "";
       const ev = evidenceText(hy);
-      return '<li class="vt-hyp vt-st-' + h.esc(hy.strength) + '"><b>' + h.esc(tl(hy.tag)) + "</b>"
+      // Netzweit heißt dieselbe Messung anderes als "mehrere": hier fiel die ganze Kohorte.
+      const label = hy.tag === "cohort-event" && r.scope === "network"
+        ? h.t("vt.tag.cohortEventNetwork") : tl(hy.tag);
+      // Die Kohorten-Zahl ohne Namen ist eine Häufung ohne Spur: erst die Keys zeigen,
+      // ob dieselben Knoten immer zusammen fallen (Anbieter, Infrastruktur, Peering).
+      // Genannt werden die Knoten mit demselben Vorfallstyp - die Vergleichsgruppe, nach der
+      // der Betreiber suchen soll. Andere Typen stehen in der Peer-Zeile des Kartons.
+      const peerList = Array.isArray(hy.evidence?.sameTypeMasters)
+        ? hy.evidence.sameTypeMasters
+        : (Array.isArray(hy.evidence?.peerMasters) ? hy.evidence.peerMasters : []);
+      const hypPeers = peerList.length ? '<span class="vt-ev vt-ev-peers">' + peerChips(peerList) + "</span>" : "";
+      return '<li class="vt-hyp vt-st-' + h.esc(hy.strength) + '"><b>' + h.esc(label) + "</b>"
         + '<span class="vt-strength">' + h.esc(h.t("vt.strength." + hy.strength)) + "</span>"
         + (ev ? '<span class="vt-ev">' + h.esc(ev) + "</span>" : "")
+        + hypPeers
         + (lift ? '<span class="vt-lift">' + h.esc(lift) + "</span>" : "") + "</li>";
     }).join("");
     const next = (r.guidance || []).map((g) => "<li>" + h.esc(h.t("vt.g." + g)) + "</li>").join("");
@@ -485,19 +562,27 @@ export function createValidatorTrace(h) {
       + '<span class="vt-badge vt-type-' + h.esc(r.type) + '">' + h.esc(h.t("vt.type." + r.type)) + "</span>"
       + '<span class="vt-badge vt-scope-' + h.esc(r.scope) + '">' + h.esc(h.t("vt.scope." + r.scope)) + "</span></header>"
       + seriesLine(r.series)
-      + '<ul class="vt-rc-metrics">' + metricHtml + "</ul>"
+      + '<ul class="vt-rc-metrics">' + metricHtml + "</ul>" + peerLine
       + '<h4 class="vt-h4">' + h.esc(h.t("vt.hypotheses")) + '</h4><ul class="vt-hyps">' + hyps + "</ul>"
       + (next ? '<h4 class="vt-h4">' + h.esc(h.t("vt.nextCheck")) + '</h4><ul class="vt-next">' + next + "</ul>" : "")
       + (gaps ? '<p class="vt-rc-gaps"><small>' + h.esc(h.t("vt.dataGaps")) + "</small> " + h.esc(gaps) + "</p>" : "")
       + "</article>";
   }
 
-  function retraceBlock(rows) {
+  function retraceBlock(rows, total) {
     if (!Array.isArray(rows) || !rows.length) return '<p class="vt-empty">' + h.esc(h.t("vt.noRetrace")) + "</p>";
     const shown = rows.slice(0, RETRACE_SHOWN);
-    const more = rows.length > shown.length
-      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.retraceShowing", { shown: shown.length, total: rows.length })) + "</small></p>" : "";
-    return '<div class="vt-rc-list">' + shown.map(retraceCard).join("") + "</div>" + more;
+    // Die Antwort kann mehr Vorfaelle haben als Karten gesendet werden (retraceTotal). Ohne die
+    // Gesamtzahl wirkt "12 von 12" vollständig, obwohl 8.609 Vorfälle dahinter liegen.
+    const rest = rows.slice(RETRACE_SHOWN);
+    const notes = [];
+    if (rest.length) notes.push(h.t("vt.retraceShowing", { shown: shown.length, total: num(rows.length) }));
+    if (Number.isFinite(total) && total > rows.length) notes.push(h.t("vt.retraceCapped", { sent: num(rows.length), total: num(total) }));
+    const noteHtml = notes.length ? '<p class="vt-scope"><small>' + notes.map((n) => h.esc(n)).join(" · ") + "</small></p>" : "";
+    const moreBtn = rest.length ? '<button type="button" class="vt-rc-more">' + h.esc(h.t("vt.retraceMore", { n: num(rest.length) })) + "</button>" : "";
+    return '<div class="vt-rc-list">' + shown.map(retraceCard).join("") + "</div>"
+      + (rest.length ? '<div class="vt-rc-rest" hidden>' + rest.map(retraceCard).join("") + "</div>" : "")
+      + moreBtn + noteHtml;
   }
 
   // Risikoprofil: Ausfallrate mit Anomalie gegen Ausfallrate ohne Anomalie. Zu kleine
@@ -513,9 +598,46 @@ export function createValidatorTrace(h) {
       + "<td>" + h.esc(pc(r.rateWith === null ? null : r.rateWith * 100)) + "</td>"
       + "<td>" + h.esc(pc(r.rateWithout === null ? null : r.rateWithout * 100)) + "</td>"
       + "<td>" + h.esc(Number.isFinite(r.lift) ? "×" + fac(r.lift) : "–") + "</td></tr>").join("");
+    // Die Grundlage benennt auch, WELCHE Tage in die Vergleichung gehen: nur Tage mit
+    // Signatur-Ebene. Tage ohne sie sind Luecke, nicht "geprueft und nichts gefunden".
+    const rc = risk.coverage || {};
+    const basis = Number.isFinite(rc.daysWithAnomaly)
+      ? " " + h.t("vt.riskBasis", { with: num(rc.daysWithAnomaly), without: num(rc.daysWithoutAnomaly ?? 0) }) : "";
     const note = h.t("vt.riskBase", { ledgers: num(risk.totalLedgers), fails: num(risk.incidentLedgers) })
-      + (risk.statsTruncated ? " " + h.t("vt.riskTrunc") : "");
+      + basis + (risk.statsTruncated ? " " + h.t("vt.riskTrunc") : "");
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + '<p class="vt-note">' + h.esc(note) + "</p>";
+  }
+
+  // Signatur-Empfindlichkeit: auf welchen Ledger-Signaturen faellt DIESER Knoten ueberproportional
+  // zurueck - und tun die anderen Knoten desselben Fensters dasselbe? Die Risikolehne oben
+  // antwortet auf "wie oft faellt ein Ledger mit dieser Signatur ueberhaupt" (Netzlage). Erst die
+  // Kohorten-Gegenprobe trennt Knotenproblem von Netzstockung von Last auf einer Transaktionsform.
+  function sensitivityBlock(s) {
+    if (!s || !Array.isArray(s.rows) || !s.rows.length) return '<p class="vt-empty">' + h.esc(h.t("vt.sensNone")) + "</p>";
+    const head = ["vt.sens.hTag", "vt.sens.hExp", "vt.sens.hFails", "vt.sens.hOwn", "vt.sens.hLift", "vt.sens.hCohort", "vt.sens.hVerdict"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rows = s.rows.map((r) => "<tr" + (r.measurable ? "" : ' class="vt-thin"') + ">"
+      + '<th scope="row">' + h.esc(tl(r.tag)) + "</th>"
+      + "<td>" + h.esc(num(r.exposureLedgers)) + "</td>"
+      + "<td>" + h.esc(num(r.fails)) + "</td>"
+      + "<td>" + h.esc(pc(r.rateWith === null ? null : r.rateWith * 100)) + " / " + h.esc(pc(r.rateWithout === null ? null : r.rateWithout * 100)) + "</td>"
+      + "<td>" + h.esc(Number.isFinite(r.lift) ? "×" + fac(r.lift) : "–") + "</td>"
+      + "<td>" + h.esc(Number.isFinite(r.cohortLift) ? "×" + fac(r.cohortLift) + " · " + num(r.cohortPeers) : "–") + "</td>"
+      + '<td class="vt-sensv vt-sensv-' + h.esc(r.verdict) + '">' + h.esc(h.t("vt.sens.verdict." + r.verdict)) + "</td></tr>").join("");
+    const cov = s.coverage || {};
+    const gapText = (s.gaps || []).map((g) => h.t("vt.sens.gap." + g)).join(" · ");
+    const note = h.t("vt.sensNote", {
+      ledgers: num(cov.ledgers), with: num(cov.daysWithAnomaly), without: num(cov.daysWithoutAnomaly), peers: num(cov.peers),
+    }) + (gapText ? " " + h.t("vt.sensGaps", { gaps: gapText }) : "");
+    const hv = (s.headline && s.headline.verdict) || "thin";
+    const chips = ((s.headline && s.headline.tags) || []).slice(0, 6).map((t) => '<span class="vt-chip">' + h.esc(tl(t)) + "</span>").join("");
+    const headline = '<p class="vt-sens-head"><b>' + h.esc(h.t("vt.sens.head." + hv)) + "</b>" + chips + "</p>";
+    const fams = (s.families || []).map((f) => '<span class="vt-chip">' + h.esc(h.t("vt.sens.family." + f.family)) + " " + num(f.specific) + "/" + num(f.tags) + "</span>").join("");
+    const famLine = fams ? '<p class="vt-sens-fam"><small>' + h.esc(h.t("vt.sens.famLabel")) + "</small> " + fams + "</p>" : "";
+    return headline + '<div class="vt-tablewrap"><table class="vt-table vt-sens-table"><thead><tr>' + head
+      + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + '<p class="vt-note vt-table-hint">' + h.esc(h.t("vt.tableScroll")) + "</p></div>" + famLine
       + '<p class="vt-note">' + h.esc(note) + "</p>";
   }
 
@@ -526,7 +648,10 @@ export function createValidatorTrace(h) {
     const rows = a.signals.map((s) => '<li class="vt-atk"><span class="vt-atk-led">' + h.esc(h.t("vt.ledger")) + " #" + h.esc(String(s.ledgerIndex)) + "</span>"
       + '<span class="vt-atk-when">' + h.esc(stamp(s.timeMs)) + " UTC</span>"
       + '<span class="vt-atk-n">' + h.esc(h.t("vt.attackAffected", { n: num(s.affectedValidators) })) + "</span>"
-      + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span></li>").join("");
+      + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span>"
+      + (Array.isArray(s.masters) && s.masters.length
+        ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")
+      + "</li>").join("");
     return '<p class="vt-scope"><small>' + h.esc(h.t("vt.attackThreshold", { n: num(a.threshold), total: num(a.total) })) + "</small></p>"
       + '<ul class="vt-list vt-atk-list">' + rows + "</ul>";
   }
@@ -704,17 +829,28 @@ export function createValidatorTrace(h) {
       observed: num(s.observed), own: num(peer.own.failures), ownRate: rate(peer.own.rate),
       peers: num(pr.count), median: rate(pr.medianRate), p90: rate(pr.p90Rate), pooled: rate(pr.pooledRate),
     })];
-    lines.push(h.t("vt.peer.rank", {
-      percentile: pcn(cmp.percentile * 100), above: num(cmp.peersAbove), excess: num(cmp.excessFailures),
+    lines.push(h.t("vt.peer.rank", { percentile: pcn(cmp.percentile * 100), above: num(cmp.peersAbove) }));
+    // Vor der Grundrate und ueber der Grundrate sind verschiedene Aussagen: ein negatives excess
+    // als "ueber der Grundrate" zu lesen ist das Gegenteil von dem, was gemessen wurde.
+    if (Number.isFinite(cmp.excessFailures)) lines.push(cmp.excessFailures < 0
+      ? h.t("vt.peer.excessBelow", { excess: num(Math.abs(cmp.excessFailures)) })
+      : h.t("vt.peer.excessAbove", { excess: num(cmp.excessFailures) }));
+    // p unter der Rundungsgrenze als 0,0000 zu zeigen liest sich wie Gewissheit - es ist die
+    // Nachweisgrenze der Naeherung, kein Beweis.
+    if (Number.isFinite(cmp.z)) lines.push(h.t("vt.peer.z", {
+      z: fac(cmp.z), p: !Number.isFinite(cmp.pValue) ? "–" : cmp.pValue < 1e-4 ? "< 0.0001" : cmp.pValue.toFixed(4),
     }));
-    if (Number.isFinite(cmp.z)) lines.push(h.t("vt.peer.z", { z: fac(cmp.z), p: Number.isFinite(cmp.pValue) ? cmp.pValue.toFixed(4) : "–" }));
+    if (cmp.direction) lines.push(h.t("vt.peer.direction." + cmp.direction));
     lines.push(h.t("vt.peer.cohort", {
       solo: num(co.solo), shared: num(co.shared), unrecorded: num(co.unrecorded),
       share: Number.isFinite(co.soloShare) ? pcn(co.soloShare * 100) : "–",
       max: Number.isFinite(co.maxCohort) ? num(co.maxCohort) : "–",
     }));
     lines.push(h.t("vt.peer.network", { own: num(nq.ownNoQuorum), ownRate: rate(nq.ownNoQuorumRate), peerMedian: rate(nq.peerMedianNoQuorumRate) }));
-    if (s.estimated) lines.push(h.t("vt.peer.estimated", { days: num(s.daysDaily) }));
+    if (s.estimated) lines.push(h.t("vt.peer.estimated", {
+      ledgers: num(s.observedDaily), observed: num(s.observed),
+      legacyDays: num(s.daysDaily), partialDays: num(s.daysPartial ?? 0),
+    }));
     const alone = (peer.aloneHours || []).slice(0, 6).map((a) => "<li>" + h.esc(h.t("vt.peer.aloneLine", {
       hour: hourLabel(a.hourMs), own: num(a.ownFailures), peers: num(a.observedPeers), ledgers: num(a.ledgers),
     })) + "</li>").join("");
@@ -915,6 +1051,7 @@ export function createValidatorTrace(h) {
     const rhead = ["vt.cause.hLedger", "vt.cause.hType", "vt.cause.hVerdict", "vt.cause.hConfidence",
       "vt.cause.hLayers", "vt.cause.hCheck"]
       .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rowTotal = Number.isFinite(c.rowTotal) && c.rowTotal >= c.rows.length ? c.rowTotal : c.rows.length;
     const rrows = c.rows.slice(0, CAUSE_ROWS).map((r) => "<tr>"
       + '<th scope="row">#' + h.esc(num(r.ledgerIndex)) + "</th>"
       + "<td>" + h.esc(h.t("vt.k." + r.type)) + "</td>"
@@ -924,9 +1061,10 @@ export function createValidatorTrace(h) {
       + "<td>" + h.esc((r.nextCheck || []).slice(0, 2).map((k) => h.t("vt.cause." + k)).join(" · ") || "–") + "</td>"
       + "</tr>").join("");
     const rowsBlock = c.rows.length
-      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.cause.rowsTitle")) + '</h4><table class="vt-table vt-cause-rows"><thead><tr>'
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.cause.rowsTitle")) + '</h4><div class="vt-tablewrap"><table class="vt-table vt-cause-rows"><thead><tr>'
         + rhead + "</tr></thead><tbody>" + rrows + "</tbody></table>"
-        + (c.rows.length > CAUSE_ROWS ? '<p class="vt-note">' + h.esc(h.t("vt.cause.rowsMore", { shown: CAUSE_ROWS, total: c.rows.length })) + "</p>" : "")
+        + '<p class="vt-note vt-table-hint">' + h.esc(h.t("vt.tableScroll")) + "</p></div>"
+        + (rowTotal > CAUSE_ROWS ? '<p class="vt-note">' + h.esc(h.t("vt.cause.rowsMore", { shown: CAUSE_ROWS, total: num(rowTotal) })) + "</p>" : "")
       : '<p class="vt-empty">' + h.esc(h.t("vt.cause.rowsNone")) + "</p>";
     const gaps = Object.keys(c.gapTally || {}).sort().map((g) => h.t("vt.cause.gap." + g) + " (" + num(c.gapTally[g]) + ")").join(" · ");
     const gapLine = gaps ? '<p class="vt-note">' + h.esc(gaps) + "</p>" : "";
@@ -1225,6 +1363,23 @@ export function createValidatorTrace(h) {
 
   // Readout-Zeile: dieselbe Information wie der Tooltip, aber für Tastatur und Screenreader.
   function wire(body) {
+    // Aeltere Vorfaelle waren bisher unerreichbar: gezeichnet wurden 12 Karten, gesendet werden
+    // mehr. Aufdecken kostet keine neue Anfrage - die Karten sind schon in der Antwort.
+    const more = body.querySelector(".vt-rc-more");
+    if (more) {
+      more.addEventListener("click", () => {
+        const hidden = body.querySelector(".vt-rc-rest");
+        if (hidden) hidden.hidden = false;
+        more.remove();
+      });
+    }
+    body.querySelectorAll("[data-peer-more]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const rest = btn.parentElement && btn.parentElement.querySelector(".vt-peer-rest");
+        if (rest) rest.hidden = false;
+        btn.remove();
+      });
+    });
     const readout = body.querySelector("#vt-readout");
     if (!readout) return;
     body.querySelectorAll(".vt-col").forEach((col) => {
@@ -1234,11 +1389,19 @@ export function createValidatorTrace(h) {
     });
   }
 
-  function openValidator(master, title, ref) {
+  // names: Map (oder Array von [master, domain]) aus der bereits gezeichneten Validatorenliste.
+  // Wer ohne Namen aufgerufen wird, sieht gekuerzte Keys - nie eine erfundene Bezeichnung.
+  function rememberNames(names) {
+    if (names instanceof Map) nameMap = names;
+    else if (Array.isArray(names)) nameMap = new Map(names);
+  }
+  function openValidator(master, title, ref, names) {
+    rememberNames(names);
     current = { mode: "validator", master, title: title || master.slice(0, 14) + "…", range: "24h", ref: ref || null };
     load();
   }
-  function openPatterns() {
+  function openPatterns(names) {
+    rememberNames(names);
     current = { mode: "patterns", master: null, title: "", range: "24h" };
     load();
   }

@@ -36,6 +36,7 @@ import { LATENCY_VERDICTS } from '../lib/validator-vote-latency.mjs';
 import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
+import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, rel), 'utf8');
@@ -777,4 +778,123 @@ test('Risikoflaeche: Block, heisse Bande, duenne Zeile und jede Achsen-Aussage i
     'ein Urteil und keine Messung sind dieselbe Farbe');
   assert.notEqual(badgeToken('vt-surfv-load-bound'), badgeToken('vt-surfv-quorum-bound'),
     'Last und Quorum-Reserve sind verschiedene naechste Pruefungen');
+});
+
+/* Empfindlichkeits-Ebene: die Kohorten-Gegenprobe erst trennt Knotenproblem von Netzstockung
+ * und Last auf einer Transaktionsform. Guard ist die Verdrahtung - Block an der Trace-Antwort,
+ * jedes Urteil in eigener Farbe, jede Messluecke als Text, duenne Zeile als eigener Zustand. */
+test('Empfindlichkeits-Ebene: Block, jede Urteil-Farbe und jede Messluecke ist verdrahtet', () => {
+  assert.match(src, /function sensitivityBlock\(s\)/, 'sensitivityBlock fehlt im Overlay');
+  assert.match(src, /sensitivityBlock\(d\.sensitivity\)/, 'sensitivityBlock haengt nicht an der Trace-Antwort');
+  assert.match(src, /h\.t\("vt\.sens\.verdict\." \+ r\.verdict\)/, 'Urteil ohne Label-Präfix');
+  assert.match(src, /h\.t\("vt\.sens\.gap\." \+ g\)/, 'Messlücke ohne Label');
+  assert.match(src, /h\.t\("vt\.sens\.head\." \+ hv\)/, 'Form-Urteil ohne Label');
+  assert.match(src, /h\.t\("vt\.sens\.family\." \+ f\.family\)/, 'Prüffamilie ohne Label');
+  for (const v of SENSITIVITY_VERDICTS) assert.ok(cssRules.has('.vt-sensv-' + v), 'Urteils-Farbe fehlt: ' + v);
+  // Duenne Stichprobe ist ein Zeilenzustand, nicht eine Rate von 0.
+  assert.match(src, /r\.measurable \? "" : ' class="vt-thin"'/, 'Zeile ohne duennen Zustand');
+  assert.ok(cssRules.has('.vt-table tr.vt-thin td'), 'duenne Zeile ohne Markierung');
+  // Ohne den Kohorten-Lift daneben ist das eigene Urteil kein Gegenbeweis.
+  assert.match(src, /r\.cohortLift/, 'Kohorten-Lift fehlt in der Tabelle');
+  assert.match(src, /vt\.sensNote/, 'Messbasis (Ledger, Tage mit/ohne Signatur, Peers) fehlt');
+  assert.match(src, /vt\.sensGaps/, 'Messlücken werden nicht benannt');
+  // Sieben Spalten auf schmalem Schirm: ohne Ueberlauf fehlt die Urteilsspalte.
+  assert.ok(cssRules.has('.vt-tablewrap'), 'Tabellen-Ueberlauf fehlt');
+  assert.ok(cssRules.has('.vt-table-hint'), 'Hinweis auf den Ueberlauf fehlt');
+  // Die Basis-Regel steht SPAETER als die Media-Regel; ohne hoehere Spezifik gewinnt sie und der
+  // Hinweis bleibt auf dem Handy versteckt, obwohl die Tabelle quer scrollbar ist.
+  assert.match(ruleBody('.vt-note.vt-table-hint'), /display:\s*block/, 'Hinweis auf schmalem Schirm von der Basis-Regel erschlagen');
+  assert.notEqual(ruleBody('.vt-sensv-signature-specific'), ruleBody('.vt-sensv-signature-network'),
+    'Knotenproblem und Kohortenstockung sind dieselbe Farbe');
+  assert.notEqual(ruleBody('.vt-sensv-signature-blind'), ruleBody('.vt-sensv-signature-specific'),
+    'blind dagegen und koppelnd an deinen Knoten sind dieselbe Farbe');
+});
+
+/* Kohorten-Namen (2026-10-16): "6 Validatoren betroffen" ohne die Knoten ist keine Retrace-Spur.
+ * Guard ist die Verdrahtung der dUNL-Namen in Retrace-Zeile und Sammelblock. */
+test('Kohorten-Namen: Retrace und Sammelblock nennen die betroffenen dUNL-Knoten', () => {
+  assert.match(src, /const peerChips = \(/, 'peerChips fehlt - Peer-Namen haben keinen gemeinsamen Aufbau');
+  assert.match(src, /peerChips\(peers\)/, 'Retrace-Zeile zeigt die Peers nicht');
+  assert.match(src, /peerChips\(s\.masters\)/, 'Sammelblock zeigt die Peers nicht');
+  assert.match(src, /vt\.peersLine/, 'Retrace-Zeile ohne Aussage, wie viele Knoten mitfielen');
+  assert.match(src, /vt\.attackPeers/, 'Sammelblock ohne Aussage ueber die betroffenen Knoten');
+  assert.match(src, /vt\.peersMore/, 'abgeschnittene Peer-Liste bleibt ohne Hinweis');
+  assert.match(src, /PEER_SHOWN/, 'keine Obergrenze der angezeigten Knoten');
+  assert.match(src, /nameMap/, 'Master-Name hat keine Zuordnung aus der Antwort');
+  assert.ok(cssRules.has('.vt-rc-peers'), 'Peer-Zeile im Retrace ohne Regel');
+  assert.ok(cssRules.has('.vt-atk-peers'), 'Peer-Zeile im Sammelblock ohne Regel');
+  assert.ok(cssRules.has('.vt-peer'), 'Knoten-Chip ohne Regel');
+  assert.ok(cssRules.has('.vt-peer-more'), 'abgeschnittene Liste ohne eigene Form');
+});
+
+/* Netz-Kohorte (2026-10-16): die Kohorten-Hypothese fehlte genau auf den netzweiten Karten.
+ * Guard ist ihre Verdrahtung im Retrace-Karton - Namen, eigenes Label, und die Trennung des
+ * Belegtexts vom Timeline-Raster (der Belegtext stand in einer 180-px-Spalte). */
+test('Netz-Kohorte: die Hypothese nennt die Knoten und hat ein eigenes Label', () => {
+  assert.match(src, /vt-ev-peers/, 'Kohorten-Hypothese ohne Namen-Zeile');
+  assert.match(src, /hy\.evidence\.peerMasters/, 'Hypothese ohne Rueckgriff auf die volle Peer-Liste');
+  assert.match(src, /vt\.tag\.cohortEventNetwork/, 'netzweiter Vorfall ohne eigenes Label');
+  assert.ok(cssRules.has('.vt-ev-peers'), 'Namen-Zeile in der Hypothese ohne Regel');
+  assert.ok(cssRules.has('.vt-timeline .vt-ev'), 'Timeline-Zeile ohne eigenes Raster');
+  assert.ok(!/180px/.test(ruleBody('.vt-ev')), 'Belegtext in der Hypothese bekommt das Timeline-Raster');
+  assert.match(ruleBody('.vt-hyp .vt-ev'), /display:\s*block/, 'Belegtext ohne eigene Darstellung');
+});
+/* Dasselbe Problem (2026-10-16): "19 andere" ohne Vorfallstyp vermischt Knoten, die auf
+ * demselben Ledger Verschiedenes hatten. Guard ist die nach Typ getrennte Nennung - in der
+ * Peer-Zeile des Kartons und in der Kohorten-Hypothese. */
+test('Kohorte nach Vorfallstyp: gleichfallende Knoten stehen getrennt von anderen Abweichungen', () => {
+  assert.match(src, /a\.sameTypeMasters/, 'Peer-Zeile kennt die gleichfallenden Knoten nicht');
+  assert.match(src, /a\.otherTypeMasters/, 'Peer-Zeile kennt die anders fallenden Knoten nicht');
+  assert.match(src, /vt\.peersLineSame/, 'gleichfallende Knoten ohne eigene Aussage');
+  assert.match(src, /vt\.peersLineOther/, 'anders fallende Knoten ohne eigene Aussage');
+  assert.match(src, /vt-peer-group/, 'Peer-Gruppen ohne eigene Klasse');
+  assert.ok(cssRules.has('.vt-peer-group'), 'Peer-Gruppe ohne Regel');
+  assert.match(src, /vt\.evCohortAll/, 'Kohorte ohne Aussage, dass alle denselben Typ hatten');
+  assert.match(src, /vt\.evCohortSame/, 'Kohorte ohne Zahl der gleichen Vorfallstypen');
+  assert.match(src, /peerChips\(peerList\)/, 'Hypothese nennt die gleichfallenden Knoten nicht');
+});
+/* Gekuerzte Ranglisten (2026-10-16): 8.609 Vorfaelle waren 25 MB JSON. Guard ist, dass das
+ * Overlay die Gesamtzahl aus der Antwort nimmt - nicht die Laenge der gekuerzten Liste. */
+test('Gekuerzte Ranglisten: die Gesamtzahl kommt aus der Antwort, nicht aus der Liste', () => {
+  assert.match(src, /retraceBlock\(d\.retrace, d\.retraceTotal\)/, 'Retrace ohne Gesamtzahl aus der Antwort');
+  assert.match(src, /c\.rowTotal/, 'Ursachen-Rangliste ohne Gesamtzahl aus der Antwort');
+  assert.match(src, /vt\.retraceShowing/, 'Retrace-Kuerzung ohne Hinweis auf die Gesamtzahl');
+  assert.match(src, /vt\.cause\.rowsMore/, 'Ursachen-Kuerzung ohne Hinweis auf die Gesamtzahl');
+});
+/* Aeltere Retrace-Karten (2026-10-16): 12 Karten gezeichnet, 60 gesendet. Ohne Aufdecken
+ * blieben aeltere Vorfaelle fuer den Betreiber unerreichbar - Retrace heisst aber genau:
+ * den Vorfall von vor drei Tagen noch erreichen. Guard ist die Verdrahtung des Aufdeckens. */
+test('Retrace-Aufdecken: gesendete Karten sind erreichbar, die Kappung ist benannt', () => {
+  assert.match(src, /vt-rc-rest/, 'verborgene Karten ohne eigener Block');
+  assert.match(src, /vt-rc-more/, 'Aufdecken-Button fehlt');
+  assert.match(src, /vt\.retraceMore/, 'Aufdecken ohne Beschriftung');
+  assert.match(src, /vt\.retraceCapped/, 'Kappung der gesendeten Karten ohne Hinweis');
+  assert.ok(cssRules.has('.vt-rc-rest'), 'verborgener Kartenblock ohne Regel');
+  assert.match(ruleBody('.vt-rc-rest[hidden]'), /display:\s*none/, 'verborgener Block bleibt trotz hidden sichtbar');
+  assert.ok(cssRules.has('.vt-rc-more'), 'Aufdecken-Button ohne Regel');
+});
+
+test('Deckungs-Luecke: halbe Tage und geschaetzte Ledger sind im Overlay benannt', () => {
+  assert.match(src, /vt\.inWindowDayOnly/, 'Tages-Koernung im Fenster ohne Hinweis');
+  assert.match(src, /w\.observedDayOnly > 0/, 'der geschaetzte Anteil wird nicht ausgewertet');
+  assert.match(src, /vt\.peer\.estimated", \{\s*ledgers: num\(s\.observedDaily\)/, 'Peer-Hinweis ohne Ledger-Zahl');
+  assert.match(src, /partialDays: num\(s\.daysPartial/, 'halbe Tage im Peer-Hinweis fehlen');
+});
+
+/* Der Nenner des Profils ist nicht ueberall gemessen. Ein Profil, das Abweichungen bei
+ * "0 Ledger beobachtet" zeigt, ist kein Messwert - und ein geschaetzter Nenner, der nicht
+ * benannt wird, ist eine Zahl ohne Herkunft. */
+test('Profil-Nenner: geschaetzte Ledger werden benannt, nicht still gerechnet', () => {
+  assert.match(src, /vt\.profileLedgersEstimated/, 'Profil-Fussnote fehlt');
+  assert.match(src, /profile\.estimatedLedgers > 0/, 'die Gesamtzahl wird nicht ausgewertet');
+  assert.match(src, /vt\.bucketLedgersEstimated/, 'Intervall-Hinweis fehlt');
+  assert.match(src, /cell\.ledgersEstimated > 0/, 'der geschaetzte Anteil je Intervall wird nicht ausgewertet');
+});
+
+/* "+19 weitere" ohne Weg, sie zu sehen, war eine Zahl ohne Spur. Die Keys sind schon in der
+ * Antwort - Aufdecken darf keine zweite Anfrage kosten. */
+test('Peer-Listen: die gekuerzte Liste laesst sich aufdecken', () => {
+  assert.match(src, /data-peer-more/, 'kein Aufdecken-Knopf');
+  assert.match(src, /class="vt-peer-rest" hidden/, 'die restlichen Keys sind nicht vorgemerkt');
+  assert.match(src, /querySelectorAll\("\[data-peer-more\]"\)/, 'der Handler fehlt');
 });

@@ -21,11 +21,12 @@ const DICT = {
 };
 import { SERIES_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
-import { PEER_AUTHORITIES, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
+import { PEER_AUTHORITIES, PEER_DIRECTIONS, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
 import { LATENCY_AUTHORITIES, LATENCY_CLASSES, LATENCY_PATTERNS, LATENCY_REASONS, LATENCY_VERDICTS } from "../lib/validator-vote-latency.mjs";
 import { DIVERGENCE_AUTHORITIES, DIVERGENCE_GAPS, DIVERGENCE_GUIDANCE, DIVERGENCE_REASONS, DIVERGENCE_VERDICTS, LINEAGES } from "../lib/validator-divergence.mjs";
 import { CAUSE_CHECKS, CAUSE_CONFIDENCE, CAUSE_GAPS, CAUSE_KINDS, CAUSE_LAYERS, CAUSE_STRENGTHS, CAUSE_TAGS, UNEXPLAINED } from "../lib/validator-cause.mjs";
 import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from "../lib/validator-quorum-surface.mjs";
+import { SENSITIVITY_FAMILIES, SENSITIVITY_GAPS, SENSITIVITY_HEADLINES, SENSITIVITY_VERDICTS } from "../lib/validator-sensitivity.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -48,11 +49,12 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.datagap.", "vt.fpverdict.", "vt.g.", "vt.k.", "vt.range.", "vt.scope.",
     "vt.series.cause.", "vt.sign.", "vt.state.", "vt.strength.", "vt.type.",
     "vt.impact.authority.", "vt.impact.reason.", "vt.impact.verdict.", "vt.load.verdict.", "vt.verdict.", "vt.win.class.",
-    "vt.peer.authority.", "vt.peer.reason.", "vt.peer.type.", "vt.peer.verdict.",
+    "vt.peer.authority.", "vt.peer.direction.", "vt.peer.reason.", "vt.peer.type.", "vt.peer.verdict.",
     "vt.lat.authority.", "vt.lat.class.", "vt.lat.pattern.", "vt.lat.reason.", "vt.lat.verdict.",
     "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
     "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.",
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
+    "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
   // nicht als h.t("Praefix" + ...) - sie gehoeren deshalb nicht in diese Liste.
@@ -63,7 +65,10 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
 test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
   const groups = [["vt.verdict.", SERIES_VERDICTS], ["vt.fpverdict.", FINGERPRINT_VERDICTS], ["vt.win.class.", WINDOW_CLASSES], ["vt.load.verdict.", LOAD_VERDICTS], ["vt.impact.verdict.", IMPACT_VERDICTS],
   ["vt.impact.authority.", IMPACT_AUTHORITIES], ["vt.impact.reason.", IMPACT_REASONS],
-  ["vt.peer.verdict.", PEER_VERDICTS], ["vt.peer.reason.", PEER_REASONS], ["vt.peer.authority.", PEER_AUTHORITIES], ["vt.peer.type.", PEER_TYPES]];
+  ["vt.peer.verdict.", PEER_VERDICTS], ["vt.peer.reason.", PEER_REASONS], ["vt.peer.authority.", PEER_AUTHORITIES], ["vt.peer.type.", PEER_TYPES],
+  // Unter der Grundrate und darueber sind verschiedene naechste Pruefungen - die Richtung ist Teil
+  // des Urteils, nicht ein Vorzeichen, das der Leser selbst deuten muss.
+  ["vt.peer.direction.", PEER_DIRECTIONS]];
   const latPrefix = (suf) => "vt.lat." + suf;
   groups.push([latPrefix("verdict."), LATENCY_VERDICTS], [latPrefix("reason."), LATENCY_REASONS],
     [latPrefix("authority."), LATENCY_AUTHORITIES], [latPrefix("class."), LATENCY_CLASSES], [latPrefix("pattern."), LATENCY_PATTERNS]);
@@ -84,6 +89,10 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
     ["vt.surface.axis.", SURFACE_AXES],
     ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
+  // Empfindlichkeit: das Urteil beantwortet, ob DICH diese Signatur ueberproportional trifft.
+  // Ohne Label stünde der rohe Schluessel genau dort, wo Betreiber entscheiden.
+  groups.push(["vt.sens.verdict.", SENSITIVITY_VERDICTS], ["vt.sens.gap.", SENSITIVITY_GAPS],
+    ["vt.sens.head.", SENSITIVITY_HEADLINES], ["vt.sens.family.", SENSITIVITY_FAMILIES]);
   for (const [prefix, values] of groups) {
     assert.ok(Array.isArray(values) && values.length > 0, prefix + " ist leer");
     const missing = values.filter((v) => DICT.en[prefix + v] === undefined || DICT.de[prefix + v] === undefined);
@@ -103,6 +112,15 @@ test("Serien-Zeile: alle drei Erholungs-Ursachen haben einen Text in EN und DE",
     assert.notEqual(DICT.en["vt.series.cause." + cause], undefined);
     assert.notEqual(DICT.de["vt.series.cause." + cause], undefined);
   }
+});
+
+test("Empfindlichkeitstabelle: sieben Spaltentitel haben einen Text in EN und DE", () => {
+  // Die Titel stehen im UI in einem Schluessel-Feld, nicht als h.t("...") - der Literal-Guard
+  // sieht sie nicht, also prueft dieser Test sie direkt an der Liste aus dem UI.
+  const columns = ["vt.sens.hTag", "vt.sens.hExp", "vt.sens.hFails", "vt.sens.hOwn", "vt.sens.hLift",
+    "vt.sens.hCohort", "vt.sens.hVerdict", "vt.sens.famLabel"];
+  const missing = columns.filter((k) => DICT.en[k] === undefined || DICT.de[k] === undefined);
+  assert.deepEqual(missing, [], "fehlende Spaltentitel: " + missing.join(", "));
 });
 
 test("Uebersetzte Werte sind keine Schluessel-Replikate", () => {

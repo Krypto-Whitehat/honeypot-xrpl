@@ -17,8 +17,12 @@ export function createLiveMonitor(h) {
     traceMod = traceMod || mod.createValidatorTrace({ t: h.t, esc: h.esc, ruleName: h.ruleName });
     return traceMod;
   }).catch(() => null);
-  const openTrace = (master, title, ref) => loadTrace().then((tm) => tm && tm.openValidator(master, title, ref));
-  const openPatterns = () => loadTrace().then((tm) => tm && tm.openPatterns());
+  // Master -> Domain, gebaut aus derselben Liste, die gerade gezeichnet wird. Das Overlay braucht
+  // die Namen fuer die Mit-Betroffenen auf einem Ledger; ein eigener Request dafuer waere eine
+  // zweite Messung desselben Zustands.
+  const validatorNames = new Map();
+  const openTrace = (master, title, ref) => loadTrace().then((tm) => tm && tm.openValidator(master, title, ref, validatorNames));
+  const openPatterns = () => loadTrace().then((tm) => tm && tm.openPatterns(validatorNames));
   const samples = [];
   let anomalies = [];
   const rows = [];
@@ -116,6 +120,8 @@ export function createLiveMonitor(h) {
     const alerts = document.getElementById("validator-alerts");
     if (!list || !empty || !alerts) return;
     const vals = Array.isArray(body?.validators) ? body.validators : [];
+    validatorNames.clear();
+    for (const v of vals) if (v.key && v.domain) validatorNames.set(v.key, v.domain);
     empty.hidden = vals.length > 0;
     const cov = document.getElementById("validator-coverage");
     if (cov && body?.dunl) {

@@ -16,6 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { addLedgerRiskSample, createTracker, TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
 import { classifyShape, createShapeTracker, SIGNATURE_TAGS } from "../lib/tx-forensics.mjs";
+import { ANOMALY_TAGS, isAnomalyTag } from "../lib/validator-trace.mjs";
 import { isSignatureTag } from "../lib/validator-retrace.mjs";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
 import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured, normalizeDay } from "../lib/validator-trace-store.mjs";
@@ -48,8 +49,8 @@ const LATE_VOTES_CAP = 1200;
 // Ledger-Ebene Anomalien inklusive der Transaktions-Signaturen: nur diese gehen in die
 // Risikovergleichsrechnung ein (Wie oft fällt ein Ledger MIT dieser Form aus, im Vergleich zu
 // Ledgern ohne sie). new-tx-type:* und type-burst:* sind über das Präfix zählbar.
-const ANOMALY_TAGS = new Set(["no-quorum", "hash-split", "load-spike", "load-extreme", "close-gap", "amendment-activity", "unl-change", ...SIGNATURE_TAGS]);
-const isAnomalyTag = (tag) => ANOMALY_TAGS.has(tag) || String(tag).startsWith("new-tx-type:") || String(tag).startsWith("type-burst:");
+// Die Vokabel kommt aus lib/validator-trace.mjs: Recorder und Analyse-Ebenen teilen dieselbe
+// Menge, ein neuer Tag ist dort nicht nachzutragen.
 const FLUSH_MS = REMOTE ? 300000 : 30000;
 const RUN_SECONDS = Number(process.env.TRACE_RUN_SECONDS) || 0;
 
@@ -86,6 +87,10 @@ function emptyDay(date) {
     // Forensik + Anomalie-Zähler: die Grundlage jeder Retrace. Ohne sie ist die Frage
     // 'warum verpasst?' aus der Aufzeichnung nicht beantwortbar.
     ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {},
+    // Marker, nicht Zaehler: dieser Tag fuehrt die Signatur-Ebene. Ein Tag ohne diesen Marker
+    // (Altbestand) wurde nie auf Anomalien geprueft - das ist etwas anderes als 'geprueft und
+    // keine gefunden'. Die Risikuebene braucht die Unterscheidung fuer ihre Vergleichsgruppe.
+    anomalyRecorded: true,
     // Abdeckung der Transaktions-Forensik: wie viele Ledger wirklich eine Tx-Form haben und wie
     // viele erwartet, aber nicht erfasst wurden. Ohne diese Zähler wäre "keine Signatur" nicht
     // von "keine Beobachtung" zu trennen.
