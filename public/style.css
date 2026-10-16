@@ -2983,57 +2983,107 @@ body[data-a6] {
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
 @media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-ev { grid-template-columns: 1fr 1fr; } }
-/* Incident-Profil (3D): ein Prisma je Zeitintervall auf eigener Grundriss-Kachel.
-   Geometrie ist abgeleitet statt paarweise gesetzt: --d = Tiefe in der Bildebene,
-   --dz = --d · tan 41° (0,86929) = Höhenversatz der Tiefenverschiebung, --skew = 41deg.
-   Die Tiefenfläche ist --d breit und mit -skew geschert (Höhenversatz bei x = --d:
-   d · tan 41° = --dz). Die Deckfläche ist --dz hoch und mit (skew - 90deg) geschert
-   (Breitenversatz bei y = --dz: dz · tan 49° = 1,15037 · 0,86929 · d = d). Beide Kanten
+/* Incident-Profil (3D): ein Prisma je Zeitintervall.
+   Geometrie ist abgeleitet statt paarweise gesetzt: --d = max. Tiefe des Profils,
+   --dz = --d * tan 41deg (0,86929) = Höhenversatz dieser Tiefe, --skew = 41deg.
+   Die Tiefenfläche ist --dc breit und mit -skew geschert (Höhenversatz bei x = --dc:
+   dc * tan 41deg = --dzc). Die Deckfläche ist --dzc hoch und mit (skew - 90deg) geschert
+   (Breitenversatz bei y = --dzc: dzc * tan 49deg = 1,15037 * 0,86929 * dc = dc). Beide Kanten
    treffen sich deshalb bei jeder Breite exakt; ein Wertepaar wie 15/13 wäre nur für eine
    einzige Breite geschlossen und öffnet das Prisma um Bruchteile eines Pixels.
-   Tiefe und Säulenabstand folgen der Containerbreite (cqw) statt einem Fixwert: 24 Intervalle
-   auf 320 px dürfen nicht in die Nachbarssäule ragen – sonst verschmelzen die Deckflächen zu
-   einem durchgehenden Schrägband und die Säulen sind nicht mehr je Intervall zählbar.
-    Invariante --d <= --gap in jedem cqw-Zweig (0,78 < 1,02, 3 < 3,5, 10 < 13): die Deckfläche
-    ragt exakt --d über die Vorderfläche hinaus (dz · tan 49° = d), die Tiefenfläche ebenso.
-    Der Überstand in die Nachbarsspalte ist damit --d - --gap und damit nie positiv.
-   Beleuchtung (Licht von oben): Vorderfläche Grundfarbe, Deckfläche aufgehellt, Tiefenfläche
-   abgedunkelt. Erst diese drei Töne geben dem Auge ein Volumen; drei gleichfarbige
-   Scherflächen lesen als schiefe Rechtecke.
+
+   Tiefe je Säule statt je Profil (--dc <= --bh): eine feste Tiefe macht aus kleinen Werten
+   schiefe Bänder. Gemessen 2026-10-16 live (peak 5000, --d 7,63 px, --dz 6,63 px): ein
+   Intervall mit 1 Vorfall war 2,48 px hoch - Grundriss-Rückkante (6,63 px) und Deckfläche
+   (6,63 px) ragten ÜBER die Balken-Oberkante, und die Deckflächen benachbarter Säulen
+   berührten sich mit 2,4 px Abstand (Säule 29 px + Tiefe 7,63 px gegen Schrittweite 39 px).
+   Das Profil las sich als durchgehendes Schrägband statt als Säulen. Deshalb:
+     --dc = min(--d, --bh) für Säulen mit Vorfällen, --dzc = --dc * tan 41deg.
+   Damit gilt dzc <= 0,869 * bh < bh: die Grundriss-Rückkante liegt unter der Balken-Oberkante,
+   der Grundriss ist von der Vorderfläche verdeckt (geometrisch korrekt - die Grundfläche
+   eines soliden Prismas sieht man nicht), und die Deckfläche ist nie höher als der Balken.
+   Säulen ohne Vorfälle behalten --d: dort ist der Grundriss die Kachel des Intervalls.
+   Profiltiefe ist eine Sichtbarkeits-Regel, keine Sparregel. Gemessen 2026-10-16 (7-Tage-
+   Fenster, peak 4, Container 963 px, 24 Säulen): mit 0,5cqw war --d 4,82 px und --dzc 4,19 px,
+   die Deckfläche lag pixelgleich über dem Balken (Luminanz 0,55 gegen 0,54) und die Tiefen-
+   fläche war schmaler als ein Rasterzeichen - das Profil las sich als flacher Kamm statt als
+   Prisma. Deshalb 0,85cqw (8,19 px bei 963 px, Obergrenze 11 px) und --gap auf 1,15cqw.
+   Invariante --dc <= --d <= --gap in jedem cqw-Zweig (0,85 < 1,15, 3 < 4, 11 < 15): der
+   Überstand in die Nachbarsspalte ist nie positiv, und der Abstand zweier Deckflächen bleibt
+   bei 963 px Container 29,97 + 11,25 - 8,31 = 32,91 px.
+
+   Beleuchtung (Licht von oben): drei getrennte Töne, nicht drei Überlagerungen derselben
+   Farbe: Vorderfläche die Typ-Farbfolge, Deckfläche dieselbe Farbe mit 45 % Weiß, Tiefenfläche
+   sie mit 42 % Schwarz. Gemessen 2026-10-16 im ausgelieferten Noir-Theme (Pixel im Plot, ein
+   und dieselbe Säule): Deckfläche rgb(208,213,219) = L 212, Vorderfläche rgb(154,164,176) =
+   L 163, Tiefenfläche rgb(103,109,117) = L 108 - drei unterscheidbare Töne. Die alte Fassung
+   legte 26 % Weiß auf eine Fläche, die schon die Farbe des obersten Farbverlaufs trug; die
+   Kante war im gerasterten Bild nicht mehr von der Vorderfläche zu trennen. Es sind Schleier
+   über var(--vt-cap), keine Theme-Farben: sie hellen bzw. dunkeln in Light und Noir gleich ab
+   und lassen kein Hex-Literal außerhalb der Token-Blöcke entstehen.
    Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
    --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
    Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { container-type: inline-size; --skew: 41deg; --dz-k: 0.86929; --d: clamp(3px, 0.78cqw, 10px); --dz: calc(var(--d) * var(--dz-k)); --gap: clamp(3.5px, 1.02cqw, 13px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: rgba(20, 20, 22, 0.34); --vt-sheen: rgba(255, 255, 255, 0.26); --vt-edge: rgba(20, 20, 22, 0.24); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+.vt-profile { container-type: inline-size; --skew: 41deg; --dz-k: 0.86929; --d: clamp(3px, 0.85cqw, 11px); --dz: calc(var(--d) * var(--dz-k)); --gap: clamp(4px, 1.15cqw, 15px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: rgba(12, 12, 14, 0.42); --vt-sheen: rgba(255, 255, 255, 0.45); --vt-edge: rgba(20, 20, 22, 0.24); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
 .vt-plot { position: relative; height: calc(var(--plot-h) + var(--dz)); margin: 0 calc(var(--d) + 3px) 0 var(--gutter); }
 .vt-grid, .vt-bars { position: absolute; left: 0; right: 0; bottom: 0; height: var(--plot-h); }
 .vt-gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--a6-graph-grid); }
-.vt-gridline.vt-zero { background: var(--a6-graph-line-soft); }
+/* Null-Linie = Groundline, auf der alle Prismensohlen sitzen. Eine Säule ohne sichtbaren
+   Boden wirkt schwebend, deshalb eine Stufe stärker als die Gitterlinien. */
+.vt-gridline.vt-zero { background: var(--a6-graph-line); }
 .vt-gridlabel { position: absolute; right: calc(100% + 6px); top: -6px; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
 .vt-bars { display: flex; align-items: stretch; gap: var(--gap); }
 @keyframes vt-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 .vt-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; animation: vt-rise 300ms ease-out backwards; animation-delay: calc(var(--i, 0) * 16ms); }
-/* Grundriss = Grundfläche des Prismas: Vorderkante auf der Achse, Rückkante um (+d, -dz)
-   versetzt. Der Grundriss trägt den Intervall-Zustand: clean (beobachtet, keine Abweichung),
-   solo / cohort / network (Abweichung, nach Zahl betroffener dUNL-Validatoren), unknown
-   (Abweichung, Kohorte nicht erfasst), none (kein Ledger aufgezeichnet). Ein leeres
-   Intervall bleibt als Kachel stehen, damit die Zeitachse sich durchgehend liest. */
-.vt-foot { position: absolute; left: 0; right: 0; bottom: 0; height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+/* Grundriss = Grundfläche des Prismas: Vorderkante auf der Achse, Rückkante um (+dc, -dzc)
+   versetzt. Bei Säulen mit Vorfällen ist er von der Vorderfläche verdeckt (dc <= bh ->
+   dzc < bh) – die Grundfläche eines soliden Prismas ist nicht sichtbar. Sein Zustand ist
+   dort der Kohortenstreifen unter der Achse, dieselben Intervalle, dieselben Farben.
+   Bei Säulen ohne Vorfälle bleibt --d: dort IST der Grundriss die Kachel des Intervalls.
+   Zustände: clean (beobachtet, keine Abweichung), solo / cohort / network (Abweichung, nach
+   Zahl betroffener dUNL-Validatoren), unknown (Abweichung, Kohorte nicht erfasst), none
+   (kein Ledger aufgezeichnet). Ein leeres Intervall bleibt als Kachel stehen, damit die
+   Zeitachse sich durchgehend liest. */
+.vt-foot { position: absolute; left: 0; right: 0; bottom: 0; height: var(--dzc); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-clean .vt-foot { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-col.vt-state-solo .vt-foot { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
 .vt-col.vt-state-cohort .vt-foot { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
 .vt-col.vt-state-network .vt-foot { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
 .vt-col.vt-state-unknown .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-none .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
-.vt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * var(--n, 0)); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
-.vt-side { position: absolute; left: 100%; top: 0; width: var(--d); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
-.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(var(--vt-sheen), var(--vt-sheen)); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+.vt-col { --bh: calc(var(--u) * var(--n, 0)); --dc: var(--d); --dzc: calc(var(--dc) * var(--dz-k)); }
+/* Nicht-leere Intervalle bekommen eine Sichtbarkeits-Untergrenze von 2 px: bei einer
+   Wurzel-Achse ueber ein 7-Tage-Fenster (peak 5000) ist ein Intervall mit einem Vorfall
+   2,5 px hoch, mit zwei 3,5 px - unter der Schwelle, ab der eine Kante noch zu sehen ist.
+   Die Untergrenze ist eine Rendering-Regel, keine Achsenregel: sie gilt nur fur Saulen mit
+   Vorfaellen (vt-nonzero) und bleibt weit unter einem Gitterintervall (78 px bei peak 5000,
+   step 1000). Die exakte Zahl steht in Readout und aria-label. */
+.vt-col.vt-nonzero { --bh: max(2px, calc(var(--u) * var(--n, 0))); }
+/* Tiefe folgt der Balkenhoehe (Begruendung im Kopf dieses Blocks): --dc nie ueber --bh,
+   damit Grundriss-Rueckkante und Deckflaeche unter der Balken-Oberkante bleiben. */
+.vt-col.vt-nonzero { --dc: min(var(--d), var(--bh)); --dzc: calc(var(--dc) * var(--dz-k)); }
+/* Unter 460 px Content-Breite wird das Prisma flach. Nachgerechnet (cqw = Content-Breite
+   des Containers; .vt-plot zieht links --gutter und rechts calc(--d + 3px) ab; 24 Säulen und
+   23 gap; gap clamp(4px, 1,15cqw, 15px), Tiefe clamp(3px, 0,85cqw, 11px), Gutter
+   clamp(20px, 4,2cqw, 42px)): die Tiefe erreicht die 4 px Kantenbreite erst bei 470,6 px
+   Content-Breite (4 / 0,0085); bei 480 px ist die Säule 13,58 px breit und die Tiefe 4,08 px -
+   die Tiefenfläche ist eine eigene Kante. Bei 460 px sind es 3,91 px Tiefe an einer 12,98 px-
+   Säule, bei 260 px Content (286 px Aussenbreite, gemessen 2026-10-16 bei 390 px Viewport)
+   3,00 px Tiefe, 2,59 px Deckfläche und eine 5,91 px-Säule an einem 234 px-Plot: die Extrusion
+   war ein Fleck auf der Säule, kein Volumen. Eine schmale Säule ohne Scherflächen ist eine
+   lesbare Spalte; eine breite Säule mit ihnen ist ein Prisma. Die Typ-Farbe bleibt in
+   Vorderfläche, Kohortenstreifen und Legende. */
+@container (max-width: 460px) { .vt-side, .vt-top { display: none; } .vt-col:not(.vt-nonzero) .vt-foot { min-height: 4px; } }
+.vt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--bh); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
+.vt-side { position: absolute; left: 100%; top: 0; width: var(--dc); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(var(--vt-sheen), var(--vt-sheen)); box-shadow: inset 0 0 0 1px var(--vt-edge); }
 /* Signatur-Marker: sitzt auf der Oberkante des Prismas (Hoehe --u * --n) und zeigt, dass die
    Transaktions-Forensik an einem Ausfall-Ledger dieses Intervalls eine Form-Signatur gemessen
    hat. Er ist schmucklos und absichtlich klein - die Aussage liegt im Readout und im Streifen. */
-.vt-mark { position: absolute; left: 50%; bottom: calc(var(--u) * var(--n, 0) + var(--dz) + 5px); width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
+.vt-mark { position: absolute; left: 50%; bottom: calc(var(--bh) + var(--dzc) + 1px); width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
 .vt-axis { position: relative; height: 14px; margin: 4px calc(var(--d) + 3px) 0 var(--gutter); }
 .vt-axis span { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); white-space: nowrap; }
 /* Kohortenstreifen: eine Zeile unter der Zeitachse, exakt auf den Intervallen der Säulen
@@ -3118,6 +3168,28 @@ body[data-a6] {
 .vt-table th[scope="row"], .vt-th-l { text-align: left; }
 .vt-table thead th { border-bottom-color: var(--a6-line-strong); color: var(--a6-muted); font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; font-size: 10px; }
 .vt-table th[scope="row"] { font-weight: 600; color: var(--a6-ink); }
+/* Serien-Zeile in der Retrace-Karte: die Erklaerung ist die Zeitfolge, nicht der Ledger - sie
+   steht deshalb direkt unter dem Ledger-Kopf und trägt dieselbe Akzentkante wie die Karte. */
+.vt-rc-series { margin: 6px 0 0; padding: 6px 8px; border: 1px solid var(--a6-accent); border-radius: var(--a6-r-xs); background: var(--a6-accent-soft); font-family: var(--a6-mono); font-size: 11px; color: var(--a6-body); }
+.vt-rc-series small { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a6-muted); }
+/* Knoten-Signatur: Messgroesse (dt) und Wert (dd) als Definitionspaar in einem Raster, das bei
+   schmalem Container umbricht, ohne die Lesereihenfolge zu drehen. */
+.vt-fp { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; margin: 0; }
+.vt-fp-row { border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 6px 8px; }
+.vt-fp-row dt { font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a6-muted); }
+.vt-fp-row dd { margin: 3px 0 0; font-family: var(--a6-mono); font-size: 12px; color: var(--a6-ink); }
+/* Last-Ausfall-Kurve: die Normalbetriebsstufe ist der Vergleichspunkt jedes Last-Urteils. Sie
+   muss in der Tabelle selbst zu sehen sein, nicht erst in der Zeile darunter. */
+.vt-table tr.vt-load-base th[scope="row"], .vt-table tr.vt-load-base td { background: var(--a6-accent-soft); border-bottom-color: var(--a6-accent); }
+/* Urteils-Badges: die Farbe trägt das Urteil, damit das Auge vor dem Text weiß, ob ein Befund
+   ein Kapazitätsproblem, ein Netzproblem oder kein Problem ist. */
+.vt-badge.vt-fpv-chronic-outage, .vt-badge.vt-fpv-outlier-node { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-fpv-network-driven, .vt-badge.vt-fpv-clean { border-color: var(--a6-accent); color: var(--a6-accent-text); }
+.vt-badge.vt-fpv-solo-only, .vt-badge.vt-fpv-intermittent, .vt-badge.vt-fpv-mixed { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-loadv-load-limited { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-loadv-always-failing { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-loadv-load-resilient { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-loadv-unknown { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-small { display: block; color: var(--a6-muted); font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .vt-atk { display: grid; grid-template-columns: 150px 170px 150px 1fr; gap: 8px; align-items: baseline; }
 .vt-atk-when, .vt-atk-n { color: var(--a6-muted); }
@@ -3130,6 +3202,7 @@ body[data-a6] {
      die Plot-Höhe ein Mobilmaß; die Kantenbeziehung dz = d · tan 41° gilt unverändert. */
   .vt-profile { --plot-h: 132px; }
   .vt-rc-metrics { grid-template-columns: 1fr 1fr; }
+  .vt-fp { grid-template-columns: 1fr 1fr; }
   .vt-atk { grid-template-columns: 1fr 1fr; }
   .vt-table { font-size: 10px; }
   .vt-table th, .vt-table td { padding: 5px 4px; }
