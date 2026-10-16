@@ -117,6 +117,14 @@ const readDay = (dataDir) => {
 const base = Date.now() - 90000;
 const idx0 = 107699001;
 scenario = { ledgers: [], votes: [] };
+// Anlaufphase: 22 lueckenlose Ledger bei vollem Empfang. Die eigene Erfassungs-Basis entsteht
+// erst ab voteBaselineMin (20 bewertete Ledger). Ohne sie waere der duenne Empfang in L2 eine
+// Zahl ohne Vergleich - die Engine muesste ihn behaupten statt ihn zu messen.
+for (let w = 22; w >= 1; w--) {
+  const wIdx = idx0 - w, wClose = base - w * 5000;
+  scenario.ledgers.push({ index: wIdx, hash: hex64(wIdx), closeMs: wClose, txCount: 3 });
+  for (const s of signable) scenario.votes.push({ index: wIdx, key: s.key, hash: hex64(wIdx), atMs: wClose + 1000 });
+}
 // L0: alle signierbaren Knoten stimmen ab -> keine Abweichung (Grundlinie, kein Forensik-Eintrag)
 scenario.ledgers.push({ index: idx0, hash: hex64(idx0), closeMs: base, txCount: 4 });
 for (const s of signable) scenario.votes.push({ index: idx0, key: s.key, hash: hex64(idx0), atMs: base + 1000 });
@@ -132,8 +140,11 @@ const thinCount = Math.max(1, quorum - 8);
 scenario.ledgers.push({ index: idx2, hash: hex64(idx2), closeMs: close2, txCount: 3 });
 for (const s of signable.slice(1, 1 + thinCount)) scenario.votes.push({ index: idx2, key: s.key, hash: hex64(idx2), atMs: close2 + 1000 });
 scenario.votes.push({ index: idx2, key: "rNonMemberFixtureSignerNotInTheRegistry", hash: hex64(idx2), atMs: close2 + 1200 });
-// L3: Close-Abstand 30 s bei 5-s-Takt -> Erfassungs-Luecke dieses Rekorders (cg = true)
-const idx3 = idx0 + 3, close3 = close2 + 30000;
+// L3: zwei Indizes werden nie gesendet (idx0 + 3 und idx0 + 4 fehlen) -> Erfassungs-Luecke
+// dieses Rekorders, nachgerechnet an der Index-Folge: pg = idx2, l = idx2 + 3. Der 30-s-Abstand
+// bleibt als Begleitsignal stehen; er war bisher die Regel und ist live widerlegt (8 000 ms
+// Abstand bei 35 von 35 gesehenen Mitgliedern, Ledger 107699231).
+const idx3 = idx0 + 5, close3 = close2 + 30000;
 scenario.ledgers.push({ index: idx3, hash: hex64(idx3), closeMs: close3, txCount: 2 });
 for (const s of signable.slice(1, 3)) scenario.votes.push({ index: idx3, key: s.key, hash: hex64(idx3), atMs: close3 + 1000 });
 
@@ -155,9 +166,14 @@ check("cl = true fuer alle drei Ledger (Netz hat geschlossen)",
 check("L2: geschlossen unter Quorum (top < need, Marge negativ)",
   row(idx2) && row(idx2).top < row(idx2).need && row(idx2).mg < 0,
   row(idx2) ? `${row(idx2).top} / ${row(idx2).need} Marge ${row(idx2).mg}` : "-");
-check("L2: cg = false (kein Erfassungs-Rueckstand)", row(idx2)?.cg === false);
-check("L3: cg = true (30 s Abstand bei 5 s Takt)", row(idx3)?.cg === true,
-  row(idx3) ? `gap ${row(idx3).gap} ms / Median ${row(idx3).gmed} ms` : "-");
+check("L2: cg = false und pg = idx1 (lueckenlose Index-Folge, nachgerechnet)",
+  row(idx2)?.cg === false && row(idx2)?.pg === idx1,
+  row(idx2) ? `pg=${row(idx2).pg} l=${row(idx2).l}` : "-");
+check("L3: cg = true, weil idx0+3 und idx0+4 nie gesendet wurden", row(idx3)?.cg === true,
+  row(idx3) ? `pg=${row(idx3).pg} l=${row(idx3).l} gap ${row(idx3).gap} ms / Median ${row(idx3).gmed} ms` : "-");
+check("L3: der Sprung ist auch als Stream-Luecke aufgezeichnet",
+  (dayA.gaps ?? []).some((g) => g.reason === "stream-gap" && g.from === idx0 + 3 && g.to === idx0 + 4),
+  JSON.stringify(dayA.gaps ?? []));
 check("ov zaehlt Nicht-dUNL-Signierer mit (L2: ov = top + 1)",
   row(idx2) && row(idx2).ov === thinCount + 1, row(idx2) ? `ov=${row(idx2).ov} eigene=${row(idx2).v}` : "-");
 check("need ist nachrechenbar: need = ceil(mm * 0.8)",
@@ -179,19 +195,35 @@ const verdictOf = (i) => byLedger.get(i)?.verdict ?? "-";
 log("Diagnose-Verdikte:", [idx1, idx2, idx3].map((i) => "#" + i + " " + verdictOf(i)).join(" | "));
 check("L1: Quorum beobachtet bei geschlossenem Ledger -> closed-quorum-observed",
   verdictOf(idx1) === "closed-quorum-observed");
-check("L2: geschlossen unter Quorum -> closed-observation-gap (kein Netz-Befund)",
-  verdictOf(idx2) === "closed-observation-gap");
+check("L2: geschlossen unter Quorum, duennerer Empfang als der eigene Normalwert -> closed-reception-thin",
+  verdictOf(idx2) === "closed-reception-thin");
 check("L3: geschlossen mit Erfassungs-Luecke -> closed-capture-gap",
   verdictOf(idx3) === "closed-capture-gap");
 check("keine Zeile behauptet 'not-closed' ohne Beleg (kein Netz-Stockungs-Befund)",
   diag.rows.every((r) => r.verdict !== "not-closed") && diag.critical === 0,
   `critical=${diag.critical}`);
-check("Schliess-Bilanz: 3 geschlossen, 1 Erfassungs-Luecke",
-  diag.closed === 3 && diag.captureGaps === 1,
-  `closed=${diag.closed} captureGaps=${diag.captureGaps} unanswered=${diag.unanswered}`);
+check("Schliess-Bilanz: 3 geschlossen, 1 Erfassungs-Luecke, 0 offene Erfassungs-Fragen",
+  diag.closed === 3 && diag.captureGaps === 1 && diag.captureGapUnknown === 0,
+  `closed=${diag.closed} captureGaps=${diag.captureGaps} unknown=${diag.captureGapUnknown} unanswered=${diag.unanswered}`);
+check("Erfassungs-Belege sind benannt: L2 index-basiert frei, L3 index-basiert Luecke",
+  byLedger.get(idx2)?.captureGapBasis === "ledger-index" && byLedger.get(idx2)?.captureGap === false
+  && byLedger.get(idx3)?.captureGapBasis === "ledger-index" && byLedger.get(idx3)?.captureGap === true,
+  [idx1, idx2, idx3].map((i) => `#${i} ${byLedger.get(i)?.captureGapBasis ?? "-"}=${String(byLedger.get(i)?.captureGap)}`).join(" "));
 check("Netzseite reicht bis in die Diagnose (ov = eigene + Nicht-dUNL)",
   byLedger.get(idx2)?.observedValidations === thinCount + 1,
   "ov=" + String(byLedger.get(idx2)?.observedValidations));
+check("L2: eigene Empfangs-Bilanz steht in der Datei (ov, ovb, ot) und ov unter ovb",
+  row(idx2)?.ov === thinCount + 1 && Number.isFinite(row(idx2)?.ovb) && row(idx2)?.ot === true && row(idx2).ov < row(idx2).ovb,
+  row(idx2) ? `ov=${row(idx2).ov} ovb=${row(idx2).ovb} ot=${String(row(idx2).ot)}` : "-");
+check("L1: ein fehlender Knoten ist kein duennerer Empfang (ot = false, ov = signierbare - 1)",
+  row(idx1)?.ot === false && row(idx1)?.ov === signable.length - 1,
+  row(idx1) ? `ov=${row(idx1).ov} ovb=${row(idx1).ovb} ot=${String(row(idx1).ot)}` : "-");
+check("Erfassungs-Ereignisse werden aufgezeichnet (Art, Zeit, Index, Endpunkt)",
+  (dayA.captureEvents ?? []).some((e) => typeof e.e === "string" && Number.isFinite(e.atMs) && typeof e.url === "string"),
+  JSON.stringify(dayA.captureEvents ?? []));
+check("Diagnose zaehlt duennen Empfang und Erfassungs-Ereignisse (L2 Empfang, L3 beides)",
+  diag.receptionThin === 2 && (diag.captureEvents ?? 0) >= 1,
+  `receptionThin=${diag.receptionThin} captureEvents=${diag.captureEvents}`);
 
 // ---------- Phase B: Endpunkt meldet keinen Quorum ----------
 quorumReport = 0;
@@ -211,11 +243,11 @@ check("Phase A: Grund loggiert (gemeldeter Wert)", /Netz-Quorum: 28/.test(outA))
 console.log("");
 console.log("Phase A Forensik-Zeilen (aus der geschriebenen Tagesdatei):");
 for (const r of rows) {
-  console.log(`  #${r.l}  ${r.top}/${r.need} Marge ${r.mg}  closed=${r.cl} cg=${r.cg} ov=${r.ov} mm=${r.mm}  hash ${String(r.ch).slice(0, 16)}...`);
+  console.log(`  #${r.l}  ${r.top}/${r.need} Marge ${r.mg}  closed=${r.cl} cg=${r.cg} pg=${r.pg} ov=${r.ov} mm=${r.mm}  Empfang ${r.ov}/${r.ovb} ot=${r.ot}  hash ${String(r.ch).slice(0, 16)}...`);
 }
 console.log("");
 for (const r of diag.rows) {
-  console.log(`  Diagnose #${r.ledgerIndex}  ${r.verdict}  Basis ${r.closure.basis}  ${r.closure.captureGap ? "Erfassungs-Luecke" : "keine Erfassungs-Luecke"}  ${r.topVotes}/${r.needed} ov=${r.observedValidations}  ${r.critical ? "kritisch" : "nicht kritisch"}`);
+  console.log(`  Diagnose #${r.ledgerIndex}  ${r.verdict}  Basis ${r.closure.basis}  Erfassung ${String(r.captureGap)} (${r.captureGapBasis})  ${r.topVotes}/${r.needed} ov=${r.observedValidations}  ${r.critical ? "kritisch" : "nicht kritisch"}`);
 }
 const failed = checks.filter((c) => !c.ok);
 console.log("");
