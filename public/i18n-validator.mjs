@@ -45,7 +45,10 @@ export const VALIDATOR_DICT = {
   'vt.state.clean': 'observed, no deviation',
   'vt.state.solo': 'solo – only this validator',
   'vt.state.cohort': 'few peers – 2 to 4 validators',
-  'vt.state.network': 'network event – 5 or more validators',
+  // Der Scope 'network' zaehlt Knoten, die DIESER Rekorder auf einem Ledger gemeinsam ohne
+  // Stimme sieht. Ob das Netz ein Ereignis hatte, sagt die Zahl nicht - die Gegenprobe
+  // direkt daneben (Kohorten-Bilanz) sagt, wie viele dieser Knoten die Referenz entlastet.
+  'vt.state.network': '5 or more validators without a vote in this capture',
   'vt.state.unknown': 'deviation, cohort not recorded',
   'vt.state.none': 'no ledger observed in this interval',
   'vt.sign.hit': 'transaction signature measured',
@@ -132,7 +135,7 @@ export const VALIDATOR_DICT = {
     'vt.peersLine': 'other validators on this ledger ({n}):',
     'vt.peersLineSame': 'same failure on this ledger ({n}):',
     'vt.peersLineOther': 'different failure on this ledger ({n}):',
-    'vt.attackPeers': 'affected on this ledger ({n}):',
+    'vt.attackPeers': 'without a vote in this capture ({n}):',
     'vt.atkBound': 'closed ledger: of the {absent} nodes with no seen vote at most {max} can be genuine, at least {min} are recorder gaps',
     'vt.atkBoundMissing': 'boundary not recorded: this ledger has no forensics row, so the count is not bounded',
     'vt.peersMore': '+{n} more',
@@ -701,7 +704,7 @@ export const VALIDATOR_DICT = {
   'vt.state.clean': 'beobachtet, keine Abweichung',
   'vt.state.solo': 'solo – nur dieser Validator',
   'vt.state.cohort': 'wenige Mit-Validatoren – 2 bis 4',
-  'vt.state.network': 'Netzereignis – 5 oder mehr Validatoren',
+  'vt.state.network': '5 oder mehr Validatoren ohne Stimme in dieser Erfassung',
   'vt.state.unknown': 'Abweichung, Kohorte nicht erfasst',
   'vt.state.none': 'kein Ledger in diesem Intervall beobachtet',
   'vt.sign.hit': 'Transaktions-Signatur gemessen',
@@ -788,7 +791,7 @@ export const VALIDATOR_DICT = {
     'vt.peersLine': 'andere Validatoren auf diesem Ledger ({n}):',
     'vt.peersLineSame': 'dasselbe Problem auf diesem Ledger ({n}):',
     'vt.peersLineOther': 'andere Abweichung auf diesem Ledger ({n}):',
-    'vt.attackPeers': 'auf diesem Ledger betroffen ({n}):',
+    'vt.attackPeers': 'ohne Stimme in dieser Erfassung ({n}):',
     'vt.atkBound': 'geschlossener Ledger: von den {absent} Knoten ohne erfassten Vote können höchstens {max} echt sein, mindestens {min} sind Erfassungs-Lücken dieses Recorders',
     'vt.atkBoundMissing': 'Grenze nicht erfasst: dieser Ledger hat keine Forensik-Zeile, die Zahl ist also nicht begrenzt',
     'vt.peersMore': '+{n} weitere',

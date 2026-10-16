@@ -41,6 +41,7 @@ import {
 import { normalizeTag } from "../lib/tag-identity.mjs";
 import { validatorView } from "../lib/validator-service.mjs";
 import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
+import { groundOf, groundTruthMap } from "../lib/validator-ground.mjs";
 import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 import {
@@ -188,10 +189,10 @@ app.get("/api/validator-trace", async (req, res) => {
   // Zahl, die das Panel zeigt, wird gegen die eigene Erfassung gerechnet. Ohne Referenz bleibt
   // die Gegenprobe offen - sie wird nicht als Entlastung gelesen.
   const groundMap = await groundTruthMap();
-  const ground = master && groundMap ? groundMap.get(master) ?? null : null;
+  const ground = groundOf(groundMap, master);
   const side = await localHistorySide();
   if (master && (format === "csv" || format === "json")) {
-    const report = validatorReport(days, master, { range, now: Date.now(), clusters: side.clusters });
+    const report = validatorReport(days, master, { range, now: Date.now(), clusters: side.clusters, ground });
     if (format === "json") return res.json(report);
     const safeRange = REPORT_RANGES.includes(range) ? range : "7d";
     const name = "validator-report-" + master.slice(0, 8) + "-" + safeRange + ".csv";
@@ -205,22 +206,6 @@ app.get("/api/validator-trace", async (req, res) => {
   // die Cluster auch dem Selbst-Report zur Verfuegung.
   res.json({ available: true, source, days: days.length, historyError: side.historyError, ...traceForValidator(days, master, { range, clusters: side.clusters, ground, groundPeers: groundMap }) });
 });
-
-// Die Referenz je Knoten aus der Validator-Ansicht (60 s Cache). Fehlend oder ohne Zahl ist
-// kein Befund: die Gegenprobe bleibt offen und wird im Overlay als offen ausgewiesen.
-async function groundTruthMap() {
-  try {
-    const view = await validatorView();
-    const asOfMs = view.updatedAt ?? null;
-    const map = new Map();
-    for (const v of view.validators ?? []) {
-      const a = v.agreement24h ?? {};
-      map.set(v.key, { missed: a.missed ?? null, total: a.total ?? null, score: a.score ?? null,
-        incomplete: a.incomplete === true, asOfMs });
-    }
-    return map;
-  } catch { return null; }
-}
 
 app.get("/api/validators", async (req, res) => {
   try {

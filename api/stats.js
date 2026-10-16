@@ -6,6 +6,7 @@ import { validatorView } from "../lib/validator-service.mjs";
 import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/validator-trace-query.mjs";
 import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
+import { groundOf, groundTruthMap } from "../lib/validator-ground.mjs";
 import { readHistoryGitHub } from "../lib/history.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,8 +61,13 @@ export default async function handler(req, res) {
       // Maschinenlesbarer Selbst-Report: ein Betreiber soll seinen Knoten per Cron auswerten
       // koennen, ohne das Overlay zu oeffnen. csv = Tabellenform, json = nur der Report.
       const attackClusters = await impactClusters(Date.now());
+      // Die Netz-Referenz je Knoten steht beiden Ausgaengen zur Verfuegung: dem Overlay-Trace
+      // und dem maschinenlesbaren Selbst-Report. Ein Report ohne Gegenprobe enthaelt die Zahl
+      // affectedValidators ohne die Zahl, die sie traegt oder widerlegt.
+      const groundMap = await groundTruthMap();
+      const ground = groundOf(groundMap, master);
       if (master && (format === "csv" || format === "json")) {
-        const report = validatorReport(days, master, { range, now: Date.now(), clusters: attackClusters || [] });
+        const report = validatorReport(days, master, { range, now: Date.now(), clusters: attackClusters || [], ground });
         if (format === "json") return res.status(200).json(report);
         const safeRange = REPORT_RANGES.includes(range) ? range : "7d";
         const name = "validator-report-" + master.slice(0, 8) + "-" + safeRange + ".csv";
@@ -70,9 +76,12 @@ export default async function handler(req, res) {
           .setHeader("content-disposition", "attachment; filename=\"" + name + "\"")
           .send(reportCsv(report));
       }
-      // Produktions-Paritaet: lokal erhaelt traceForValidator die Cluster, hier bisher nicht.
-      // Ohne sie ist die Angriffs-Wirkungs-Ebene auf Vercel null, waehrend sie lokal urteilt.
-      const body = traceForValidator(days, master, { range, clusters: attackClusters || [] });
+      // Produktions-Paritaet: beide Einstiegspunkte muessen mit derselben Gegenprobe urteilen.
+      // Ohne Netz-Referenz je Knoten bleibt die Erfassungs-Luecke offen und der Endpoint
+      // behauptet weniger, als er weiss: lokal die eine, live die andere Auskunft.
+      const body = traceForValidator(days, master, {
+        range, clusters: attackClusters || [], ground: groundOf(groundMap, master), groundPeers: groundMap,
+      });
       return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(attackClusters), ...body });
     }
     res.status(200).json(await getStats());

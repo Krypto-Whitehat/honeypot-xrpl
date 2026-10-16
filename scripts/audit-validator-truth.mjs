@@ -24,6 +24,7 @@
 // Lauf:  node scripts/audit-validator-truth.mjs              (24-h-Fenster, alle Knoten mit Anspruch)
 //        node scripts/audit-validator-truth.mjs --hours=1    (Stunde-Fenster)
 //        node scripts/audit-validator-truth.mjs --max=20     (Deckel je Tag beim Einlesen)
+//        node scripts/audit-validator-truth.mjs --ledger=107695059  (Retrace: die Knoten dieses Ledgers)
 // Exit 0 = kein Widerspruch: jede Knoten-Aussage bleibt innerhalb ihrer beiden Grenzen.
 // Exit 1 = mindestens ein Widerspruch: die Erfassung behauptet mehr Abwesenheiten als die Referenz.
 // Exit 2 = kein Widerspruch gefunden, aber Knoten blieben ungeprueft, weil die Referenz nicht
@@ -32,7 +33,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
 import { fileURLToPath } from "node:url";
-import { absencesOf, closureBound, compareAbsences, summarizeTruth } from "../lib/validator-truth.mjs";
+import { ABSENCE_TYPES, absencesOf, closureBound, compareAbsences, summarizeTruth } from "../lib/validator-truth.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validator-trace");
@@ -88,6 +89,88 @@ const names = new Map();
 const listRes = await get("https://api.xrpscan.com/api/v1/validators");
 if (listRes.json && Array.isArray(listRes.json)) {
   for (const v of listRes.json) if (v?.master_key) names.set(v.master_key, v.domain || "");
+}
+
+// --ledger=<index>: die Retrace-Ansicht eines einzelnen Ledgers. Die Fensterzahl der Referenz
+// begrenzt, WIE VIELE Behauptungen nicht stimmen koennen; diese Ansicht zeigt, WELCHE Knoten
+// diese Engine an diesem Ledger als Nicht-Signierer fuehrt, und was die Referenz zu jedem
+// einzelnen sagt. Genau das fehlt, wenn eine Zeile auffaellt und nachgeprueft werden soll.
+const ledgerArg = args.find((a) => a.startsWith("--ledger="));
+if (ledgerArg) {
+  const index = Number(ledgerArg.split("=")[1]);
+  if (!Number.isFinite(index) || index <= 0) {
+    console.log("--ledger braucht eine Ledger-Index, zum Beispiel --ledger=107695059");
+    process.exit(2);
+  }
+  process.exit(await ledgerProbe(index));
+}
+
+async function ledgerProbe(index) {
+  const stats = ledgerRows.get(index) ?? null;
+  const named = [];
+  for (const [master, list] of claimsByMaster) {
+    const hits = list.filter((c) => c.ledgerIndex === index && ABSENCE_TYPES.has(c.type));
+    if (hits.length) named.push({ master, hits });
+  }
+  named.sort((a, b) => b.hits.length - a.hits.length || String(a.master).localeCompare(String(b.master)));
+  const c = stats?.c ?? {};
+  const absentCount = (c.missed ?? 0) + (c.noQuorum ?? 0);
+  const need = Number(stats?.need) || 0;
+  const members = Number.isFinite(stats?.mm) && stats.mm > 0 ? stats.mm
+    : (need ? Math.ceil(need / TRACE_DEFAULTS.quorumFrac) : null);
+  const bound = closureBound({ members, needed: need });
+  console.log("LEDGER " + index);
+  console.log("  in dieser Erfassung:", stats ? "ja" : "NEIN - dieser Ledger steht in keinem geladenen Tag");
+  if (stats) {
+    console.log("  geschlossen:", stats.cl === true ? "ja" : "nein/unklar",
+      "| Hash:", typeof stats.ch === "string" ? stats.ch : "-",
+      "| Transaktionen:", Number.isFinite(stats.tx) ? stats.tx : "-");
+    console.log("  dUNL-Knoten:", members ?? "-", "| Quorum-Ziel:", need || "-",
+      "| erfasste Stimmen:", stats.v ?? "-", "| bestes Ergebnis:", stats.top ?? "-",
+      "| Abstand:", stats.mg ?? "-");
+    console.log("  Schliess-Grenze:", bound
+      ? "hoechstens " + bound.genuineAbsentMax + " von " + absentCount
+        + " als Nicht-Signierer gefuehrten Knoten koennen echt fehlen -> mindestens "
+        + Math.max(0, absentCount - bound.genuineAbsentMax) + " sind Luecken dieser Erfassung"
+      : "nicht bestimmbar (dUNL-Groesse oder Quorum-Ziel fehlt in dieser Erfassung)");
+  }
+  console.log("");
+  console.log("  Von dieser Erfassung als Nicht-Signierer gefuehrte Knoten:", named.length);
+  const hours = HOURS === 1 ? 1 : 24;
+  let refuted = 0, within = 0, open = 0;
+  for (const { master, hits } of named) {
+    const all = absencesOf(claimsByMaster.get(master) ?? [], master);
+    const res = await get("https://api.xrpscan.com/api/v1/validator/" + master);
+    const a = res.json ? ((hours === 1 ? res.json.agreement_1h : res.json.agreement_24h) ?? {}) : {};
+    const scan = res.json ? {
+      missed: a.missed ?? null, total: a.total ?? null, score: a.score ?? null,
+      incomplete: a.incomplete === true, asOfMs: Date.now(),
+    } : null;
+    const r = scan
+      ? compareAbsences({ master, claims: all, scan, rangeHours: hours, hours })
+      : { verdict: "not-comparable", claims: all.length, groundMissed: null, groundTotal: null,
+        falsePositiveMin: null, reason: res.error ?? "no-reference" };
+    if (r.verdict === "contradicted") refuted += 1;
+    else if (r.verdict === "consistent") within += 1;
+    else open += 1;
+    console.log("  - " + String(names.get(master) || master.slice(0, 16)).padEnd(34)
+      + " an diesem Ledger " + String(hits.length).padStart(2)
+      + "  Fenster " + String(r.claims).padStart(4) + " eigene / Referenz "
+      + String(r.groundMissed ?? "-").padStart(5) + "/" + String(r.groundTotal ?? "-").padStart(6)
+      + "  mindestens eigene " + String(r.falsePositiveMin ?? "-").padStart(4)
+      + "  " + (r.verdict === "contradicted" ? "WIDERLEGT" : r.verdict === "consistent" ? "innerhalb" : "keine Referenz")
+      + "  " + r.reason);
+    await sleep(DELAY);
+  }
+  console.log("");
+  console.log("BEFUND LEDGER " + index);
+  console.log("  benannte Knoten:", named.length, "| widerlegt:", refuted,
+    "| innerhalb der Referenz:", within, "| ohne verwertbare Referenz:", open);
+  console.log("  Welcher der benannten Knoten an diesem Ledger echt fehlte, bleibt offen: die Referenz"
+    + " ist eine Fensterzahl, keine Liste je Ledger.");
+  console.log("  Nachlesbar: https://xrpscan.com/ledger/" + index + " und https://api.xrpscan.com/api/v1/validator/<master>");
+  if (open) return 2;
+  return refuted ? 1 : 0;
 }
 
 // Grenze B zuerst, ganz ohne Netz: die Schliessung selbst begrenzt, wie viele Knoten echt
