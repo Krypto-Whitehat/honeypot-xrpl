@@ -32,6 +32,13 @@ const WSS = (process.env.TRACE_WSS || "wss://xrplcluster.com").split(",").map((s
 const VL_URL = "https://vl.ripple.com";
 const REGISTRY_URL = "https://api.xrpscan.com/api/v1/validatorregistry";
 const DETAIL_QUEUE_MAX = 50;
+// Forensik-Detail je Ledger mit Abweichung. Der Deckel schützt die Tagesdatei; bei Erreichen
+// wird die älteste Forensik verworfen und das offen markiert (nie still).
+const LEDGER_STATS_CAP = 6000;
+// Ledger-Ebene Anomalien (ohne Incident-Zusatz-Tags) — nur diese gehen in die
+// Risikovergleichsrechnung ein. new-tx-type:* zählbar über das Präfix.
+const ANOMALY_TAGS = new Set(["no-quorum", "hash-split", "load-spike", "load-extreme", "close-gap", "amendment-activity", "unl-change"]);
+const isAnomalyTag = (tag) => ANOMALY_TAGS.has(tag) || String(tag).startsWith("new-tx-type:");
 const FLUSH_MS = REMOTE ? 300000 : 30000;
 const RUN_SECONDS = Number(process.env.TRACE_RUN_SECONDS) || 0;
 
@@ -64,7 +71,10 @@ const dirty = new Set();  // Daten, die beim nächsten Flush geschrieben werden 
 let lastLedger = null;    // letzter gesehener Ledger-Index (für Lückenerkennung)
 
 function emptyDay(date) {
-  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null, firstMs: null, lastMs: null, hourly: {} };
+  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null, firstMs: null, lastMs: null, hourly: {},
+    // Forensik + Anomalie-Zähler: die Grundlage jeder Retrace. Ohne sie ist die Frage
+    // 'warum verpasst?' aus der Aufzeichnung nicht beantwortbar.
+    ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {} };
 }
 function dayObj(date) {
   if (!days.has(date)) {
@@ -75,6 +85,10 @@ function dayObj(date) {
     if (obj) {
       obj.gaps ??= []; obj.incidents ??= []; obj.validators ??= {}; obj.ledgers ??= 0; obj.quorumFail ??= 0;
       obj.hourly ??= {}; obj.firstMs ??= null; obj.lastMs ??= null;
+      // Altbestand (vor der Forensik-Stufe) hat diese Felder nicht -> explizit anlegen, damit
+      // die Retrace sie nie als "beobachtet: 0" missdeutet, sondern als "nicht erfasst".
+      obj.ledgerStats ??= []; obj.ledgerStatsTruncated ??= false; obj.incidentLedgers ??= 0;
+      obj.anomaly ??= {}; obj.anomalyFail ??= {};
       // Altbestand: noQuorum-Zähler fehlen -> 0, damit ++ nicht auf undefined läuft.
       for (const v of Object.values(obj.validators)) if (v && typeof v === "object") v.noQuorum ??= 0;
       for (const hb of Object.values(obj.hourly)) for (const v of Object.values(hb?.v ?? {})) if (v && typeof v === "object") v.noQuorum ??= 0;
@@ -110,6 +124,28 @@ function recordResult(r, detailNote) {
     else if (inc.type === "wrong-hash") { v.wrongHash++; hv.wrongHash++; }
     else if (inc.type === "no-quorum") { v.noQuorum = (v.noQuorum ?? 0) + 1; hv.noQuorum = (hv.noQuorum ?? 0) + 1; }
     d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined });
+  }
+  // Forensik je Ledger mit Abweichung: Quorum-Rand, Hash-Spaltung, Close-Abstand, Last und
+  // die Betroffenheit je Typ. Das ist der Unterschied zwischen "Validator hat verpasst" und
+  // "warum er verpasst hat".
+  if (r.incidents.length) {
+    d.incidentLedgers += 1;
+    if (d.ledgerStats.length >= LEDGER_STATS_CAP) { d.ledgerStats.shift(); d.ledgerStatsTruncated = true; }
+    const f = r.forensics ?? {};
+    d.ledgerStats.push({
+      l: r.ledgerIndex, t: r.closeMs,
+      v: f.votes ?? 0, need: f.needed ?? 0, top: f.topVotes ?? 0, mg: f.margin ?? 0,
+      sp: f.runnerVotes ?? 0, gap: r.closeGapMs ?? null, gmed: r.medianGap ?? null,
+      tx: r.txCount ?? 0, med: r.medianTx ?? 0,
+      c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
+    });
+  }
+  // Anomalie-Zähler auf Ledger-Ebene: Nenner und Zähler für den Risikovergleich. Ohne sie wäre
+  // jede Ursache eine Einzelbeobachtung ohne Vergleichswert.
+  for (const tag of r.ledgerTags ?? []) {
+    if (!isAnomalyTag(tag)) continue;
+    d.anomaly[tag] = (d.anomaly[tag] ?? 0) + 1;
+    if (r.incidents.length) d.anomalyFail[tag] = (d.anomalyFail[tag] ?? 0) + 1;
   }
   d.lastLedger = r.ledgerIndex;
   dirty.add(date);
