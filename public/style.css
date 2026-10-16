@@ -2983,43 +2983,108 @@ body[data-a6] {
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }
 @media (max-width: 760px) { .vt-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vt-ev { grid-template-columns: 1fr 1fr; } }
-/* Incident-Profil (3D): echte Prismen auf schräger Grundfläche, gestapelt nach Vorfallstyp.
-   Geometrie: Tiefenvektor (+d, -dz) mit d = 15, dz = 13. Die Seitenfläche ist ein Rechteck der
-   Breite d, geschert mit skewY(-skew), tan(skew) = dz/d. Die Deckfläche ist dasselbe Rechteck um
-   die Achse gedreht: Höhe dz, geschert mit skewX(skew - 90deg), tan(90 - skew) = d/dz. Nur dann
-   treffen sich die Kanten exakt (13 · tan 49° = 15 = d) und das Prisma ist geschlossen.
-   Balkenhöhe und Achse teilen sich
-   ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit --n Vorfällen ist deshalb zwingend
-   so hoch, wie die Gitterlinie bei n sagt. Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { --d: 15px; --dz: 13px; --skew: 41deg; --plot-h: 176px; --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: rgba(20, 20, 22, 0.26); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+/* Incident-Profil (3D): ein Prisma je Zeitintervall auf eigener Grundriss-Kachel.
+   Geometrie ist abgeleitet statt paarweise gesetzt: --d = Tiefe in der Bildebene,
+   --dz = --d · tan 41° (0,86929) = Höhenversatz der Tiefenverschiebung, --skew = 41deg.
+   Die Tiefenfläche ist --d breit und mit -skew geschert (Höhenversatz bei x = --d:
+   d · tan 41° = --dz). Die Deckfläche ist --dz hoch und mit (skew - 90deg) geschert
+   (Breitenversatz bei y = --dz: dz · tan 49° = 1,15037 · 0,86929 · d = d). Beide Kanten
+   treffen sich deshalb bei jeder Breite exakt; ein Wertepaar wie 15/13 wäre nur für eine
+   einzige Breite geschlossen und öffnet das Prisma um Bruchteile eines Pixels.
+   Tiefe und Säulenabstand folgen der Containerbreite (cqw) statt einem Fixwert: 24 Intervalle
+   auf 320 px dürfen nicht in die Nachbarssäule ragen – sonst verschmelzen die Deckflächen zu
+   einem durchgehenden Schrägband und die Säulen sind nicht mehr je Intervall zählbar.
+    Invariante --d <= --gap in jedem cqw-Zweig (0,78 < 1,02, 3 < 3,5, 10 < 13): die Deckfläche
+    ragt exakt --d über die Vorderfläche hinaus (dz · tan 49° = d), die Tiefenfläche ebenso.
+    Der Überstand in die Nachbarsspalte ist damit --d - --gap und damit nie positiv.
+   Beleuchtung (Licht von oben): Vorderfläche Grundfarbe, Deckfläche aufgehellt, Tiefenfläche
+   abgedunkelt. Erst diese drei Töne geben dem Auge ein Volumen; drei gleichfarbige
+   Scherflächen lesen als schiefe Rechtecke.
+   Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
+   --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
+   Kein WebGL, keine neue Abhängigkeit. */
+.vt-profile { container-type: inline-size; --skew: 41deg; --dz-k: 0.86929; --d: clamp(3px, 0.78cqw, 10px); --dz: calc(var(--d) * var(--dz-k)); --gap: clamp(3.5px, 1.02cqw, 13px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: rgba(20, 20, 22, 0.34); --vt-sheen: rgba(255, 255, 255, 0.26); --vt-edge: rgba(20, 20, 22, 0.24); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
-.vt-plot { position: relative; height: calc(var(--plot-h) + var(--dz)); margin: 0 calc(var(--d) + 4px) 0 46px; }
-.vt-grid, .vt-bars, .vt-floor { position: absolute; left: 0; right: 0; bottom: 0; }
-.vt-grid, .vt-bars { height: var(--plot-h); }
+.vt-plot { position: relative; height: calc(var(--plot-h) + var(--dz)); margin: 0 calc(var(--d) + 3px) 0 var(--gutter); }
+.vt-grid, .vt-bars { position: absolute; left: 0; right: 0; bottom: 0; height: var(--plot-h); }
 .vt-gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--a6-graph-grid); }
 .vt-gridline.vt-zero { background: var(--a6-graph-line-soft); }
-.vt-gridlabel { position: absolute; right: calc(100% + 8px); top: -6px; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
-.vt-bars { display: flex; align-items: stretch; gap: 3px; }
-.vt-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; }
-.vt-col::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--a6-graph-grid); }
-.vt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * var(--n, 0)); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px rgba(20, 20, 22, 0.18); }
-.vt-side { position: absolute; left: 100%; top: 0; width: var(--d); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px rgba(20, 20, 22, 0.22); }
-.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); box-shadow: inset 0 0 0 1px rgba(20, 20, 22, 0.22); }
-.vt-floor { height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 60%, transparent); }
-.vt-floor i { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--a6-graph-line-soft); }
-.vt-axis { position: relative; height: 14px; margin: 4px calc(var(--d) + 4px) 0 46px; }
+.vt-gridlabel { position: absolute; right: calc(100% + 6px); top: -6px; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
+.vt-bars { display: flex; align-items: stretch; gap: var(--gap); }
+@keyframes vt-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.vt-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; animation: vt-rise 300ms ease-out backwards; animation-delay: calc(var(--i, 0) * 16ms); }
+/* Grundriss = Grundfläche des Prismas: Vorderkante auf der Achse, Rückkante um (+d, -dz)
+   versetzt. Der Grundriss trägt den Intervall-Zustand: clean (beobachtet, keine Abweichung),
+   solo / cohort / network (Abweichung, nach Zahl betroffener dUNL-Validatoren), unknown
+   (Abweichung, Kohorte nicht erfasst), none (kein Ledger aufgezeichnet). Ein leeres
+   Intervall bleibt als Kachel stehen, damit die Zeitachse sich durchgehend liest. */
+.vt-foot { position: absolute; left: 0; right: 0; bottom: 0; height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-clean .vt-foot { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-col.vt-state-solo .vt-foot { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
+.vt-col.vt-state-cohort .vt-foot { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-col.vt-state-network .vt-foot { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-col.vt-state-unknown .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-none .vt-foot { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
+.vt-bar { position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * var(--n, 0)); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
+.vt-side { position: absolute; left: 100%; top: 0; width: var(--d); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dz); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(var(--vt-sheen), var(--vt-sheen)); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+/* Signatur-Marker: sitzt auf der Oberkante des Prismas (Hoehe --u * --n) und zeigt, dass die
+   Transaktions-Forensik an einem Ausfall-Ledger dieses Intervalls eine Form-Signatur gemessen
+   hat. Er ist schmucklos und absichtlich klein - die Aussage liegt im Readout und im Streifen. */
+.vt-mark { position: absolute; left: 50%; bottom: calc(var(--u) * var(--n, 0) + var(--dz) + 5px); width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
+.vt-axis { position: relative; height: 14px; margin: 4px calc(var(--d) + 3px) 0 var(--gutter); }
 .vt-axis span { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); white-space: nowrap; }
-.vt-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0 46px; padding: 0; }
+/* Kohortenstreifen: eine Zeile unter der Zeitachse, exakt auf den Intervallen der Säulen
+   (gleiche Ränder, gleicher Abstand, gleiche Flex-Basis). Er zeigt, wie viele dUNL-Validatoren
+   im selben Intervall ausfielen – die Frage, die zwischen "mein Knoten" und "Netzereignis"
+   trennt. Ohne Aufzeichnung ist die Kachel schraffiert, nicht grau. */
+.vt-heat { display: flex; gap: var(--gap); margin: 3px calc(var(--d) + 3px) 0 var(--gutter); }
+.vt-heat-cell { flex: 1 1 0; min-width: 0; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-heat-cell.vt-state-clean { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-heat-cell.vt-state-solo { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
+.vt-heat-cell.vt-state-cohort { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-heat-cell.vt-state-network { background: var(--a6-accent); }
+.vt-heat-cell.vt-state-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
+.vt-heat-cell.vt-state-none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); opacity: 0.6; }
+/* Signaturstreifen: eine Zeile unter dem Kohortenstreifen, exakt auf denselben Intervallen
+   (gleiche Raender, gleicher Abstand, gleiche Flex-Basis). Er zeigt, ob die Transaktions-
+   Forensik an den Ausfall-Ledern dieses Validators eine Form-Signatur gemessen hat. */
+.vt-sign { display: flex; gap: var(--gap); margin: 3px calc(var(--d) + 3px) 0 var(--gutter); }
+.vt-sign-cell { flex: 1 1 0; min-width: 0; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-sign-cell.vt-sign-hit { background: var(--a6-accent); }
+.vt-sign-cell.vt-sign-clear { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-sign-cell.vt-sign-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
+.vt-sign-cell.vt-sign-none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); opacity: 0.6; }
+.vt-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 0 var(--gutter); padding: 0; }
+.vt-heat-legend { margin-top: 4px; }
+.vt-sign-legend { margin-top: 4px; }
+.vt-sign-note { margin: 6px 0 0 var(--gutter); font-size: 10px; }
 .vt-legend li { display: flex; align-items: center; gap: 6px; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-body); }
 .vt-swatch { width: 12px; height: 12px; border: 1px solid var(--a6-line-strong); border-radius: var(--a6-r-xs); }
 .vt-swatch.vt-c-missed { background: var(--a6-sev-suspect); }
 .vt-swatch.vt-c-partial { background: var(--a6-sev-info); }
 .vt-swatch.vt-c-wrongHash { background: var(--a6-sev-malicious); }
 .vt-swatch.vt-c-noQuorum { background: var(--a6-sev-neutral); }
-.vt-col:hover .vt-bar, .vt-col:focus-visible .vt-bar { box-shadow: inset 0 0 0 1px rgba(20, 20, 22, 0.18), 0 0 0 2px var(--a6-focus); }
+.vt-heat-key { width: 12px; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-heat-key.vt-state-clean { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-heat-key.vt-state-solo { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
+.vt-heat-key.vt-state-cohort { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
+.vt-heat-key.vt-state-network { background: var(--a6-accent); }
+.vt-heat-key.vt-state-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
+.vt-heat-key.vt-state-none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); opacity: 0.6; }
+.vt-sign-key { width: 12px; height: 9px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
+.vt-sign-key.vt-sign-hit { background: var(--a6-accent); }
+.vt-sign-key.vt-sign-clear { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-sign-key.vt-sign-unknown { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); }
+.vt-sign-key.vt-sign-none { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); opacity: 0.6; }
+/* Zustände: Hover und Tastaturfokus heben das Prisma aus der Ebene (nur transform, kein
+   Layout-Sprung). Der Fokusrahmen umfasst die ganze Intervallspalte, weil Readout und
+   Screenreader dieselbe Spalte lesen. */
+.vt-col:hover .vt-bar, .vt-col:focus-visible .vt-bar { transform: translateY(-3px); }
 .vt-col:focus { outline: none; }
+.vt-col:focus-visible { outline: 2px solid var(--a6-focus); outline-offset: 2px; }
 .vt-sub { margin: 0 0 8px; font-size: 11px; color: var(--a6-muted); }
 .vt-rc-list { display: grid; gap: 8px; }
 .vt-rc { border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 10px 12px; background: var(--a6-surface-alt); }
@@ -3056,24 +3121,24 @@ body[data-a6] {
 .vt-small { display: block; color: var(--a6-muted); font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .vt-atk { display: grid; grid-template-columns: 150px 170px 150px 1fr; gap: 8px; align-items: baseline; }
 .vt-atk-when, .vt-atk-n { color: var(--a6-muted); }
-@media (prefers-reduced-motion: reduce) { .vt-bar, .vt-side, .vt-top, .vt-col { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .vt-col { animation: none; }
+  .vt-bar { transition: none; }
+}
 @media (max-width: 760px) {
-  /* Mobil andere Kantenlängen, aber derselbe Zusammenhang: dz = d · tan(skew).
-   10 · tan 41° = 8,69 -> 8,7px. Ein Wertepaar wie 10/9 würde das Prisma um 0,35px öffnen. */
-  .vt-profile { --plot-h: 132px; --d: 10px; --dz: 8.7px; }
-  .vt-plot, .vt-axis, .vt-legend { margin-left: 34px; }
-  .vt-plot { margin-right: calc(var(--d) + 2px); }
-  .vt-axis { margin-right: calc(var(--d) + 2px); }
-  .vt-bars { gap: 2px; }
+  /* Tiefe, Säulenabstand und Achsen-Gutter folgen der Containerbreite (cqw) – hier braucht nur
+     die Plot-Höhe ein Mobilmaß; die Kantenbeziehung dz = d · tan 41° gilt unverändert. */
+  .vt-profile { --plot-h: 132px; }
   .vt-rc-metrics { grid-template-columns: 1fr 1fr; }
   .vt-atk { grid-template-columns: 1fr 1fr; }
   .vt-table { font-size: 10px; }
   .vt-table th, .vt-table td { padding: 5px 4px; }
 }
-/* Datenvisualisierung: die Farbcodierung trägt die Aussage (Vorfallstyp). In erzwungenen
-   Kontrastfarben bleiben die Flächen erhalten, Text und Achsen folgen Systemfarben. */
+/* Datenvisualisierung: die Farbcodierung trägt die Aussage (Vorfallstyp und Kohorten-Breite).
+   In erzwungenen Kontrastfarben bleiben Prismen- und Streifenflächen erhalten, Text und Achsen
+   folgen Systemfarben. */
 @media (forced-colors: active) {
-  .vt-bar, .vt-side, .vt-top, .vt-swatch { forced-color-adjust: none; }
+  .vt-bar, .vt-side, .vt-top, .vt-foot, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
   .vt-col:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
   .vt-hyp.vt-st-measured { border-color: CanvasText; }
 }

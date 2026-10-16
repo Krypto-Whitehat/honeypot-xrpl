@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTracker } from "../lib/validator-trace.mjs";
+import { classifyShape, createShapeTracker, SIGNATURE_TAGS } from "../lib/tx-forensics.mjs";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
 import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 
@@ -32,13 +33,18 @@ const WSS = (process.env.TRACE_WSS || "wss://xrplcluster.com").split(",").map((s
 const VL_URL = "https://vl.ripple.com";
 const REGISTRY_URL = "https://api.xrpscan.com/api/v1/validatorregistry";
 const DETAIL_QUEUE_MAX = 50;
+// Transaktions-Forensik (die Form der Tx je Ledger) läuft über den "transactions"-Stream mit —
+// ohne zusätzliche Ledger-Abfragen. Env TRACE_TX_SHAPE=0 schaltet sie ab (dann fehlt die Ebene
+// vollständig und die Retrace weist das als Datenlücke aus, statt "keine Auffälligkeit" zu sagen).
+const TX_SHAPE = process.env.TRACE_TX_SHAPE !== "0";
 // Forensik-Detail je Ledger mit Abweichung. Der Deckel schützt die Tagesdatei; bei Erreichen
 // wird die älteste Forensik verworfen und das offen markiert (nie still).
 const LEDGER_STATS_CAP = 6000;
-// Ledger-Ebene Anomalien (ohne Incident-Zusatz-Tags) — nur diese gehen in die
-// Risikovergleichsrechnung ein. new-tx-type:* zählbar über das Präfix.
-const ANOMALY_TAGS = new Set(["no-quorum", "hash-split", "load-spike", "load-extreme", "close-gap", "amendment-activity", "unl-change"]);
-const isAnomalyTag = (tag) => ANOMALY_TAGS.has(tag) || String(tag).startsWith("new-tx-type:");
+// Ledger-Ebene Anomalien inklusive der Transaktions-Signaturen: nur diese gehen in die
+// Risikovergleichsrechnung ein (Wie oft fällt ein Ledger MIT dieser Form aus, im Vergleich zu
+// Ledgern ohne sie). new-tx-type:* und type-burst:* sind über das Präfix zählbar.
+const ANOMALY_TAGS = new Set(["no-quorum", "hash-split", "load-spike", "load-extreme", "close-gap", "amendment-activity", "unl-change", ...SIGNATURE_TAGS]);
+const isAnomalyTag = (tag) => ANOMALY_TAGS.has(tag) || String(tag).startsWith("new-tx-type:") || String(tag).startsWith("type-burst:");
 const FLUSH_MS = REMOTE ? 300000 : 30000;
 const RUN_SECONDS = Number(process.env.TRACE_RUN_SECONDS) || 0;
 
@@ -74,7 +80,11 @@ function emptyDay(date) {
   return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null, firstMs: null, lastMs: null, hourly: {},
     // Forensik + Anomalie-Zähler: die Grundlage jeder Retrace. Ohne sie ist die Frage
     // 'warum verpasst?' aus der Aufzeichnung nicht beantwortbar.
-    ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {} };
+    ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {},
+    // Abdeckung der Transaktions-Forensik: wie viele Ledger wirklich eine Tx-Form haben und wie
+    // viele erwartet, aber nicht erfasst wurden. Ohne diese Zähler wäre "keine Signatur" nicht
+    // von "keine Beobachtung" zu trennen.
+    shapeSeen: 0, shapeMissing: 0 };
 }
 function dayObj(date) {
   if (!days.has(date)) {
@@ -88,7 +98,7 @@ function dayObj(date) {
       // Altbestand (vor der Forensik-Stufe) hat diese Felder nicht -> explizit anlegen, damit
       // die Retrace sie nie als "beobachtet: 0" missdeutet, sondern als "nicht erfasst".
       obj.ledgerStats ??= []; obj.ledgerStatsTruncated ??= false; obj.incidentLedgers ??= 0;
-      obj.anomaly ??= {}; obj.anomalyFail ??= {};
+      obj.anomaly ??= {}; obj.anomalyFail ??= {}; obj.shapeSeen ??= 0; obj.shapeMissing ??= 0;
       // Altbestand: noQuorum-Zähler fehlen -> 0, damit ++ nicht auf undefined läuft.
       for (const v of Object.values(obj.validators)) if (v && typeof v === "object") v.noQuorum ??= 0;
       for (const hb of Object.values(obj.hourly)) for (const v of Object.values(hb?.v ?? {})) if (v && typeof v === "object") v.noQuorum ??= 0;
@@ -101,6 +111,22 @@ let MEMBERS = [];
 function recordResult(r, detailNote) {
   const date = dayOf(r.closeMs);
   const d = dayObj(date);
+  // Transaktions-Forensik vor der Zählung: die FORM der Tx ist die Ledger-seitige Mitursache
+  // (Fächerung eines Drainers, Orderbuch-Flut, Fehlerrate, Batch-Verstärkung, Netzwerk-Ebene).
+  // Sie gilt für jedes Ledger, nicht nur für die mit Abweichung — nur so ist der
+  // Risikovergleich "Ausfallwahrscheinlichkeit mit Signatur gegen ohne" überhaupt möglich.
+  const shapeRes = TX_SHAPE ? shapeTracker.commit(r.ledgerIndex) : null;
+  const shapeTags = shapeRes ? classifyShape(shapeRes.form, shapeRes.base).map((x) => x.tag) : [];
+  if (shapeRes?.sweep) shapeTags.push("sweep-window");
+  if (shapeTags.length) {
+    r.ledgerTags = [...new Set([...(r.ledgerTags ?? []), ...shapeTags])];
+    for (const inc of r.incidents) inc.reasons = [...new Set([...(inc.reasons ?? []), ...shapeTags])];
+  }
+  // Ehrliche Lücke statt stiller Null: ein Ledger mit Tx, deren Form aber nicht beobachtet
+  // wurde, ist "nicht erfasst" — ein Ledger ohne Tx ist dagegen wirklich leer.
+  const shapeSeenNow = Boolean(shapeRes?.form);
+  if (TX_SHAPE && shapeSeenNow) d.shapeSeen += 1;
+  else if (TX_SHAPE && r.txCount > 0) d.shapeMissing += 1;
   d.ledgers += 1;
   if (!r.hasQuorum) d.quorumFail += 1;
   // Aufzeichnungsspanne + Stunden-Buckets: Stundenzähler machen die Overlay-
@@ -138,6 +164,11 @@ function recordResult(r, detailNote) {
       sp: f.runnerVotes ?? 0, gap: r.closeGapMs ?? null, gmed: r.medianGap ?? null,
       tx: r.txCount ?? 0, med: r.medianTx ?? 0,
       c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
+      // Tx-Form und die Belege der Signaturen, die in diesem Ledger feuerten. Die Konto-Adresse
+      // selbst wird nicht gespeichert: die Signatur ist eine Form-Aussage, kein Konto-Report.
+      sh: shapeRes?.form ? (({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }) => ({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }))(shapeRes.form) : null,
+      sev: shapeRes ? Object.fromEntries(classifyShape(shapeRes.form, shapeRes.base).map((x) => [x.tag, x.evidence])) : {},
+      sweep: shapeRes?.sweep ?? null,
     });
   }
   // Anomalie-Zähler auf Ledger-Ebene: Nenner und Zähler für den Risikovergleich. Ohne sie wäre
@@ -184,7 +215,8 @@ let ws = null;
 let rpcId = 100;
 const rpcPending = new Map();
 let tracker = null;
-const stats = { validations: 0, ledgers: 0, connects: 0 };
+const shapeTracker = createShapeTracker();
+const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0 };
 let detailQueue = [];
 let detailBusy = false;
 
@@ -260,6 +292,11 @@ function onMessage(ev) {
   } else if (m.type === "ledgerClosed") {
     stats.ledgers++;
     onLedgerClosed(m);
+  } else if (m.type === "transaction" && TX_SHAPE) {
+    stats.txShape++;
+    // Tx dem Ledger zuordnen, in dem sie validiert wurden. Fehlt die Indexangabe, gehört sie
+    // zum zuletzt geschlossenen Ledger — nie zu einem erfundenen.
+    shapeTracker.addTxTo(Number(m.ledger_index ?? lastLedger), m);
   }
 }
 
@@ -270,7 +307,9 @@ function connect(urlIdx = 0, backoff = 1000) {
     stats.connects++;
     log("verbunden", url);
     backoff = 1000;
-    ws.send(JSON.stringify({ id: 1, command: "subscribe", streams: ["validations", "ledger"] }));
+    const streams = ["validations", "ledger"];
+    if (TX_SHAPE) streams.push("transactions");
+    ws.send(JSON.stringify({ id: 1, command: "subscribe", streams }));
   };
   ws.onmessage = onMessage;
   ws.onclose = () => {

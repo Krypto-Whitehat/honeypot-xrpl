@@ -18,13 +18,36 @@ const SPAN_MS = { "1h": 3600000, "24h": 86400000, "7d": 7 * 86400000, all: null 
 const RETRACE_SHOWN = 12;
 const RISK_ROWS = 12;
 
+// Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
+// NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
+// Retrace-Engine: dasselbe Wort "Netzereignis" muss an beiden Stellen dasselbe meinen,
+// sonst widersprechen sich Profil und Diagnose.
+const NETZ_AB = 5;
+// Intervall-Zustande fur Grundriss, Kohortenstreifen und Legende. clean und none kommen aus der
+// gemessenen Ledger-Abdeckung, solo/cohort/network/unknown aus der Kohorten-Breite.
+const STATES = ["clean", "solo", "cohort", "network", "unknown", "none"];
+// Signaturstreifen: gemessene Transaktions-Signatur / beobachtet ohne Signatur / Ebene nicht
+// erfasst / Intervall nicht beobachtet.
+const SIGN_STATES = ["hit", "clear", "unknown", "none"];
+
+// null/undefined = für dieses Ledger ist die Betroffenheit nicht aufgezeichnet (Tage vor
+// der Forensik-Stufe). Das ist NICHT "solo": solo ist eine Messung, unknown eine Lücke.
+export function breadthOf(cohort) {
+  if (!Number.isFinite(cohort)) return "unknown";
+  if (cohort >= NETZ_AB) return "network";
+  if (cohort >= 2) return "cohort";
+  return "solo";
+}
+
 // Korrelations-Tag -> lesbare Bezeichnung (Übersetzung, sonst Rohname; nie eine erfundene Ursache).
 export function tagLabel(h, tag) {
   const base = String(tag).split(":")[0];
   const key = "vt.tag." + base;
   const txt = h.t(key);
   if (!txt || txt === key) return String(tag);
-  return base === "new-tx-type" ? txt + " " + String(tag).slice(base.length + 1) : txt;
+  // new-tx-type:<TYP> und type-burst:<TYP> tragen den Typ im Tag - ohne ihn waere die Anzeige
+  // eine allgemeine Floskel ohne den eigentlichen Transaktionstyp.
+  return base === "new-tx-type" || base === "type-burst" ? txt + " " + String(tag).slice(base.length + 1) : txt;
 }
 
 // Achsenmaß: peak ist ein Vielfaches von step, und es entstehen höchstens 5 Gitterintervalle.
@@ -51,6 +74,10 @@ export function createValidatorTrace(h) {
   // (und damit je Sprache an anderer Stelle sitzen darf).
   const pcn = (v) => (Number.isFinite(v) ? (Math.round(v * 10) / 10).toFixed(1) : "–");
   const stamp = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().replace("T", " ").slice(0, 19) : "–");
+
+  // Kohorten-Zahl lesbar machen. Ohne Messung steht die Lücke da, nicht "0" – eine 0 wäre
+  // die Aussage "kein anderer Validator", die aus Altdaten nicht folgt.
+  const cohortText = (c) => (Number.isFinite(c) ? h.t("vt.cohortCount", { n: c }) : h.t("vt.cohortUnknown"));
 
   function close() {
     if (overlay) { overlay.remove(); overlay = null; }
@@ -132,7 +159,7 @@ export function createValidatorTrace(h) {
       : "";
     body.innerHTML = keyLine + refLine + coverageLine + scopeTag
       + '<div class="vt-cards">' + cards + "</div>" + totalLine + noData
-      + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.retraceTitle")) + "</h3>"
       + '<p class="vt-sub">' + h.esc(h.t("vt.retraceNote")) + "</p>" + retraceBlock(d.retrace)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.riskTitle")) + "</h3>"
@@ -148,26 +175,68 @@ export function createValidatorTrace(h) {
     return range === "7d" || range === "all" ? iso.slice(5, 10) : iso.slice(11, 16);
   }
 
-  // 3D-Profil: ein Prisma je Zeitintervall, Höhe = Anzahl Abweichungen, Stapel = Vorfallstyp.
-  // Keine erfundenen Werte: leere Intervalle bleiben leer, die Achse endet bei der Achsenrunde.
-  function profile3d(incidents, range) {
+  // 3D-Profil: ein Prisma je Zeitintervall auf eigenem Grundriss. Höhe = eigene Abweichungen,
+  // Stapel = Vorfallstyp, Grundriss und Kohortenstreifen = wie viele dUNL-Validatoren im
+  // selben Intervall ebenfalls ausfielen. Die dritte Dimension ist also eine Messgröße der
+  // Retrace-Engine, keine Dekoration.
+  // Keine erfundenen Werte: leere Intervalle zeigen nur ihre Grundriss-Kachel, die Achse endet
+  // bei der Achsenrunde, und ohne Kohortenmessung steht "nicht erfasst" – nicht "solo".
+  // Intervall-Zustand: vier getrennte Aussagen, nie vermischt.
+  //   clean   Intervall beobachtet, keine Abweichung dieses Validators
+  //   none    kein beobachteter Ledger in diesem Intervall (Aufzeichnungsluecke)
+  //   solo / cohort / network  Abweichungen, sortiert nach der Zahl betroffener dUNL-Validatoren
+  //   unknown Abweichungen, aber Kohorten-Breite fuer diese Tage nicht erfasst
+  // clean und none sind Messungen der Aufzeichnung, solo/cohort/network sind Messungen der
+  // Kohorte. Ein leeres Intervall ohne Abdeckungsdaten ist none - nicht "sauber".
+  function stateOf(cell) {
+    if (!cell.total) return cell.ledgers > 0 ? "clean" : "none";
+    return breadthOf(cell.cohort);
+  }
+
+  // Signatur-Zustand eines Intervalls: hat die Transaktions-Forensik an den Ausfall-Ledern
+  // dieses Validators eine Form-Signatur gemessen? Ohne erfasste Ledger der Ebene ist der
+  // Zustand unknown, nicht "keine Signatur" - das waere eine Aussage ueber etwas, das nicht
+  // beobachtet wurde.
+  function signStateOf(cell, layerRecorded) {
+    if (!layerRecorded) return "unknown";
+    if (cell.signatures > 0) return "hit";
+    if (!cell.ledgers && !cell.total) return "none";
+    return "clear";
+  }
+
+  // 3D-Profil: ein Prisma je Zeitintervall auf eigenem Grundriss.
+  //
+  // Die Achse, die Intervalle und die gemessene Ledger-Abdeckung kommen vom Server
+  // (profileCells in lib/validator-trace-query.mjs): dasselbe Fenster, dieselbe Achse, kein
+  // Uhrversatz zwischen Daten und Darstellung. Die Abdeckung je Intervall ist der Grund, warum
+  // "beobachtet, alles in Ordnung" und "hier nichts aufgezeichnet" jetzt verschieden aussehen:
+  // vorher waren beide leer und wurden als "nicht erfasst" schraffiert.
+  //
+  // Ebenen des Profils:
+  //   Balkenhoehe        = eigene Abweichungen (Achsenmass --u, identisch zu den Gitterlinien)
+  //   Stapelfarben       = Vorfallstyp
+  //   Grundriss + Streifen = Intervall-Zustand (clean / solo / cohort / network / unknown / none)
+  //   Marker + Signaturstreifen = Transaktions-Signatur an den Ausfall-Ledern dieses Validators
+  function profile3d(incidents, range, profile, coverage) {
     const list = (incidents || []).filter((i) => Number.isFinite(i.timeMs) && TYPE_KEY[i.type]);
     if (!list.length) return '<p class="vt-empty">' + h.esc(h.t("vt.profileEmpty")) + "</p>";
-    const span = SPAN_MS[range];
-    const now = Date.now();
-    const times = list.map((i) => i.timeMs);
-    const from = span ? now - span : Math.min(...times);
+    if (!profile || !Array.isArray(profile.cells) || profile.cells.length !== BUCKETS) {
+      return '<p class="vt-empty">' + h.esc(h.t("vt.profileNoProfile")) + "</p>";
+    }
+    const cells = profile.cells;
+    // Liegt die Transaktions-Forensik uberhaupt vor? Ohne erfasste Ledger dieser Ebene darf das
+    // Profil nicht "keine Signatur" zeigen, sondern nur "nicht erfasst".
+    const shapeLayer = Boolean(coverage && Number(coverage.shapeSeen) > 0);
+    const from = profile.from;
+    const now = profile.to;
     const width = Math.max(1, now - from);
-    const cells = Array.from({ length: BUCKETS }, () => ({ missed: 0, partial: 0, wrongHash: 0, noQuorum: 0, total: 0, tags: new Map() }));
     const legend = { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 };
-    for (const i of list) {
-      const key = TYPE_KEY[i.type];
-      const idx = Math.min(BUCKETS - 1, Math.max(0, Math.floor(((i.timeMs - from) / width) * BUCKETS)));
-      const cell = cells[idx];
-      cell[key] += 1;
-      cell.total += 1;
-      legend[key] += 1;
-      for (const r of i.reasons || []) cell.tags.set(r, (cell.tags.get(r) || 0) + 1);
+    const states = { clean: 0, solo: 0, cohort: 0, network: 0, unknown: 0, none: 0 };
+    const signs = { hit: 0, clear: 0, unknown: 0, none: 0 };
+    for (const cell of cells) {
+      for (const k of PROFILE_TYPES) legend[k] += cell[k] || 0;
+      states[stateOf(cell)] += 1;
+      signs[signStateOf(cell, shapeLayer)] += 1;
     }
     const { peak, step } = axisScale(Math.max(...cells.map((x) => x.total)));
     const grid = [];
@@ -175,8 +244,10 @@ export function createValidatorTrace(h) {
       grid.push('<div class="vt-gridline' + (v === 0 ? " vt-zero" : "") + '" style="bottom:'
         + ((v / peak) * 100).toFixed(3) + '%"><span class="vt-gridlabel">' + h.esc(String(v)) + "</span></div>");
     }
-    const cols = cells.map((cell, i) => {
-      const label = bucketLabel(from, width, i, range);
+    const cols = cells.map((cell) => {
+      const i = cell.index;
+      const state = stateOf(cell);
+      const sign = signStateOf(cell, shapeLayer);
       const stops = [];
       let acc = 0;
       let cap = null;
@@ -187,34 +258,53 @@ export function createValidatorTrace(h) {
         stops.push("var(--vt-" + k + ") " + a.toFixed(2) + "% " + ((acc / cell.total) * 100).toFixed(2) + "%");
         cap = k;
       }
-      const topTags = [...cell.tags.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3)
-        .map(([tag, n]) => tl(tag) + " ×" + n).join(" · ");
-      const tip = h.t("vt.bucketReadout", { label, total: cell.total, missed: cell.missed, partial: cell.partial, wrongHash: cell.wrongHash, noQuorum: cell.noQuorum })
-        + (topTags ? " · " + topTags : "");
-      const style = "--n:" + cell.total + (stops.length ? ";--vt-grad:linear-gradient(to top," + stops.join(",") + ")" : "")
+      const topTags = Object.entries(cell.tags).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 3)
+        .map(([tag, n]) => tl(tag) + " x" + n).join(" . ");
+      const args = {
+        label: bucketLabel(from, width, i, range), total: cell.total, missed: cell.missed, partial: cell.partial,
+        wrongHash: cell.wrongHash, noQuorum: cell.noQuorum, cohort: cohortText(cell.cohort),
+        ledgers: num(cell.ledgers), signatures: num(cell.signatures),
+      };
+      const style = "--n:" + cell.total + ";--i:" + i
+        + (stops.length ? ";--vt-grad:linear-gradient(to top," + stops.join(",") + ")" : "")
         + (cap ? ";--vt-cap:var(--vt-" + cap + ")" : "");
-      const aria = h.t("vt.bucketAria", { label, total: cell.total, missed: cell.missed, partial: cell.partial, wrongHash: cell.wrongHash, noQuorum: cell.noQuorum });
-      return '<div class="vt-col" tabindex="0" role="group" data-tip="' + h.esc(tip) + '" aria-label="' + h.esc(aria) + '">'
-        + '<div class="vt-bar" style="' + style + '">'
+      return '<div class="vt-col vt-state-' + state + '" tabindex="0" role="group" style="' + style + '" data-tip="'
+        + h.esc(h.t("vt.bucketReadout", args) + (topTags ? " . " + topTags : "")) + '" aria-label="'
+        + h.esc(h.t("vt.bucketAria", args)) + '">'
+        + '<span class="vt-foot" aria-hidden="true"></span>'
+        + '<div class="vt-bar">'
         + (cell.total ? '<span class="vt-side" aria-hidden="true"></span><span class="vt-top" aria-hidden="true"></span>' : "")
-        + "</div></div>";
+        + "</div>"
+        + (sign === "hit" ? '<span class="vt-mark" aria-hidden="true"></span>' : "")
+        + "</div>";
     }).join("");
+    const heat = cells.map((cell) => '<span class="vt-heat-cell vt-state-' + stateOf(cell) + '"></span>').join("");
+    const signStrip = cells.map((cell) => '<span class="vt-sign-cell vt-sign-' + signStateOf(cell, shapeLayer) + '"></span>').join("");
     const ticks = AXIS_TICKS.map((i) => '<span style="left:' + (((i + 0.5) / BUCKETS) * 100).toFixed(3) + '%">'
       + h.esc(bucketLabel(from, width, i, range)) + "</span>").join("");
     const legendHtml = PROFILE_TYPES.map((k) => '<li><span class="vt-swatch vt-c-' + k + '"></span>'
       + h.esc(h.t("vt.k." + (k === "wrongHash" ? "wrong-hash" : k === "noQuorum" ? "no-quorum" : k))) + " " + h.esc(String(legend[k])) + "</li>").join("");
-    // Spanne exakt benennen, nicht über die Intervall-Etiketten: überspringt das Fenster die
-    // Mitternacht, läge die Startmarke des letzten Intervalls sonst vor der des ersten.
+    const stateLegend = STATES.map((k) => '<li><span class="vt-heat-key vt-state-' + k + '"></span>'
+      + h.esc(h.t("vt.state." + k)) + " " + h.esc(String(states[k])) + "</li>").join("");
+    const signLegend = SIGN_STATES.map((k) => '<li><span class="vt-sign-key vt-sign-' + k + '"></span>'
+      + h.esc(h.t("vt.sign." + k)) + " " + h.esc(String(signs[k])) + "</li>").join("");
     const spanLabel = (ms) => new Date(ms).toISOString().slice(5, 16).replace("T", " ");
     const meta = h.t("vt.profileMeta", { buckets: BUCKETS, from: spanLabel(from), to: spanLabel(now), peak });
+    const shapeNote = shapeLayer
+      ? h.t("vt.signCoverage", { seen: num(coverage.shapeSeen), missing: num(coverage.shapeMissing) })
+      : h.t("vt.signAbsent");
     return '<div class="vt-profile" style="--peak:' + peak + '">'
       + '<div class="vt-profile-top"><p class="vt-profile-meta">' + h.esc(meta) + "</p>"
       + '<p class="vt-readout" id="vt-readout" aria-live="polite">' + h.esc(h.t("vt.profileHint")) + "</p></div>"
       + '<div class="vt-plot"><div class="vt-grid" aria-hidden="true">' + grid.join("") + "</div>"
-      + '<div class="vt-floor" aria-hidden="true">' + Array.from({ length: BUCKETS + 1 }, (_, i) => '<i style="left:' + ((i / BUCKETS) * 100).toFixed(3) + '%"></i>').join("") + "</div>"
       + '<div class="vt-bars">' + cols + "</div></div>"
       + '<div class="vt-axis" aria-hidden="true">' + ticks + "</div>"
-      + '<ul class="vt-legend">' + legendHtml + "</ul></div>";
+      + '<div class="vt-heat" role="img" aria-label="' + h.esc(h.t("vt.heatAria")) + '">' + heat + "</div>"
+      + '<div class="vt-sign" role="img" aria-label="' + h.esc(h.t("vt.signAria")) + '">' + signStrip + "</div>"
+      + '<ul class="vt-legend">' + legendHtml + "</ul>"
+      + '<ul class="vt-legend vt-heat-legend">' + stateLegend + "</ul>"
+      + '<ul class="vt-legend vt-sign-legend">' + signLegend + "</ul>"
+      + '<p class="vt-note vt-sign-note">' + h.esc(shapeNote) + "</p></div>";
   }
 
   function evidenceText(hy) {
@@ -224,6 +314,15 @@ export function createValidatorTrace(h) {
     if (hy.tag === "load-spike" || hy.tag === "load-extreme") return h.t("vt.evLoad", { tx: num(e.txCount), med: num(e.medianTx), ratio: fac(e.ratio) });
     if (hy.tag === "close-gap") return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) });
     if (hy.tag === "cohort-event") return h.t("vt.evCohort", { n: num(e.affectedValidators), others: num(e.others) });
+    if (hy.tag === "drainer-fanout") return h.t("vt.evFanout", { fanout: num(e.fanoutAccounts), txs: num(e.fanoutTxs), ledgerTx: num(e.ledgerTx) });
+    if (hy.tag === "sender-burst") return h.t("vt.evBurst", { accountTx: num(e.accountTx), share: pcn(e.share * 100) });
+    if (hy.tag === "failure-spike") return h.t("vt.evFailure", { failed: num(e.failed), share: pcn(e.share * 100) });
+    if (hy.tag === "batch-amplify") return h.t("vt.evBatch", { batchTx: num(e.batchTx), innerTx: num(e.innerTx) });
+    if (hy.tag === "fee-spike") return h.t("vt.evFee", { maxFee: num(e.maxFee), medianFee: num(e.medianFee) });
+    if (hy.tag === "feature-change") return h.t("vt.evFeature", { featureTx: num(e.featureTx) });
+    if (hy.tag === "sweep-window") return h.t("vt.evSweep", { destinations: num(e.sweepDestinations), ledgers: num(e.sweepLedgers), txs: num(e.sweepTxs) });
+    if (hy.tag === "account-create-burst" || hy.tag === "offer-flood" || hy.tag === "nft-spam") return h.t("vt.evCount", { count: num(e.count), baseline: num(e.baseline) });
+    if (String(hy.tag).startsWith("type-burst:")) return h.t("vt.evRatio", { count: num(e.count), baseline: num(e.baseline), ratio: fac(e.ratio) });
     return "";
   }
 
@@ -304,6 +403,29 @@ export function createValidatorTrace(h) {
       + '<ul class="vt-list vt-atk-list">' + rows + "</ul>";
   }
 
+  // Signaturbord: Form -> Ausfallwahrscheinlichkeit. Die Zahlen kommen aus den vollstaendigen
+  // Ledger-Zaehlern; der Beispiel-Ledger zeigt, dass die Signatur real aufgetreten ist.
+  function signatureBlock(sig) {
+    if (!sig || !Array.isArray(sig.rows) || !sig.rows.length) return '<p class="vt-empty">' + h.esc(h.t("vt.sigEmpty")) + "</p>";
+    const head = ["vt.sig.hTag", "vt.sig.hLedgers", "vt.sig.hFails", "vt.sig.hLift", "vt.sig.hSample"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const rows = sig.rows.map((r) => {
+      const s = r.sample || null;
+      const sample = s ? h.t("vt.sigSample", { ledger: num(s.ledgerIndex), time: s.timeMs ? stamp(s.timeMs) : "–" }) : "–";
+      return "<tr>"
+        + '<th scope="row">' + h.esc(tl(r.tag)) + (r.reliable ? "" : '<small class="vt-small">' + h.esc(h.t("vt.riskSmall")) + "</small>") + "</th>"
+        + "<td>" + h.esc(num(r.anomalyLedgers)) + "</td>"
+        + "<td>" + h.esc(num(r.anomalyFailLedgers)) + "</td>"
+        + "<td>" + h.esc(Number.isFinite(r.lift) ? "×" + fac(r.lift) : "–") + "</td>"
+        + "<td>" + h.esc(sample) + "</td></tr>";
+    }).join("");
+    const cov = (sig.coverage) || {};
+    const note = h.t("vt.sigCoverage", { seen: num(cov.shapeSeen), missing: num(cov.shapeMissing) })
+      + (sig.statsTruncated ? " " + h.t("vt.riskTrunc") : "");
+    return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
+      + '<p class="vt-note">' + h.esc(note) + "</p>";
+  }
+
   function gapsBlock(gaps) {
     if (!gaps || !gaps.length) return "";
     return '<h3 class="vt-h">' + h.esc(h.t("vt.gaps")) + '</h3><ul class="vt-list">' + gaps.slice(0, 50).map((g) =>
@@ -318,6 +440,7 @@ export function createValidatorTrace(h) {
     body.innerHTML = '<p class="vt-h">' + h.esc(h.t("vt.incidentsTotal", { n: d.incidents })) + "</p>"
       + '<h3 class="vt-h">' + h.esc(h.t("vt.recurring")) + "</h3>" + (rec ? '<ul class="vt-list">' + rec + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.noRecurring")) + "</p>")
       + '<h3 class="vt-h">' + h.esc(h.t("vt.attackTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.attackNote")) + "</p>" + attackBlock(d.attacks)
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.sigTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.sigNote")) + "</p>" + signatureBlock(d.signatures)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.riskTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.riskNote")) + "</p>" + riskBlock(d.risk)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.perValidator")) + '</h3><ul class="vt-list">' + (per || "") + "</ul>";
   }
