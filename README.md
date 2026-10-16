@@ -140,8 +140,8 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/flow-state` | `{ cursor, updatedAt, validatedIndex, clusters: [{ id, label, roles, rolesByAddress, edges, totalDrops, txCount, distinctAccounts, firstSeen, lastSeen, fieldsCapped? }] }` — normalisierte Projektion des persistierten Flow-States (serverseitig baitLabels-gefiltert, Top-200, 7-Tage-Fenster, 30 Tage für Cluster mit Betrugsevidenz — `FLOW_STATE_MALICIOUS_RETENTION_MS`); `fieldsCapped: true` nur wenn die Write-Pfad-Feldkappe (`FLOW_STATE_MEMBER_CAP` 300) `memberAddresses` gekürzt hat — `distinctAccounts` bleibt der je gesehene WAHRE Bestand (monoton, `lib/ledger-walk.mjs` mergeCluster; Vergleich bait-inklusiv vor dem STILL-Filter); ohne Token `200 + reason` (fail-closed) |
 | `GET /api/flow-state?route=archive&address=…&from=…&to=…&range=30d\|90d` | `{ address, from, to, hops: [{ from, to, type, amountDrops, txHash, ledgerSeq }], truncated, queryDays, range? }` — Rückwärts-Replay über die Flow-Archiv-Tages-Chunks; `type` je Hop seit Kritik-Runde 3 (Parität zum Live-Kantenvertrag); `range` steuert die Lese-Tiefe (30 d = 1 Block, 90 d = 3 Blöcke nötig — bei Default-Kappe 2 ehrlich `truncated: true` + `queryDays: 62`); ungültiger `range` → 400 |
 | `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed). Bedient von der Function `api/flow-state.js` (Zweig `route=block-window`) via Rewrite — Hobby-Limit: max. 12 Serverless Functions pro Deployment |
-| `GET /api/validator-trace?master=<master>&range=1h\|24h\|7d\|all` | `{ available, source, days, master, range, summary, inWindow, coverage, incidents, gaps, patterns, retrace, profile, risk }` — Retrace eines dUNL-Validators: Vorfalls-Zeitachse, Intervall-Profil (24 Intervalle mit Ledger-Abdeckung, Kohorte und Signatur), je Vorfall die messbare Ursache mit Stärkenrang und der Lift-Wert dieser Anomalie |
-| `GET /api/validator-trace?patterns=1&range=…` | `{ incidents, tags, recurring, perValidator, risk, attacks, signatures }` — Netz-Sicht: wiederkehrende Muster über alle Validatoren, Risikozeilen (Rate mit Signatur gegen ohne, `lift`), Angriffs-Signale und das Signatur-Bord der Transaktions-Formen mit Belegen |
+| `GET /api/validator-trace?master=<master>&range=1h\|24h\|7d\|all` | `{ available, source, days, master, range, summary, inWindow, coverage, incidents, gaps, patterns, retrace, diagnosis, profile, risk }` — Retrace eines dUNL-Validators: Vorfalls-Zeitachse, Intervall-Profil (24 Intervalle mit Ledger-Abdeckung, Kohorte und Signatur), je Vorfall die messbare Ursache mit Stärkenrang und der Lift-Wert dieser Anomalie, dazu Fingerprint, Ausfallserien, Quorum-Kritikalität und Last-Ausfall-Kurve dieses Knotens |
+| `GET /api/validator-trace?patterns=1&range=…` | `{ incidents, tags, recurring, perValidator, risk, attacks, signatures, split, clusters, windows, load }` — Netz-Sicht: wiederkehrende Muster über alle Validatoren, Risikozeilen (Rate mit Signatur gegen ohne, `lift`), Angriffs-Signale, Signatur-Bord der Transaktions-Formen, Netz-Serien, Kohorten-Cluster und die Last-Ausfall-Kurve des Netzdurchschnitts |
 | `GET /…`           | statische Files aus `public/` |
 
 **Datenquellen der Endpunkte (Doku 2026-10-04):** `/api/threats`, `/api/stats`
@@ -237,6 +237,22 @@ nur dieser Validator) > `correlated` (Ledger-Kontext/Signatur) > `none` (nichts
 Korreliertes gefunden), plus `guidanceFor` (welcher Prüfschritt als nächstes) und
 `dataGaps` (was die Aufzeichnung dazu nicht hergibt).
 
+**Diagnose-Ebene (warum eine Serie, nicht ein Ledger)** (`lib/validator-diagnose.mjs`, `diagnosis`
+im Antwortkörper): die Retrace erklärt einen Vorfall aus seinem Ledger — die Zeitfolge und die
+Last kann sie nicht. Beides ist gemessen die Haupterklärung, also sitzt die Diagnose **nach**
+der Retrace, nicht statt ihr. `fingerprint`: eigene Ausfallrate gegen Netzmedian und Netzmittel,
+Anteil der eigenen Vorfälle auf Netzereignis-Ledgern, Anteil in Serien, längste Serie,
+Spitzenstunden, mit Urteil `clean` / `network-driven` / `chronic-outage` / `solo-only` /
+`outlier-node` / `intermittent` / `mixed`. `runs`: Ausfallserien mit Länge, Dauer und wie viele
+Nachbarn dieselben Ledger gleichzeitig verfehlten. `criticality`: Quorum-Kritikalität (wie knapp
+das Quorum auf den betroffenen Ledgern stand). `load`: `loadResponseCurve` — Ausfallrate je
+**absoluter** Tx-Stufe aus `LOAD_BUCKETS` (10/25/50/100/200/400/800/1600/3200), Urteil
+`load-limited` / `load-resilient` / `always-failing` / `unknown`. Relative Last-Tags vergleichen
+einen Ledger nur mit seinem eigenen Median; damit ist die Betreiberfrage („ab wie vielen Tx fällt
+MEIN Knoten zurück, und halten die anderen dieselbe Last?“) nicht beantwortbar — nur absolute
+Stufen sind über Tage und Validatoren hinweg vergleichbar. Dieselbe Kurve ohne `master` ist die
+Netzseite: ohne den Vergleich wäre die Kurve eines einzelnen Knotens eine Zahl ohne Bedeutung.
+
 **3D-Intervall-Profil** (`profileCells`, UI `profile3d`): 24 Intervalle über das
 gewählte Fenster. Säulenöhe = eigene Abweichungen (Achsenmaß identisch zu den
 Gitterlinien), Stapelfarben = Vorfallstyp, Grundriss + Kohortenstreifen =
@@ -246,7 +262,12 @@ Signaturstreifen = Transaktions-Signatur an einem Ausfall-Ledger dieses Interval
 Geometrie ist deterministisch: `--dz = --d x tan(41deg)`, `--d <= --gap` in jedem
 `clamp`-Zweig, Säulen-Zeile, Kohortenstreifen und Signaturstreifen teilen dieselben
 Ränder, denselben Abstand und dieselbe Flex-Basis (Guards:
-`public/validator-trace-markup.test.mjs`).
+`public/validator-trace-markup.test.mjs`). Achse zweigig: bis `peak` 50 linear (ein Gitterintervall
+je Vorfall — bei peak 4 sind das 44/88/132/176 px), ab 51 Wurzel, weil linear bei peak 150 nur
+1,17 px je Vorfall wäre und damit unter der Kantensichtbarkeit liegt. Unter 460 px Content-Breite
+des Containers schaltet CSS die Scherflächen ab: die Tiefe erreicht die 4 px Kantenbreite erst bei
+470,6 px (4 / 0,0085), und im gemessenen Mobilcontainer (260 px Content, 286 px Aussenbreite bei
+390 px Viewport) wären 3,00 px Tiefe an einer 5,91 px-Säule ein Fleck, kein Volumen.
 
 **Ehrliche Grenzen (bewusst sichtbar, nicht still null):**
 `shapeSeen` / `shapeMissing` trennen „keine Signatur gemessen“ von „Transaktionen
