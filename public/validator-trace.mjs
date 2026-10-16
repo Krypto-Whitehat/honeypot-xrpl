@@ -611,10 +611,14 @@ function truthBlock(t) {
     const peers = Array.isArray(a.peerMasters) ? a.peerMasters : [];
     const samePeers = Array.isArray(a.sameTypeMasters) ? a.sameTypeMasters : [];
     const otherPeers = Array.isArray(a.otherTypeMasters) ? a.otherTypeMasters : [];
+    // Unerfasste Knoten ohne jede zurechenbare Abweichung sind eine eigene Gruppe: sie erklaeren
+    // die Kohortenzahl dieser Erfassung, ohne als Ausfall in die Vergleichsgruppe zu gehoeren.
+    const capturePeers = Array.isArray(a.captureOnlyMasters) ? a.captureOnlyMasters : [];
     const peerGroup = (labelKey, list) => '<span class="vt-peer-group"><small>' + h.esc(h.t(labelKey, { n: num(list.length) })) + "</small> " + peerChips(list) + "</span>";
     const groups = [];
     if (samePeers.length) groups.push(peerGroup("vt.peersLineSame", samePeers));
     if (otherPeers.length) groups.push(peerGroup("vt.peersLineOther", otherPeers));
+    if (capturePeers.length) groups.push(peerGroup("vt.peersLineCapture", capturePeers));
     const peerLine = !peers.length ? "" : groups.length
       ? '<p class="vt-rc-peers">' + groups.join("") + "</p>"
       : '<p class="vt-rc-peers"><small>' + h.esc(h.t("vt.peersLine", { n: peers.length })) + "</small> " + peerChips(peers) + "</p>";
@@ -735,6 +739,8 @@ function truthBlock(t) {
     const rows = a.signals.map((s) => '<li class="vt-atk"><span class="vt-atk-led">' + h.esc(h.t("vt.ledger")) + " #" + h.esc(String(s.ledgerIndex)) + "</span>"
       + '<span class="vt-atk-when">' + h.esc(stamp(s.timeMs)) + " UTC</span>"
       + '<span class="vt-atk-n">' + h.esc(h.t("vt.attackAffected", { n: num(s.affectedValidators) })) + "</span>"
+      + '<span class="vt-atk-split">' + h.esc(h.t("vt.attackSplit", {
+        fault: num(s.faultValidators), capture: num(s.captureOnlyValidators) })) + "</span>"
       + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span>"
       + (Array.isArray(s.masters) && s.masters.length
         ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")

@@ -3276,6 +3276,7 @@ body[data-a6] {
 .vt-badge.vt-type-no-quorum { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-badge.vt-scope-network { background: var(--a6-ink); color: var(--a6-surface); border-color: var(--a6-ink); }
 .vt-badge.vt-scope-cohort { border-color: var(--a6-accent); color: var(--a6-accent-text); }
+.vt-badge.vt-scope-capture-cohort { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-rc-metrics { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px; }
 .vt-rc-metrics li { border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 6px 8px; }
 .vt-rc-metrics small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--a6-muted); }
@@ -3392,6 +3393,7 @@ body[data-a6] {
 .vt-small { display: block; color: var(--a6-muted); font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .vt-atk { display: grid; grid-template-columns: 150px 170px 150px 1fr; gap: 8px; align-items: baseline; }
 .vt-atk-when, .vt-atk-n { color: var(--a6-muted); }
+.vt-atk-split { color: var(--a6-muted); font-family: var(--a6-mono); font-size: 11px; }
 @media (prefers-reduced-motion: reduce) {
   .vt-col { animation: none; }
   .vt-bar { transition: none; }

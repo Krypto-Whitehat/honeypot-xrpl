@@ -979,3 +979,32 @@ test("Gegenprobe-Text: das Fenster wird benannt, nicht als 24 h gesetzt", () => 
   assert.equal((i18n.match(/vt\.cq\.truth\.summary.*\{window\}/g) || []).length, 2, "die Kohorten-Bilanz nennt das Fenster nicht in beiden Sprachen");
   assert.doesNotMatch(i18n, /im selben 24-h-Fenster|in the same 24 h window/, "ein Fenster steht fest im Text, obwohl die Auswahl an der eigenen Spanne haengt");
 });
+
+/* Kohorten-Aufteilung (2026-10-17): '19 Validatoren betroffen' auf einem geschlossenen Ledger
+ * ist eine Zahl, die Ausfall und Erfassungs-Luecke vermischt. Der Sammelblock und der
+ * Retrace-Karton muessen beide getrennt nennen, was gemessen ist. */
+test('Kohorten-Aufteilung: Sammelblock trennt Knoten-Ausfall und Erfassungs-Luecke', () => {
+  assert.match(src, /vt\.attackSplit/, 'Sammelblock ohne Aufteilung der abweichenden Knoten');
+  assert.match(src, /s\.faultValidators/, 'Sammelblock liest die Zahl der zurechenbaren Abweichungen nicht');
+  assert.match(src, /s\.captureOnlyValidators/, 'Sammelblock liest die Zahl der Unerfassten nicht');
+  assert.match(src, /vt\.peersLineCapture/, 'Retrace ohne Gruppe der Knoten ohne Knotenfehler');
+  assert.ok(cssRules.has('.vt-atk-split'), 'Aufteilung im Sammelblock ohne eigene Form');
+  assert.ok(cssRules.has('.vt-badge.vt-scope-capture-cohort'), 'Scope-Abzeichen ohne Regel');
+  const i18n = read('i18n-validator.mjs');
+  assert.equal((i18n.match(/vt\.attackSplit/g) || []).length, 2, 'die Aufteilung fehlt in einer Sprache');
+  assert.equal((i18n.match(/vt\.peersLineCapture/g) || []).length, 2, 'die Unerfassten-Gruppe fehlt in einer Sprache');
+  assert.equal((i18n.match(/vt\.scope\.capture-cohort/g) || []).length, 2, 'der neue Scope hat kein Label in beiden Sprachen');
+  assert.doesNotMatch(i18n, /'vt\.attackAffected': '\{n\} (validators|Validatoren)'/, 'die Sammelzahl spricht weiterhin pauschal von betroffenen Validatoren');
+  assert.doesNotMatch(i18n, /Simultaneous failures|Gleichzeitige Ausf\u00e4lle/, 'der Titel behauptet Ausfaelle, gemessen ist Abweichen in dieser Erfassung');
+});
+
+/* Scope-Labels (2026-10-17): 'netzweit' und 'die ganze Kohorte fiel' sind Netz-Aussagen, die
+ * auf einem bewiesen geschlossenen Ledger nicht belegt sind. Gemessen ist, was diese Erfassung
+ * auf diesem Ledger nicht sah - die Schliess-Spalte traegt den Gegenbeweis. */
+test('Scope-Label: die Netz-Formel ist durch die Erfassungs-Formel ersetzt', () => {
+  const i18n = read('i18n-validator.mjs');
+  assert.doesNotMatch(i18n, /'vt\.scope\.network': '(network-wide|netzweit)'/, 'der Scope spricht pauschal netzweit, obwohl die Schliessung das widerlegt');
+  assert.doesNotMatch(i18n, /cohortEventNetwork.*?(whole cohort fell|ganze Kohorte fiel)/s, 'die Kohorten-Formel behauptet ein Fallen, gemessen ist Unerfasstsein');
+  assert.equal((i18n.match(/'vt\.scope\.network'/g) || []).length, 2, 'das Scope-Label fehlt in einer Sprache');
+  assert.equal((i18n.match(/'vt\.tag\.cohortEventNetwork'/g) || []).length, 2, 'die Kohorten-Formel fehlt in einer Sprache');
+});
