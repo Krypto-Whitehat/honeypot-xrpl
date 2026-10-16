@@ -226,7 +226,10 @@ Verdikte der Kritikalitäts-Zelle sind eine Kette mit Vorrang: `not-closed` →
 keine Netzstockung. In der Retrace-Guidance steht dort `capture-window` („was dieser Rekorder
 empfing“) statt `network-stall`, und in der Prüfliste der Ursachen-Ebene wird
 `cause-check-network-stall` unterdrückt — außer dieser Ledger hat einen **gemessenen
-Close-Abstand** (`close-gap`), der die verlangsamte Taktung selbst belegt. Wo die Schließung
+Close-Abstand** (`close-gap`) **bei nachweislich lückenloser Index-Folge** (`captureGap === false`,
+also `pg === l - 1`). Nur dann ist der Abstand ein Netz-Befund; springt die eigene Index-Folge,
+enthält er die Ledger, die dieser Rekorder nie sah, und die nächste Prüfung bleibt die eigene
+Erfassung. Wo die Schließung
 ausdrücklich verneint ist, bleibt die Netzstockung die naheliegende Gegenprobe; wo sie **nicht
 erfasst** ist, steht ebenfalls die Erfassungs-Prüfung — eine Datenlücke des Recorders ist kein
 Verdacht gegen das Netz. Dieselbe Regel gilt seit 2026-10-17 auch auf der **Serien-Ebene**: eine
@@ -268,6 +271,19 @@ liegen 17 Ledger, die dieser Rekorder nie sah (Lücken-Log `gaps` bei 107693984)
 war dort also keine Messung, sondern ein Lesefehler über die eigene Lücke.
 `npm run backfill:closure` trägt fehlende Hashes von außen nach; so ein Hash steht als
 Fremdquelle (`chSource: "xrpscan"`) mit benannter Gegenprüfung (`chVerifiedBy`) in der Datei.
+
+**Close-Abstand braucht die Index-Folge (2026-10-17):** `close-gap` misst die Zeit zwischen zwei
+**bewerteten** Ledgern. Fehlt dazwischen ein Index, ist der Abstand die Summe der Ledger, die dieser
+Rekorder nie sah - kein Netz-Befund. Deshalb setzt `classifyReasons` den Tag nicht mehr, wenn
+`indexGap === true`, und die Takt-Basis `gapBaseline` nimmt nur Abstände zwischen
+aufeinanderfolgenden Indizes auf. Dasselbe Kriterium gilt je Ebene: Retrace-Hypothese
+(`evidence.indexContinuity` mit `true` / `false` / `null`), Ledger-Karte `attackSignals`
+(Mindestabstand **und** Ratio gegen den eigenen Takt, nicht nur Mindestabstand) und Muster-Monitor
+`lib/pattern-watch.mjs`. Die Netz-Deutung `network-stall` folgt nur bei `indexContinuity === true`;
+bei `null` (Bestand ohne `pg`) bleibt die Messung stehen und die nächste Prüfung ist die eigene
+Erfassung. Nachgerechnet am Live-Fall: 107694001 mit 70 000 ms Abstand gegen 1 000 ms eigenen Takt
+und Index-Sprung über 107694000 - kein `close-gap`; derselbe Abstand mit lückenloser Folge -
+`close-gap`.
 
 **Grenze aus der Schließung (Akkuratz-Regel, 2026-10-17):** ein bewiesen geschlossener Ledger hat
 sein Netz-Quorum erreicht — also können von den als „kein Vote erfasst" geführten dUNL-Knoten

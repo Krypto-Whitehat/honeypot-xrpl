@@ -495,7 +495,12 @@ export function createValidatorTrace(h) {
     }
     if (hy.tag === "hash-split") return h.t("vt.evSplit", { runner: num(e.runnerVotes), votes: num(e.votes) });
     if (hy.tag === "load-spike" || hy.tag === "load-extreme") return h.t("vt.evLoad", { tx: num(e.txCount), med: num(e.medianTx), ratio: fac(e.ratio) });
-    if (hy.tag === "close-gap") return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) });
+    if (hy.tag === "close-gap") {
+      // Der Abstand ist nur dann ein Netz-Takt, wenn die Index-Folge dieses Recorders als
+      // durchgehend gemessen ist. Sonst steht die Grenze daneben, nicht versteckt.
+      const basis = e.indexContinuity === true ? "" : " " + h.t("vt.evGapIndexUnknown");
+      return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) }) + basis;
+    }
     if (hy.tag === "cohort-event") {
       // "19 andere" ist nur die Hälfte der Aussage: erst der gleiche Vorfallstyp zeigt, ob
       // dieselben Knoten auf demselben Ledger dasselbe Problem hatten.
