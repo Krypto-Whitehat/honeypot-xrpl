@@ -172,15 +172,22 @@ export function createValidatorTrace(h) {
   // truth (optional, indexgleich zu keys): das Gegenurteil je Knoten aus der Lib. Ohne es
   // bleibt der Chip eine reine Namensnennung - mit ihm steht an jedem Knoten, ob die Referenz
   // seine Abwesenheit traegt oder widerlegt. Der Titel ist der Text, den die Lib rechnet.
-  const peerChips = (keys, truth) => {
+  const peerChips = (keys, truth, names) => {
     const list = Array.isArray(keys) ? keys : [];
+    // names (indexgleich zu keys) kommt aus der Lib und damit aus der Netz-Auskunft: ein Knoten,
+    // der die gerade geladene dUNL-Liste verlassen hat, ist dann trotzdem benannt.
+    const shownName = (m, i) => {
+      const n = Array.isArray(names) ? names[i] : null;
+      return n && typeof n.name === "string" && n.name ? n.name : nameOf(m);
+    };
     const chip = (m, i) => {
+      const label = shownName(m, i);
       const t = Array.isArray(truth) ? truth[i] : null;
-      if (!t) return '<span class="vt-peer">' + h.esc(nameOf(m)) + "</span>";
+      if (!t) return '<span class="vt-peer">' + h.esc(label) + "</span>";
       const verdict = TRUTH_STATES.has(t.verdict) ? t.verdict : "not-comparable";
       const tip = h.t("vt.cq.truth." + verdict, { claims: num(t.claims), ground: num(t.groundMissed),
         total: num(t.groundTotal), min: num(t.falsePositiveMin) });
-      return '<span class="vt-peer vt-peer-' + verdict + '" title="' + h.esc(tip) + '">' + h.esc(nameOf(m)) + "</span>";
+      return '<span class="vt-peer vt-peer-' + verdict + '" title="' + h.esc(tip) + '">' + h.esc(label) + "</span>";
     };
     const shown = list.slice(0, PEER_SHOWN).map(chip).join("");
     if (list.length <= PEER_SHOWN) return shown;
@@ -888,7 +895,7 @@ function truthBlock(t) {
       if (!Number.isFinite(r.affectedCount)) return "";
       const others = Array.isArray(r.affectedMasters) ? r.affectedMasters : [];
       const body = others.length
-        ? peerChips(others, r.affectedTruth)
+        ? peerChips(others, r.affectedTruth, r.affectedNames)
         : '<span class="vt-peer vt-peer-none">' + h.esc(h.t("vt.cq.affectedSolo")) + "</span>";
       return '<tr class="vt-cq-affected"><td colspan="7">'
         + '<span class="vt-cq-affected-label">'

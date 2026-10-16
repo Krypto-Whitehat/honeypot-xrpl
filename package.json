@@ -11,6 +11,7 @@
     "monitor": "node monitor/monitor.mjs",
     "audit:truth": "node scripts/audit-ground-truth.mjs",
 "audit:truth:validators": "node scripts/audit-validator-truth.mjs",
+    "audit:coherence": "node scripts/audit-coherence.mjs",
     "provision": "node monitor/provision-bait.mjs",
     "simulate": "node monitor/simulate-attack.mjs",
     "proof:trace": "node scripts/trace-write-proof.mjs",

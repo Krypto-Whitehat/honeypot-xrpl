@@ -946,7 +946,8 @@ test('Kritikalitaets-Zelle: Fremdquelle, Gegenpruefung und Kohorten-Namen sind b
   assert.match(src, /vt\.cq\.closureSource/, 'Quelle des nachgetragenen Hashes hat keine Beschriftung');
   assert.match(src, /c\.verifiedBy/, 'die zweite Autoritaet wird nicht ausgewertet');
   assert.match(src, /vt\.cq\.closureVerified/, 'Gegenpruefung hat keine Beschriftung');
-  assert.match(src, /peerChips\(others, r\.affectedTruth\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht oder ohne Gegenurteil');
+  assert.match(src, /peerChips\(others, r\.affectedTruth, r\.affectedNames\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht oder ohne Gegenurteil');
+  assert.match(src, /typeof n\.name === "string" && n\.name \? n\.name : nameOf\(m\)/, 'der Name aus der Lib wird nicht ausgewertet - die Kohorte haengt allein an der Browser-Liste');
   // Ein Name ohne Gegenurteil ist eine Beschuldigung. Die Lib liefert je Knoten das Urteil,
   // und die UI darf es nicht wegwerfen.
   assert.match(src, /vt\.cq\.truth\.summary/, 'die Kohorten-Bilanz fehlt im Overlay');
