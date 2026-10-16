@@ -42,6 +42,9 @@ const TX_SHAPE = process.env.TRACE_TX_SHAPE !== "0";
 // Forensik-Detail je Ledger mit Abweichung. Der Deckel schützt die Tagesdatei; bei Erreichen
 // wird die älteste Forensik verworfen und das offen markiert (nie still).
 const LEDGER_STATS_CAP = 6000;
+// Deckel fuer das Erfassungs-Ereignis-Protokoll: eine Verbindung kann je Tag mehrfach
+// fallen. 400 Zeilen sind weit ueber jedem beobachteten Tag und halten die Datei lesbar.
+const CAPTURE_EVENT_CAP = 400;
 // Spaet-Validierungen je Tag: 1.200 Eintraege sind bei ~20.000 Ledern ein Tag mit vielen
 // spaeten Knoten. Aeltere Eintraege fallen zuerst (die jungsten sind die, die ein Betreiber
 // gerade nachvollziehen will); die Verkuerzung ist markiert, nicht still.
@@ -52,6 +55,11 @@ const LATE_VOTES_CAP = 1200;
 // Die Vokabel kommt aus lib/validator-trace.mjs: Recorder und Analyse-Ebenen teilen dieselbe
 // Menge, ein neuer Tag ist dort nicht nachzutragen.
 const FLUSH_MS = REMOTE ? 300000 : 30000;
+// dUNL-Nachzug: die Mitgliederliste aendert sich laufend, und jeder Knoten signiert mit einem
+// Schluessel, der in festen Abstaenden neu ausgelost wird. Eine nur beim Start geladene Liste
+// veraltet damit zwangslaeufig - ein gueltiger Vote wuerde als "kein beobachtetes Mitglied"
+// gezaehlt und der Knoten als 'no-quorum' statt 'ok' gefuehrt. Env TRACE_DUNL_REFRESH_MS.
+const DUNL_REFRESH_MS = Math.max(60000, Number(process.env.TRACE_DUNL_REFRESH_MS) || 600000);
 const RUN_SECONDS = Number(process.env.TRACE_RUN_SECONDS) || 0;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
@@ -83,7 +91,7 @@ const dirty = new Set();  // Daten, die beim nächsten Flush geschrieben werden 
 let lastLedger = null;    // letzter gesehener Ledger-Index (für Lückenerkennung)
 
 function emptyDay(date) {
-  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], lastLedger: null, firstMs: null, lastMs: null, hourly: {},
+  return { date, ledgers: 0, quorumFail: 0, validators: {}, incidents: [], gaps: [], captureEvents: [], captureEventsTruncated: false, lastLedger: null, firstMs: null, lastMs: null, hourly: {},
     // Forensik + Anomalie-Zähler: die Grundlage jeder Retrace. Ohne sie ist die Frage
     // 'warum verpasst?' aus der Aufzeichnung nicht beantwortbar.
     ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {},
@@ -238,7 +246,18 @@ function recordResult(r, detailNote) {
       // Signierer ausserhalb der beobachteten dUNL. Ohne diese vier Felder waere 'no vote' eine
       // Behauptung ueber das Netz statt eine Aussage ueber die eigene Beobachtung.
       ch: f.closedHash ?? null, cl: f.closed === true, cg: f.captureGap === true,
+      // pg: der zuvor ausgewertete Ledger-Index. 'cg' ist damit nachrechenbar: die Luecke gilt
+      // genau dann, wenn pg !== l - 1. Ohne pg waere 'cg' ein Etikett ohne Zahl, und die
+      // Leseschicht (ledgerClosure) koennte die Luecke nicht gegen die Index-Folge pruefen.
+      pg: Number.isFinite(f.previousLedger) ? f.previousLedger : null,
       ov: Number.isFinite(f.observedValidations) ? f.observedValidations : null,
+      // Eigene Empfangs-Bilanz dieses Ledgers: ovb = Median der Validierungen, die dieser
+      // Rekorder in seinen letzten Ledgern empfangen hat, ot = true wenn ov unter diesem
+      // Niveau liegt. Ohne diese Felder ist '16 / 28' eine Zahl, die niemand einordnen kann -
+      // mit ihnen ist sie eine gegen die eigene Messung eingeordnete Beobachtung. ov selbst
+      // bleibt die Zahl dieses Ledgers; ovb ist dieselbe Groesse, nur als Median.
+      ovb: Number.isFinite(f.observedBaseline) ? f.observedBaseline : null,
+      ot: f.receptionThin === true,
       tx: r.txCount ?? 0, med: r.medianTx ?? 0,
       c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
       // Tx-Form und die Belege der Signaturen, die in diesem Ledger feuerten. Die Konto-Adresse
@@ -497,6 +516,32 @@ async function sampleNetworkQuorum() {
 }
 
 
+// dUNL nachziehen: dasselbe loadMembers wie beim Start, aber nachgetragen. Tracker und
+// MEMBERS muessen zusammen wechseln - 'for (const m of MEMBERS)' zaehlt die Nenner, und ein
+// Incident eines neuen Mitglieds sonst in d.validators ins Leere laufen wuerde.
+async function refreshMembers() {
+  const dunl = await loadMembers();
+  const moved = tracker.setMembers(dunl.members, dunl.ephemeralToMaster);
+  MEMBERS = dunl.members;
+  if (moved.added || moved.removed) {
+    log("dUNL nachgezogen: +", moved.added, "-", moved.removed, "=", moved.members, "Sequenz", dunl.sequence);
+  }
+  return dunl;
+}
+
+// Erfassungs-Ereignis: Trennung und Wiederaufbau des Mithoerstroms werden als Zahl
+// aufgezeichnet, nicht nur in die Konsole geschrieben. Ohne diese Zeilen ist ein duennerer
+// Empfang in einem gesehenen Ledger ('vf') nicht rueckverfolgbar - man muesste raten, ob in
+// dieser Minute der Stream weg war. 'l' ist der zuletzt gesehene Index: er sagt, wo dieser
+// Mithoerer stand, als die Verbindung riss.
+function recordCaptureEvent(kind, url) {
+  const atMs = Date.now();
+  const d = dayObj(dayOf(atMs));
+  if (d.captureEvents.length >= CAPTURE_EVENT_CAP) { d.captureEvents.shift(); d.captureEventsTruncated = true; }
+  d.captureEvents.push({ e: kind, atMs, l: lastLedger, url });
+  dirty.add(d.date);
+}
+
 function onLedgerClosed(m) {
   const idx = Number(m.ledger_index);
   if (lastLedger !== null && idx > lastLedger + 1) {
@@ -544,6 +589,7 @@ function connect(urlIdx = 0, backoff = 1000) {
   ws = new WebSocket(url);
   ws.onopen = () => {
     stats.connects++;
+    recordCaptureEvent("open", url);
     log("verbunden", url);
     backoff = 1000;
     const streams = ["validations", "ledger"];
@@ -553,6 +599,7 @@ function connect(urlIdx = 0, backoff = 1000) {
   };
   ws.onmessage = onMessage;
   ws.onclose = () => {
+    recordCaptureEvent("close", url);
     log("getrennt, neuer Versuch", WSS[(urlIdx + 1) % WSS.length]);
     setTimeout(() => connect(urlIdx + 1, Math.min(backoff * 2, 60000)), backoff);
   };
@@ -593,6 +640,7 @@ async function main() {
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const pruneTimer = setInterval(() => { if (REMOTE) pruneRemote().catch(() => {}); else pruneLocal(); }, 86400000);
   const quorumTimer = setInterval(() => { sampleNetworkQuorum().catch(() => {}); }, 3600000);
+  const dunlTimer = setInterval(() => { refreshMembers().catch(() => {}); }, DUNL_REFRESH_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
     log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
@@ -601,7 +649,7 @@ async function main() {
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer);
+    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer); clearInterval(dunlTimer);
     await flush();
     if (ws) ws.close();
     log("beendet", dirty.size ? "(" + dirty.size + " Tage nicht gespeichert)" : ", gespeichert");
