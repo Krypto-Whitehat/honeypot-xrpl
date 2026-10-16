@@ -21,7 +21,7 @@ import { classifyShape, createShapeTracker, SIGNATURE_TAGS } from "../lib/tx-for
 import { ANOMALY_TAGS, isAnomalyTag } from "../lib/validator-trace.mjs";
 import { isSignatureTag } from "../lib/validator-retrace.mjs";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
-import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured, normalizeDay } from "../lib/validator-trace-store.mjs";
+import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured, normalizeDay, writeDayLocal } from "../lib/validator-trace-store.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validator-trace");
@@ -234,11 +234,15 @@ function recordResult(r, detailNote) {
     if (inc.type === "missed") { v.missed++; hv.missed++; }
     else if (inc.type === "partial") { v.partial++; hv.partial++; }
     else if (inc.type === "wrong-hash") { v.wrongHash++; hv.wrongHash++; }
-    else if (inc.type === "no-quorum") { v.noQuorum = (v.noQuorum ?? 0) + 1; hv.noQuorum = (hv.noQuorum ?? 0) + 1; }
+    else if (inc.type === "no-quorum" || inc.type === "vote-not-observed") { v.noQuorum = (v.noQuorum ?? 0) + 1; hv.noQuorum = (hv.noQuorum ?? 0) + 1; }
     // vd: Latenz des eigenen Votes, wenn einer da war (partial / wrong-hash / spaeter missed-Vote).
     // null = kein Vote aufgezeichnet, nicht "schnell abgestimmt".
     // h: die Hash-Linie dieses Knotens in diesem Ledger. Ohne sie bleibt wrong-hash ein Etikett.
-    d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined, vd: Number.isFinite(inc.voteDelayMs) ? inc.voteDelayMs : null, h: hexOrNull(inc.votedHash) });
+    d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined, vd: Number.isFinite(inc.voteDelayMs) ? inc.voteDelayMs : null, h: hexOrNull(inc.votedHash),
+      // nc = die Schliess-Ebene dieses Ledgers hat die Schliessung ausdruecklich verneint. Ohne
+      // dieses Feld am Incident waere die Aussage nach einem ledgerStats-Truncation nicht mehr
+      // nachpruefbar, und normalizeDay duerfte 'no-quorum' nicht umstellen.
+      nc: r.closed === false ? true : undefined });
   }
   // Forensik je Ledger mit Abweichung: Quorum-Rand, Hash-Spaltung, Close-Abstand, Last und
   // die Betroffenheit je Typ. Das ist der Unterschied zwischen "Validator hat verpasst" und
@@ -338,8 +342,7 @@ function recordLateVotes(list) {
   }
 }
 
-// Lokal: alle Tage schreiben (atomar). Remote: nur geänderte Tage, Fehler bleiben dirty.
-let daySaveSeq = 0;
+// Lokal: alle Tage schreiben (atomar, mit Nachtrag-Schutz). Remote: nur geänderte Tage, Fehler bleiben dirty.
 async function flush() {
   if (REMOTE) {
     for (const date of [...dirty]) {
@@ -350,21 +353,13 @@ async function flush() {
   }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   for (const date of dirty) {
-    const file = path.join(DATA_DIR, date + ".json");
-    // Derselbe Grund wie in lib/history.mjs: ein fester tmp-Name pro Tag verzahnt
-    // zwei gleichzeitige Schreibende zu einer unparsebaren Tagesdatei.
-    const text = JSON.stringify(days.get(date));
-    const tmp = `${file}.${process.pid}.${Date.now()}.${++daySaveSeq}.tmp`;
-    try {
-      fs.writeFileSync(tmp, text);
-      if (fs.statSync(tmp).size !== Buffer.byteLength(text, "utf8")) {
-        throw new Error("Schreibpruefung: tmp-Datei hat eine andere Byte-Laenge.");
-      }
-      fs.renameSync(tmp, file);
-    } catch (err) {
-      fs.rmSync(tmp, { force: true });
-      throw err;
-    }
+    // writeDayLocal liest vor dem Schreiben den Bestand und fuehrt den Schliess-Nachtrag
+    // (ch/chSource/chVerifiedBy/chAt/xc) zurueck. Laeuft scripts/backfill-closure.mjs waehrend
+    // dieses Recorders, war sein Nachweis bisher beim naechsten Flush weg - und damit auch die
+    // einzige Autoritaet, die auf diesen Zeilen "Ledger geschlossen" sagt. Ohne diesen Schutz
+    // koennte die Diagnose unbemerkt auf "Netzstockung" zurueckfallen.
+    const carried = writeDayLocal(DATA_DIR, days.get(date));
+    if (carried) log("Schliess-Nachtrag bewahrt:", carried, "Zeile(n) in", date, "- von aussen nachgetragen, nicht selbst gesehen");
   }
   dirty.clear();
 }
