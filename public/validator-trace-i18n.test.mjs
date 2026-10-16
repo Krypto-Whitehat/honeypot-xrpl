@@ -20,6 +20,7 @@ const DICT = {
   de: { ...CORE_DICT.de, ...VALIDATOR_DICT.de },
 };
 import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
+import { CAPTURE_GAP_BASES } from "../lib/validator-trace.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
 import { PEER_AUTHORITIES, PEER_DIRECTIONS, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
 import { LATENCY_AUTHORITIES, LATENCY_CLASSES, LATENCY_PATTERNS, LATENCY_REASONS, LATENCY_VERDICTS } from "../lib/validator-vote-latency.mjs";
@@ -54,6 +55,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
     "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.", "vt.cq.verdict.",
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
+    "vt.cq.basis.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
@@ -88,6 +90,10 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.surface.verdict.", SURFACE_VERDICTS], ["vt.surface.reason.", SURFACE_REASONS],
     ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
     ["vt.cq.verdict.", CQ_VERDICTS],
+    // Die Erfassungs-Basis ist Teil des Urteils, nicht eine FuSSnote: 'gemessen an der Index-Folge'
+    // und 'gemessen am Luecken-Log' sind verschiedene Belege, und 'not-recorded' hat keinen Beleg -
+    // deshalb bekommt dieser Wert bewusst kein Label.
+    ["vt.cq.basis.", CAPTURE_GAP_BASES.filter((b) => b !== "not-recorded")],
     ["vt.surface.axis.", SURFACE_AXES],
     ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
   // Empfindlichkeit: das Urteil beantwortet, ob DICH diese Signatur ueberproportional trifft.
@@ -102,7 +108,7 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
 });
 
 test("Pruefschritte der Serien-Ebene sind uebersetzt (vt.g. wird aus der Serie ergaenzt)", () => {
-  for (const tag of ["node-offline-window", "degraded-signing", "cohort-network", "network-stall", "version-state"]) {
+  for (const tag of ["node-offline-window", "degraded-signing", "cohort-network", "network-stall", "capture-window", "version-state"]) {
     assert.notEqual(DICT.en["vt.g." + tag], undefined, "EN fehlt: vt.g." + tag);
     assert.notEqual(DICT.de["vt.g." + tag], undefined, "DE fehlt: vt.g." + tag);
   }
@@ -147,4 +153,18 @@ test("Split: der Kern traegt keine vt.*-Texte und das Overlay meldet sein Bundle
   assert.equal(added, enKeys.length + deKeys.length, "registerDict fuellt beide Sprachen vollstaendig");
   const missing = [...new Set(literals)].filter((k) => CORE_DICT.en[k] === undefined || CORE_DICT.de[k] === undefined);
   assert.deepEqual(missing, [], "nach der Anmeldung fehlt weiterhin nichts");
+});
+
+// Der noQuorum-Zaehler zaehlt, was DIESER Rekorder nicht gesehen hat. Ein Label, das daraus ein
+// fehlendes Netz-Quorum macht, ist eine Behauptung ueber das Netz - am 2026-10-16 durch xrpscan und
+// xrplcluster widerlegt (die Ledger wurden geschlossen, 28 Stimmen waren noetig und waren da).
+test("Labels: der Erfassungs-Zaehler darf kein Netz-Quorum absprechen", () => {
+  const keys = ["vt.bucketAria", "vt.bucketReadout", "vt.impact.typesNote", "vt.verdict.network-window"];
+  for (const k of keys) {
+    for (const lang of ["en", "de"]) {
+      const label = DICT[lang][k];
+      assert.ok(typeof label === "string" && label.length > 0, k + " fehlt in " + lang);
+      assert.ok(!/no quorum|kein Quorum|ohne Quorum/i.test(label), k + " (" + lang + ") spricht ein Quorum ab: " + label);
+    }
+  }
 });

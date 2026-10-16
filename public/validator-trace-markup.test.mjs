@@ -447,7 +447,7 @@ test('Bodenplatte: dieselbe Platte unter jeder Säule, Gitter und Balken sitzen 
   const base = ruleBody('.vt-base');
   assert.match(base, /height:\s*var\(--base-h\)/, '.vt-base Hoehe != --base-h');
   assert.match(base, /bottom:\s*calc\(-1 \* var\(--base-h\)\)/, '.vt-base ragt nicht in den Plattenstreifen unter der Null-Linie');
-  assert.match(base, /left:\s*0;\s*right:\s*0/, '.vt-base ist nicht so breit wie die Zelle');
+  assert.match(base, /left:\s*0;\s*right:\s*var\(--dc\)/, '.vt-base kuerzt nicht um --dc - die Platte ist breiter als ihr Prisma');
   assert.match(ruleBody('.vt-grid'), /bottom:\s*var\(--base-h\)/, 'Gitter sitzt nicht auf der Plattenoberkante');
   assert.match(ruleBody('.vt-bars'), /bottom:\s*var\(--base-h\)/, 'Saeulen sitzen nicht auf der Plattenoberkante');
   assert.match(ruleBody('.vt-plot'), /height:\s*calc\(var\(--plot-h\) \+ var\(--dz\) \+ var\(--base-h\) \+ var\(--label-h\)\)/, '.vt-plot plant Platte und Wertemarke nicht ein');
@@ -909,4 +909,49 @@ test("Kritikalitaets-Tabelle: Betroffenheits-Zeile deckt genau die Spalten der K
   assert.ok(colspan.includes(cols), 'Betroffenheits-Zeile braucht colspan="' + cols + '" (Spalten: ' + cols + ")");
   assert.ok(/vt-cq-affected/.test(traceJs), "die Betroffenheits-Zeile fehlt im Overlay");
   assert.ok(/affectedCount/.test(traceJs), "ohne affectedCount darf keine Kohorte behauptet werden");
+});
+
+/* Bodenplatte und Prisma muessen auf derselben Platte stehen. Live-Nachweis 2026-10-16 im
+ * 24-h-Fenster von xrp.vet (Content 961 px, Plot 917,64 px, Zelle 30,86 px, Abstand 7,69 px,
+ * --dc = --dzc = 6,78 px): die Bodenplatte war so breit wie die ganze Zelle, ihre gescherte
+ * Deckflaeche reichte deshalb 6,78 px in den 7,69 px breiten Abstand - 0,91 px frei.
+ * elementFromPoint traf bei 6 von 8 nicht-leeren Saeulen die .vt-base der eigenen Saeule, und
+ * 258 von 864 Pixeln in den Abstaenden nahe der Null-Linie waren bemalt (29,9 %). */
+test('Bodenplatte: Fuss und Prisma teilen dieselbe Grundflaeche, der Abstand bleibt frei', () => {
+  assert.match(ruleBody('.vt-base'), /left:\s*0;\s*right:\s*var\(--dc\)/,
+    '.vt-base kuerzt nicht um --dc - der Fuss ist breiter als sein Prisma');
+  const c = cellAt(961);
+  const reach = (c.col - c.d) + c.dzc;
+  assert.ok(Math.abs(reach - c.col) < 1e-9,
+    'Scherflaeche endet bei ' + reach.toFixed(2) + ' px statt an der Zellenkante ' + c.col.toFixed(2) + ' px');
+  assert.ok(Math.abs(c.dzc - c.d) < 1e-9, '--dzc != --dc - Scherung und Tiefe divergieren');
+  // Der alte Zustand, nachgerechnet: Fuss = volle Zellenbreite, die Scherflaeche reichte um
+  // --dzc in den Abstand und liess nur gap - dzc frei (6,78 px von 7,69 px verbraucht).
+  const freiAlt = c.gap - c.dzc;
+  assert.ok(freiAlt > 0 && freiAlt < 1,
+    'der alte Ueberstand ist nicht nachgerechnet (frei waren ' + freiAlt.toFixed(2) + ' px)');
+});
+
+/* Ein nachgetragener Schliess-Hash ist ein Nachweis von ausserhalb. Nennt die Zelle nicht, woher
+ * er kommt und wer ihn gegengeprueft hat, liest sich die Spalte wie eigener Moerbeweis. Und eine
+ * Kohorte ohne Namen ist eine Zahl ohne Spur. */
+test('Kritikalitaets-Zelle: Fremdquelle, Gegenpruefung und Kohorten-Namen sind benannt', () => {
+  assert.match(src, /c\.basis === "xrpscan"/, 'der nachgetragene Hash wird nicht als Fremdquelle ausgewertet');
+  assert.match(src, /vt\.cq\.closureSource/, 'Quelle des nachgetragenen Hashes hat keine Beschriftung');
+  assert.match(src, /c\.verifiedBy/, 'die zweite Autoritaet wird nicht ausgewertet');
+  assert.match(src, /vt\.cq\.closureVerified/, 'Gegenpruefung hat keine Beschriftung');
+  assert.match(src, /peerChips\(others\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht');
+});
+
+/* Die Grenze, die aus der Schliessung folgt, muss an drei Stellen lesbar sein: in der
+ * Kritikalitaets-Zelle, in der Messung 'vote-coverage-thin' und im Sammelereignis. Fehlt sie,
+ * steht '19 Validatoren ohne Vote' als Netz-Urteil da, obwohl der Schliess-Beweis in derselben
+ * Zeile sagt, dass hoechstens 7 davon echt sein koennen. */
+test('Erfassungs-Grenze: Zelle, Messung und Sammelereignis tragen die nachrechenbare Zahl', () => {
+  assert.match(src, /r.capture/, 'die Kritikalitaets-Zelle wertet die Grenze nicht aus');
+  assert.match(src, /vt.cq.bound/, 'die Grenze in der Zelle hat keine Beschriftung');
+  assert.match(src, /e.genuineAbsentMax/, 'die Messung nennt die Obergrenze echter Nicht-Signierer nicht');
+  assert.match(src, /vt.evCoverageBound/, 'die Messung hat keine Beschriftung fuer die Grenze');
+  assert.match(src, /s.capture/, 'das Sammelereignis wertet die Grenze nicht aus');
+  assert.match(src, /vt.atkBound/, 'das Sammelereignis hat keine Beschriftung fuer die Grenze');
 });

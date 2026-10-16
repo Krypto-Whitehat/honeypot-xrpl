@@ -211,6 +211,95 @@ vollständigen Ausfall vortäuschen.
 Quorum-Rand (Top-Stimmen vs. benötigte Stimmen), Hash-Split, Last
 (Tx vs. Median) und Takt-Lücke (Ledger-Abstand vs. Median).
 
+**Schliess-Beweis vor jedem Stimmen-Zähler (Akkuratz-Regel, 2026-10-16):** der abonnierte
+`ledger`-Stream liefert ausschließlich **validierte** Ledger — jeder aufgezeichnete Ledger ist
+damit bewiesen geschlossen, das Netz hat sein Quorum erreicht. `no-quorum` beschreibt deshalb
+**nur die eigene Beobachtung** („kein Vote dieses Recorders erfasst“), nie ein zu kleines
+Netz-Quorum; `network-stall` darf nur dort stehen, wo die Schließung ausdrücklich verneint wird
+(`cl === false`). Definiert ist das an genau einer Stelle: `ledgerClosure` in
+`lib/validator-trace.mjs` — Diagnose, Retrace und Ursachen-Ebene lesen dieselbe Funktion. Die
+Verdikte der Kritikalitäts-Zelle sind eine Kette mit Vorrang: `not-closed` →
+`closed-capture-gap` → `closed-quorum-observed` → `closed-reception-thin` →
+`closed-observation-gap`.
+
+**Prüfhinweise folgen derselben Regel (2026-10-16):** ein bewiesen geschlossener Ledger empfiehlt
+keine Netzstockung. In der Retrace-Guidance steht dort `capture-window` („was dieser Rekorder
+empfing“) statt `network-stall`, und in der Prüfliste der Ursachen-Ebene wird
+`cause-check-network-stall` unterdrückt — außer dieser Ledger hat einen **gemessenen
+Close-Abstand** (`close-gap`), der die verlangsamte Taktung selbst belegt. Wo die Schließung
+ausdrücklich verneint ist, bleibt die Netzstockung die naheliegende Gegenprobe; wo sie **nicht
+erfasst** ist, steht ebenfalls die Erfassungs-Prüfung — eine Datenlücke des Recorders ist kein
+Verdacht gegen das Netz. Dieselbe Regel gilt seit 2026-10-17 auch auf der **Serien-Ebene**: eine
+Serie, deren Ledger alle als geschlossen belegt sind (`closedLedgers == ledgers` in
+`failureRuns`), wird als `capture-window` klassifiziert statt als `network-window`, und
+`applySeries` empfiehlt dann `capture-window` statt `network-stall`. Ohne Schließ-Beweis
+bleibt die Klasse `network-window` stehen — die Frage bleibt offen, sie wird nicht zur
+Entlastung umgeschrieben.
+
+**Was eine Erfassungs-Lücke belegt — und was nicht:** Beleg ist die **Index-Folge dieses
+Recorders** (`pg` in `ledgerStats`: die Lücke gilt genau dann, wenn `l !== pg + 1`) und der
+**Lücken-Log** `gaps` mit `reason: "stream-gap"`. Der Close-Abstand ist kein Beleg: die
+Live-Messung auf `xrplcluster.com` (`npm run verify:votes`) zeigte 8 000–9 000 ms Abstand bei
+1 000 ms Median-Takt bei **35 von 35** gesehenen dUNL-Mitgliedern — normaler Netzbetrieb. Ebenso
+ist ein Index-Sprung *innerhalb* `ledgerStats` kein Beleg, weil diese Liste nur
+Abweichungs-Ledger enthält. Seit demselben Nachweis gibt es die **Empfangsbasis**: `ov` zählt alle
+empfangenen Validierungen (dUNL plus Signierer außerhalb der dUNL), `ovb` ist ihr Median über die
+letzten `baselineSize` Ledger, `ot` markiert Empfang unter `receptionRatio` (Tuning-Default
+0.75) des eigenen Niveaus. Gemessen wird der Empfang und **nicht** die Zahl der dUNL-Stimmen, weil
+die Zahl der dUNL-Stimmen teilweise aus der eigenen Zuordnung folgt und kein Empfangsbefund ist —
+der Live-Nachweis: 103–107 Validierungen bei vollen 35 Mitgliedern gegen 53 bei dem Ledger, an dem
+nur 30 Mitglieder gesehen wurden. Zusätzlich zeichnet der Monitor Verbindungsverlust und
+Wiederaufbau als `captureEvents` auf (Art, Zeit, Index, Endpunkt); zuordenbar ist nur das
+**nächste** Ereignis mit Abstand (`captureEvent.deltaMs`), und `null` heißt „nichts
+aufgezeichnet“, nie „kein Ereignis“. Ohne jeden dieser Belege bleibt die Erfassungs-Frage offen
+(`captureGapUnknown`) — eine offene Frage wird nicht zur Entlastung umgeschrieben. Die dUNL selbst
+wird während eines Laufs nachgezogen (`TRACE_DUNL_REFRESH_MS`, Default 600 000 ms), sonst werden
+ausgetauschte Mitglieder als nicht-abstimmend gezählt.
+
+**Gegenprobe nach außen:** `npm run verify:votes` deckt dieselben Ledger index-gleich gegen
+xrpscan und `xrplcluster.com` (Hash, Tx-Zahl, Close-Zeit). xrpscan antwortet in zwei Formaten —
+die Close-Zeit wird deshalb über `close_time_human` gehalten, nicht über `close_time`. Am
+2026-10-16 war die Deckung für 107690236, 107694001, 107695059 und 107695739 in Hash, Tx-Zahl und
+Close-Zeit **identisch**; abweichend war allein die bisherige *Deutung* der Stimmenzahl. Am
+107694001 ist diese Deutung durch die Sequenz des Netzes selbst widerlegt: `xrplcluster.com`
+schloss 107694000 um 11:25:42Z und 107694001 um 11:25:50Z — **8 000 ms** Abstand, während der
+Recorder an derselben Stelle 70 000 ms misst und **0 von 28** notwendigen Stimmen sieht. Dazwischen
+liegen 17 Ledger, die dieser Rekorder nie sah (Lücken-Log `gaps` bei 107693984). „Netzstockung"
+war dort also keine Messung, sondern ein Lesefehler über die eigene Lücke.
+`npm run backfill:closure` trägt fehlende Hashes von außen nach; so ein Hash steht als
+Fremdquelle (`chSource: "xrpscan"`) mit benannter Gegenprüfung (`chVerifiedBy`) in der Datei.
+
+**Grenze aus der Schließung (Akkuratz-Regel, 2026-10-17):** ein bewiesen geschlossener Ledger hat
+sein Netz-Quorum erreicht — also können von den als „kein Vote erfasst" geführten dUNL-Knoten
+höchstens `dUNL − Ziel` echt gefehlt haben; jeder darüber ist nachweisbar Erfassungs-Lücke dieses
+Recorders. `captureBound` in `lib/validator-trace.mjs` rechnet das je Zeile und steht an der
+Kritikalitäts-Zelle, an der Messung `vote-coverage-thin` und im Sammelereignis: `members`
+(aufgezeichnet als `mm`, sonst aus der Identität des Rekorder-Loops — gesehene
+Mitglieder-Stimmen plus ohne-Vote-Flags), `genuineAbsentMax`, `captureArtifactMin`.
+Nachgerechnet am 2026-10-16 (dUNL 35, Ziel 28), alle neun Zeilen mit gesehenen Stimmen unter Ziel:
+107690236 → 8, 107694001 → 28, 107694020 → 4, 107695059 → 12, 107695739 → 17, 107696265 → 18,
+107698041 → 3, 107699073 → 12, 107699400 → 10; zusammen **112 Knoten-Ledger, die nicht echt sein
+können**. Welche Knoten wirklich fehlten, ist aus einem einzelnen Mithörstrom nicht bestimmbar und
+wird nicht geraten.
+
+**Dauer-Kontrolle:** `npm run audit:truth` (`scripts/audit-ground-truth.mjs`) prüft jede
+Forensik-Zeile gegen ihre eigenen Rechenregeln (`need == ceil(members × 0.8)`,
+`mg == top − need`, Rekorder-Identität, Hash-Pflicht bei geschlossener Zeile) und jede Zeile mit
+abstreitbarem Vote-Anspruch index-gleich gegen xrpscan **und** `xrplcluster.com` — Hash, Tx-Zahl
+und Close-Zeit, inklusive der gespeicherten Gegenprüf-Vermerke (`xc`), die dabei facettenweise
+erneut gehalten werden. Exit 1 bei jeder Abweichung, `--all` prüft jede Forensik-Zeile.
+
+Der Voll-Lauf am 2026-10-17 über **alle 367** Forensik-Zeilen des 16.10.: 367 deckungsgleich,
+0 Abweichungen, 0 ungeprüfte Zeilen, alle Invariantzen 0. Dabei zeigte sich, dass
+`xrplcluster.com` ein **Pool** ist: `ledgerNotFound` heißt „dieser Knoten hat den Ledger
+nicht", nicht „der Ledger existiert nicht" — 107698656 und 107698657 wurden nach einem
+Knotenwechsel gefunden. Das Audit holt die Absenz deshalb mehrfach bei verschiedenen Knoten und
+unterscheidet drei Zustände: **Exit 0** = jede Zeile gegen mindestens eine Quelle gedeckt,
+**Exit 1** = echte Abweichung (Zahl oder Hash widerspricht der Quelle oder sich selbst),
+**Exit 2** = keine Abweichung gefunden, aber Zeilen blieben ungeprüft. Eine erreichbare Quelle
+prüft die Zeile auch dann, wenn die andere ablehnt; fehlende Deckung steht als „ungeprüft" da,
+nie als Bestätigung.
+
 **Ebene 2 — Transaktions-Ebene (warum es passierte):** `lib/tx-forensics.mjs`
 liest den `transactions`-Stream und misst die **Form** der Transaktionen genau
 dieses Ledgers — Absender-/Empfänger-Streuung, Fächerung, Fehlerrate,

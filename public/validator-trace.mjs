@@ -27,6 +27,10 @@ const RISK_ROWS = 12;
 // Ursache-Tabelle: die Vorfaelle mit Urteil, nicht die rohe Zeitleiste. 12 Zeilen sind auf einem
 // Bildschirm lesbar; die Zahl der erklaerten Vorfaelle steht in der Reduktions-Zeile.
 const CAUSE_ROWS = 12;
+// Beleg-Arten der Erfassungs-Luecke, dieselben Namen wie CAPTURE_GAP_BASES in lib/validator-trace.mjs.
+// Nur diese beiden fuehren die Beschriftung des Belegs; 'not-recorded' bekommt keine Basis, weil es
+// keine gibt. Der UI-Name ist absichtlich identisch: dieselbe Vokabel in Analyse und Anzeige.
+const CAPTURE_BASES = new Set(["ledger-index", "stream-gap"]);
 
 // Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
 // NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
@@ -477,11 +481,18 @@ export function createValidatorTrace(h) {
   function evidenceText(hy) {
     const e = hy.evidence || {};
     if (hy.tag === "quorum-thin") return h.t("vt.evMargin", { top: num(e.topVotes), needed: num(e.needed), margin: num(e.margin) });
-    if (hy.tag === "vote-coverage-thin") return h.t("vt.evCoverage", {
-      top: num(e.topVotes), needed: num(e.needed), observed: num(e.observedValidations),
-      hash: e.closedHash ? h.esc(String(e.closedHash).slice(0, 12)) + "…" : h.t("vt.cq.hashMissing"),
-      gap: e.captureGap ? h.t("vt.cq.captureGap") : h.t("vt.cq.noCaptureGap"),
-    });
+    if (hy.tag === "vote-coverage-thin") {
+      const base = h.t("vt.evCoverage", {
+        top: num(e.topVotes), needed: num(e.needed), observed: num(e.observedValidations),
+        hash: e.closedHash ? h.esc(String(e.closedHash).slice(0, 12)) + "…" : h.t("vt.cq.hashMissing"),
+        gap: e.captureGap ? h.t("vt.cq.captureGap") : h.t("vt.cq.noCaptureGap"),
+      });
+      const bound = Number.isFinite(e.genuineAbsentMax) && Number.isFinite(e.captureArtifactMin)
+        ? " · " + h.t("vt.evCoverageBound", {
+          absent: num(e.absentCount), max: num(e.genuineAbsentMax), min: num(e.captureArtifactMin) })
+        : "";
+      return base + bound;
+    }
     if (hy.tag === "hash-split") return h.t("vt.evSplit", { runner: num(e.runnerVotes), votes: num(e.votes) });
     if (hy.tag === "load-spike" || hy.tag === "load-extreme") return h.t("vt.evLoad", { tx: num(e.txCount), med: num(e.medianTx), ratio: fac(e.ratio) });
     if (hy.tag === "close-gap") return h.t("vt.evGap", { gap: sec(e.closeGapMs), med: sec(e.medianGapMs) });
@@ -656,6 +667,9 @@ export function createValidatorTrace(h) {
       + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span>"
       + (Array.isArray(s.masters) && s.masters.length
         ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")
+      + (s.capture && Number.isFinite(s.capture.genuineAbsentMax) && Number.isFinite(s.capture.captureArtifactMin)
+        ? '<span class="vt-atk-bound">' + h.esc(h.t("vt.atkBound", {
+          absent: num(s.capture.absentCount), max: num(s.capture.genuineAbsentMax), min: num(s.capture.captureArtifactMin) })) + "</span>" : "")
       + "</li>").join("");
     return '<p class="vt-scope"><small>' + h.esc(h.t("vt.attackThreshold", { n: num(a.threshold), total: num(a.total) })) + "</small></p>"
       + '<ul class="vt-list vt-atk-list">' + rows + "</ul>";
@@ -745,8 +759,43 @@ export function createValidatorTrace(h) {
     const closureCell = (r) => {
       const c = r.closure ?? { closed: null, basis: "validated-ledger-stream", hash: null };
       const hash = c.hash ? h.esc(String(c.hash).slice(0, 12)) + "…" : h.esc(h.t("vt.cq.hashMissing"));
-      const gap = r.captureGap ? " · " + h.esc(h.t("vt.cq.captureGap")) : "";
-      return hash + gap;
+      // Quelle des Hashes, nicht nur der Hash: ein nachgetragener Wert von ausserhalb ist ein
+      // Fremd-Nachweis, kein eigener Mithoerbeweis, und muss lesbar bleiben.
+      const source = c.hash && c.basis === "xrpscan" ? " · " + h.esc(h.t("vt.cq.closureSource")) : "";
+      const verified = c.hash && c.verifiedBy
+        ? " · " + h.esc(h.t("vt.cq.closureVerified", { by: c.verifiedBy }))
+        : "";
+      // Drei Zustaende, nie zwei: gemessene Luecke, gemessen keine Luecke, und nicht erfasst.
+      // 'nicht erfasst' als 'keine Luecke' zu zeigen waere eine Entlastung ohne Beleg - genau die
+      // Art Aussage, die diese Spalte seit dem 2026-10-16 nicht mehr machen darf.
+      const gap = r.captureGap === true
+        ? " · " + h.esc(h.t("vt.cq.captureGap"))
+          + (CAPTURE_BASES.has(r.captureGapBasis) ? " · " + h.esc(h.t("vt.cq.basis." + r.captureGapBasis)) : "")
+        : r.captureGap === false
+          ? " · " + h.esc(h.t("vt.cq.noCaptureGap"))
+          : " · " + h.esc(h.t("vt.cq.captureGapUnknown"));
+      // Das eigene Empfangsniveau, nicht das Netz-Ziel: 'erfasst 16 / Ziel 28' ist erst mit
+      // dem eigenen Median einordbar. Ohne ovb (aeltere Zeilen) steht nichts - fehlend bleibt
+      // fehlend.
+      const own = Number.isFinite(r.observedBaseline)
+        ? " · " + h.esc(h.t("vt.cq.ownBaseline", { seen: num(r.observedValidations), base: num(r.observedBaseline) }))
+        : "";
+      // Naechstes Erfassungs-Ereignis mit Abstand, nie ein Ereignis "irgendwann an dem Tag":
+      // eine Zuordnung ohne Abstand ist eine Behauptung. Ohne Protokoll (Altbestand) steht nichts.
+      const evt = r.captureEvent
+        ? " · " + h.esc(h.t(r.captureEvent.kind === "close" ? "vt.cq.captureEventClose" : "vt.cq.captureEventOpen", {
+          l: num(r.captureEvent.ledger), s: Math.round(num(r.captureEvent.deltaMs) / 1000) }))
+        : "";
+      // Die Grenze aus der Schliessung, nicht aus einer Schaetzung: auf einem geschlossenen
+      // Ledger koennen hoechstens (dUNL - Ziel) der nicht erfassten Knoten echt gefehlt haben.
+      // Ohne diese Zahl waere die Betroffenheits-Zeile ein Knoten-Urteil, das der Schliess-Beweis
+      // in derselben Zeile widerlegt.
+      const b = r.capture;
+      const bound = b && Number.isFinite(b.genuineAbsentMax) && Number.isFinite(b.captureArtifactMin)
+        ? " · " + h.esc(h.t("vt.cq.bound", {
+          absent: num(b.absentCount), max: num(b.genuineAbsentMax), min: num(b.captureArtifactMin) }))
+        : "";
+      return hash + source + verified + gap + own + evt + bound;
     };
     // Betroffenheit als eigene Zeile unter dem Ledger, nicht als achte Spalte: die Namen sind
     // lang, die Tabelle ist es schon. Ohne affectedCount (aeltere Antwort) bleibt die Zeile weg -
@@ -775,6 +824,9 @@ export function createValidatorTrace(h) {
       checked: num(cq.checked), absent: num(cq.checked + cq.unanswered),
       critical: num(cq.critical), followOn: num(cq.followOn),
       closed: num(cq.closed ?? 0), captureGaps: num(cq.captureGaps ?? 0),
+      captureGapUnknown: num(cq.captureGapUnknown ?? 0),
+      receptionThin: num(cq.receptionThin ?? 0),
+      captureEvents: num(cq.captureEvents ?? 0),
     });
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
       + '<p class="vt-note">' + h.esc(summary) + "</p>";

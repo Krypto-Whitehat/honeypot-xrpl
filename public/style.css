@@ -3113,14 +3113,15 @@ body[data-a6] {
 .vt-bars { display: flex; align-items: stretch; gap: var(--gap); }
 @keyframes vt-rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 .vt-col { position: relative; flex: 1 1 0; min-width: 0; height: 100%; animation: vt-rise 300ms ease-out backwards; animation-delay: calc(var(--i, 0) * 16ms); }
-/* Bodenplatte = Grundfläche des Intervalls: volle Zellenbreite, konstante Höhe, eine Platte
+/* Bodenplatte = Grundfläche des Intervalls: dieselbe Grundfläche wie das Prisma darüber
+   (Zellenbreite minus Tiefe --dc), konstante Höhe, eine Platte
    unter jeder Säule (sie ragt in den Plattenstreifen unterhalb der Null-Linie). Sie trägt
    den Intervall-Zustand und ist in jeder Säule gleich sichtbar - nicht nur dort, wo kein
    Balken steht. Zustände: clean (beobachtet, keine Abweichung), solo / cohort / network
    (Abweichung, nach Zahl betroffener dUNL-Validatoren), unknown (Abweichung, Kohorte nicht
    erfasst), none (kein Ledger aufgezeichnet). Ein leeres Intervall bleibt als Platte stehen,
    damit die Zeitachse sich durchgehend liest. */
-.vt-base { position: absolute; left: 0; right: 0; bottom: calc(-1 * var(--base-h)); height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-base { position: absolute; left: 0; right: var(--dc); bottom: calc(-1 * var(--base-h)); height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-clean .vt-base { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-col.vt-state-solo .vt-base { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
 .vt-col.vt-state-cohort .vt-base { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
@@ -3139,6 +3140,14 @@ body[data-a6] {
    - das war der "schrage" Eindruck im 24-h-Fenster (23 leere Platten, eine Saeule). Tiefe ist
    hier eine Datenaussage, keine Oberflaechenbehandlung: sie erscheint, wo ein Vorfall steht.
    Die Platte selbst bleibt in jeder Saule gleich (Farbe = Intervall-Zustand, Zeitachse durchgehend). */
+/* Nachgerechnet 2026-10-16 im ausgelieferten Overlay (24-h-Fenster, 987 px Content, Zelle
+   30,86 px, --dc 6,78 px, Abstand 7,69 px): die Deckfläche der Platte war so breit wie die ganze
+   Zelle, also reichte ihre Scherung bis 30,86 + 6,78 = 37,65 px - 6,78 px in den 7,69 px breiten
+   Abstand hinein, es blieben 0,91 px frei. An den Pixeln der Ausfall-Ledger waren 258 von 864
+   Pixeln in den Abständen nahe der Null-Linie bemalt (29,9 %): der Abstand wurde ein durchgehendes
+   schraegen Band, und der Prisma-Fuss stand nicht mehr auf seiner eigenen Platte. Die Platte ist
+   jetzt um --dc eingezogen wie der Balken darueber - Fuss und Prisma haben dieselbe Grundflaeche,
+   die Scherflaeche endet genau an der Zellenkante, und der Abstand bleibt Abstand. */
 .vt-col.vt-nonzero .vt-base::after { content: ""; position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-clean .vt-base::after { background: color-mix(in srgb, var(--a6-success) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 55%, transparent); }
 .vt-col.vt-state-solo .vt-base::after { background: color-mix(in srgb, var(--a6-ink) 8%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
