@@ -303,21 +303,27 @@ Geometrie ist deterministisch und **nachgerechnet, nicht gesetzt**: `--skew: 45d
 schiefe Bänder (live gemessen 2026-10-16: peak 5000, `--d` 7,63 px, ein Intervall mit einem
 Vorfall 2,48 px hoch); bei 45deg ist die Scherfläche so hoch wie die Säule tief ist — kanonische
 Kavaliere-Projektion und die Obergrenze dessen, was eine Ansicht von oben zeigen kann.
-Zellenbreite `--col-w = (100cqw - --gutter - 3px - 23 x --gap) / 24` (gemessen 30,86 px bei
+Zellenbreite `--col-w = (100cqw - --gutter - 3px - 23 x --gap) / 24` (gemessen 30,87 px bei
 961 px Content), Tiefe `--d = min(max(4px, 0,22 x --col-w), 8,5px, --plot-h x --dmax)`: die
 4-px-Untergrenze greift unter 568 px Content, der 8,5-px-Deckel über 1192 px, und `--dmax`
-(kürzeste gezeichnete Säulenhöhe / Plot-Höhe, aus `profile3d`) begrenzt die Kappe auf die
-kürzeste Säule — kein Intervall darf tiefer wirken, als es hoch ist. Säulen-Zeile,
-Kohortenstreifen und Signaturstreifen teilen dieselben Ränder, denselben Abstand und dieselbe
-Flex-Basis; unter jeder Säule steht dieselbe Bodenplatte (`--base-h: 6px`), und `.vt-plot`
-reserviert `--plot-h + --dz + --base-h + --label-h` (176 + 6,79 + 6 + 15 = 203,79 px), sodass
-höchste Säule und Wertemarke nie abgeschnitten werden (Guards:
-`public/validator-trace-markup.test.mjs`). Achse zweigig: bis `peak` 20 linear (ein
-Gitterintervall je Vorfall; 176 / 20 = 8,80 px, 3,5 % Luft gegen die 8,50-px-Kappe), ab `peak` 25
-Wurzel (176 x sqrt(1/25) = 35,20 px am kürzesten Körper) — linear bei peak 150 ergäbe 1,17 px je
-Vorfall und läge unter der Kantensichtbarkeit. Unter 660 px Content-Breite des Containers dünnen
-`@container`-Regeln die Wertemarken (jede zweite fällt weg), weil vier Ziffern den Abstand ihrer
-Zentren übersteigen.
+(`CAP_RATIO` x kürzeste gezeichnete Säulenhöhe / Achsenmaximum, aus `profile3d`) hält die Kappe
+auf höchstens ein Drittel des kürzesten Körpers (`CAP_RATIO = 1/3`): eine Kappe, die höher ist als
+ihr Körper, macht aus der Säule einen Keil und ihre scheinbare Höhe ein Vielfaches des gemessenen
+Wertes (live gemessen 2026-10-16: 6,79 px Kappe auf 8,80 px Körper = 0,77, Silhouette breiter als
+hoch). Säulen-Zeile, Kohortenstreifen und Signaturstreifen teilen dieselben Ränder, denselben
+Abstand und dieselbe Flex-Basis; unter jeder Säule steht dieselbe Bodenplatte (`--base-h: 6px`) mit
+eigener Deckfläche (`.vt-base::after`, Höhe `--dzc`), und `.vt-plot` reserviert
+`--plot-h + --dz + --base-h + --label-h` (208 + 6,79 + 6 + 15 = 235,79 px), sodass höchste Säule
+und Wertemarke nie abgeschnitten werden (Guards: `public/validator-trace-markup.test.mjs`).
+Achse logarithmisch in `log(1 + v)`: `axisUnit(v, peak) = peak x ln(1 + v) / ln(1 + peak)`, damit
+`peak -> peak` ohne Untergrenze und ohne Mindestbalken. Linear wäre ein Vorfall bei peak 5000 ein
+0,04-px-Streifen (208 px Plot); die alte Wurzel gab bei peak 400 nur 8,80 px Körper — zu kurz für
+eine Kappe, die als Fläche lesbar bleibt (log an derselben Stelle: 24,05 px). Gitterlinien sind
+Dekaden und Spitze (`axisTicks`, höchstens fünf Intervalle); ihre Abstände sind **nicht gleich**,
+sondern wachsen monoton gegen den asymptotischen Dekadenabstand `peak x ln(10) / ln(1 + peak)` —
+1 -> 10 misst immer 0,7404 davon, 100 -> 1000 immer 0,9961, weil sich der peak-Faktor kürzt.
+Unter 660 px Content-Breite des Containers dünnen `@container`-Regeln die Wertemarken (jede zweite
+fällt weg), weil vier Ziffern den Abstand ihrer Zentren übersteigen.
 
 **Ehrliche Grenzen (bewusst sichtbar, nicht still null):**
 `shapeSeen` / `shapeMissing` trennen „keine Signatur gemessen“ von „Transaktionen

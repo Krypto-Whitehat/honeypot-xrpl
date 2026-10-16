@@ -245,17 +245,23 @@ test('Kontrastfarben: Streifen und Marker behalten ihre Flaeche, nicht nur die P
 });
 
 /* --- Achsenskalierung -------------------------------------------------------
- * Gemessen am 2026-10-16 live (7d-Fenster, peak 5000): eine lineare Achse gab Hoehen
- * 0,03 / 0,06 / 4,53 / 138 / 158 px. Ein Intervall mit einem Vorfall war unsichtbar -
- * das Profil wirkte leer, obwohl etwas gemessen wurde. Die Achse ist deshalb
- * wurzel-bezogen; die Gitterlinien bleiben die wahren Zahlen, nur ihre Abstaende
- * folgen derselben Skala. */
-const { axisScale, axisUnit, LINEAR_PEAK, DEPTH_SKEW_K } = await import('./validator-trace.mjs');
+ * Gemessen 2026-10-16 live im ausgelieferten Overlay (7d-Fenster, peak 400, Plot 176 px,
+ * Zelle 30,88 px): die wurzel-bezogene Achse gab den kurzesten gezeichneten Koerper 8,80 px an
+ * einer Kappe von 6,78 px - 77 % der sichtbaren Hoehe einer 1-Vorfall-Saeule waren Deckflaeche,
+ * und ihre Silhouette war 30,88 px breit gegen 15,58 px hoch. Das Profil las sich als schraeger
+ * Kamm, nicht als Saeulenfeld. Die Achse ist jetzt logarithmisch, und die Kappe ist an ein
+ * festes Verhaeltnis zum kurzesten Koerper gebunden (CAP_RATIO). */
+const { axisScale, axisUnit, axisTicks, CAP_RATIO, DEPTH_SKEW_K } = await import('./validator-trace.mjs');
 assert.ok(Math.abs(DEPTH_SKEW_K - DZ_K) < 1e-5,
   'JS DEPTH_SKEW_K ' + DEPTH_SKEW_K + ' gegen CSS tan(--skew) ' + DZ_K.toFixed(6));
-/* Die Achsen-Grenze fuer ein Achsenmaximum: der kurzeste gezeichnete Koerper, umgerechnet in
- * die groesste Tiefe, auf der darauf noch eine geschlossene Kappe sitzt. */
-const dmaxRatioAt = (peak) => (axisUnit(1, peak) / peak) / DEPTH_SKEW_K;
+/* Die Achsen-Grenze fuer ein Achsenmaximum: der kurzeste moegliche Koerper, umgerechnet in die
+ * groesste Tiefe, auf der seine Kappe noch unter CAP_RATIO seiner Hoehe bleibt. */
+const dmaxRatioAt = (peak) => ((axisUnit(1, peak) / peak) * CAP_RATIO) / DEPTH_SKEW_K;
+/* Koerperhoehe eines Intervalls in px - dieselbe Kette wie CSS (--u * --n). */
+const bodyAt = (value, peak, plotH) => (axisUnit(value, peak) / peak) * plotH;
+/* Die Kappe, die CSS bei einer Plot-Hoehe wirklich zeichnet: dieselbe min-Klammer wie --d. */
+const capAt = (peak, plotH) =>
+  Math.min(Math.max(DEPTH_MIN, cellAt(961).col * DEPTH_K), DEPTH_MAX, plotH * dmaxRatioAt(peak));
 
 test('Achse: leeres Intervall hat keine Hoehe (null bleibt null, kein Mindestbalken)', () => {
   assert.equal(axisUnit(0, 5000), 0);
@@ -275,102 +281,103 @@ test('Achse: peak bleibt die wahre Achsenspitze, die Skala ist streng monoton', 
   }
 });
 
-test('Achse: wurzel-bezogene Abbildung ist exakt (1250 von 5000 = halbe Plot-Hoehe)', () => {
-  assert.equal(axisUnit(1250, 5000), 2500);
-  assert.equal(axisUnit(500, 5000), 5000 * Math.sqrt(0.1));
+test('Achse: Dekadenabstaende wachsen monoton gegen den Dekadenabstand der Skala', () => {
+  assert.equal(axisUnit(1, 400), 400 * (Math.log(2) / Math.log(401)));
+  assert.equal(axisUnit(400, 400), 400);
+  /* log(1 + v) ist NICHT dekadengleichabstaendig. Der Abstand zweier Dekaden a und 10a an der
+     Achse peak p ist p * (ln(1 + 10a) - ln(1 + a)) / ln(1 + p): er waechst mit a und naehert
+     sich von unten dem asymptotischen Dekadenabstand p * ln(10) / ln(1 + p). Nachgerechnet bei
+     peak 1000 (Achseneinheiten): 1 -> 10 = 246,75, 10 -> 100 = 320,93, 100 -> 1000 = 331,99,
+     asymptotisch 333,29. Die Gitterlinien stehen also nicht gleich weit - die Achse behauptet
+     nirgends etwas anderes, und die wahren Zahlen stehen in jeder Gitterlinie selbst. */
+  for (const peak of [1000, 5000, 40000]) {
+    const u = [1, 10, 100, 1000].map((v) => axisUnit(v, peak));
+    const gaps = u.slice(1).map((x, i) => x - u[i]);
+    const asym = (Math.log(10) / Math.log(1 + peak)) * peak;
+    for (let i = 1; i < gaps.length; i++) {
+      assert.ok(gaps[i] > gaps[i - 1], 'peak ' + peak + ': Dekadenabstand faellt: '
+        + gaps.map((g) => g.toFixed(2)).join(' / '));
+    }
+    for (const g of gaps) {
+      assert.ok(g < asym, 'peak ' + peak + ': Abstand ' + g.toFixed(2) + ' ueber dem asymptotischen ' + asym.toFixed(2));
+    }
+    /* Die Randverhaeltnisse sind peak-unabhaengig, weil der Faktor peak in Zaehler und Nenner
+       steht: (ln 11 - ln 2) / ln 10 = 0,740363 fuer 1 -> 10 und (ln 1001 - ln 101) / ln 10 =
+       0,996112 fuer 100 -> 1000. Die unterste Dekade ist rund ein Viertel schmaler als die
+       oberen - das ist der Preis von log(1 + v) ohne Untergrenze. */
+    const firstRatio = gaps[0] / asym;
+    const lastRatio = gaps[gaps.length - 1] / asym;
+    assert.ok(Math.abs(firstRatio - (Math.log(11) - Math.log(2)) / Math.log(10)) < 1e-9,
+      'peak ' + peak + ': unterster Dekadenabstand ' + firstRatio.toFixed(6) + ' gegen 0,740363');
+    assert.ok(Math.abs(lastRatio - (Math.log(1001) - Math.log(101)) / Math.log(10)) < 1e-9,
+      'peak ' + peak + ': oberster Dekadenabstand ' + lastRatio.toFixed(6) + ' gegen 0,996112');
+  }
+  // Die Abbildung hat keine Untergrenze: 1 und 2 duerfen nicht auf derselben Hoehe stehen.
+  assert.ok(axisUnit(2, 5000) > axisUnit(1, 5000), '1 und 2 standen auf derselben Hoehe');
 });
 
-test('Achse: kleine Achsen sind linear (die Wurzel war bei peak 4 eine Verschlechterung)', () => {
-  // Nachgerechnet bei Plot-Hoehe 176 px: linear 44 / 88 / 132 / 176 px - jede Stufe genau ein
-  // Gitterintervall. Aus der alten Wurzel-Skala: 88 / 124,4 / 152,4 / 176 px, also ein einziger
-  // Vorfall auf halber Plot-Hoehe und drei Stufen, die auf 36 px zusammengeschoben sind.
-  const peak = 4, plotH = 176;
-  const lin = [1, 2, 3, 4].map((v) => (axisUnit(v, peak) / peak) * plotH);
-  assert.deepEqual(lin, [44, 88, 132, 176], 'lineare Stufen bei peak 4: ' + lin.join(' / '));
-  assert.equal(axisUnit(1, 4), 1);
-  assert.equal(axisUnit(4, 4), 4);
-  assert.equal(axisUnit(7, 15), 7);
-  assert.equal(axisUnit(15, 15), 15);
-  assert.equal(axisUnit(10, 10), 10);
-});
-
-test('Achse: die Schwelle ist das Volumen (linear bis peak 20, ab peak 25 wurzel)', () => {
-  assert.equal(LINEAR_PEAK, 20, 'LINEAR_PEAK ist ' + LINEAR_PEAK);
-  /* Linear bleibt das Profil in voller Tiefe, solange der kurzeste Koerper (plotH / peak) nicht
-     unter die groesste Kappe faellt. 176 / 20 = 8,80 px gegen 8,50 px Kappe - 3,5 % Luft. */
-  assert.ok(PLOT_H / LINEAR_PEAK >= DZC_MAX, 'linear bei peak ' + LINEAR_PEAK + ': kurzester Koerper '
-    + (PLOT_H / LINEAR_PEAK).toFixed(2) + ' px unter der groessten Kappe ' + DZC_MAX.toFixed(2) + ' px');
-  /* Der alte Wert 50 war die Ursache der Haarlinie: 176 / 50 = 3,52 px Koerper gegen 6,79 px
-     Kappe bei 961 px Content. Die Achse war linear, die Kappe hoeher als jeder 1-Vorfall-Koerper,
-     und die Tiefe wurde auf Kappenhoehe zusammengezogen. */
-  assert.ok(PLOT_H / 50 < cellAt(961).dzc, 'die alte Schwelle 50 ist wieder drin: ' + (PLOT_H / 50).toFixed(2)
-    + ' px gegen Kappe ' + cellAt(961).dzc.toFixed(2) + ' px');
-  /* peak 20 ist der letzte Sprung des Achsleiters, der die groesste Kappe linear zulaesst. Der
-     naechste (peak 25) waere linear 176 / 25 = 7,04 px kurz - unter der Kappe - und ist
-     wurzel-bezogen 176 * sqrt(1 / 25) = 35,20 px. */
-  const at20linear = (axisUnit(1, 20) / 20) * PLOT_H;
-  assert.ok(Math.abs(at20linear - 8.8) < 1e-9, 'peak 20 linear: 1 Vorfall = ' + at20linear.toFixed(2) + ' px');
-  assert.ok(at20linear >= DZC_MAX && at20linear - DZC_MAX < 1, 'peak 20: kurzester Koerper '
-    + at20linear.toFixed(2) + ' px gegen Kappe ' + DZC_MAX.toFixed(2) + ' px');
-  const at25linear = (1 / 25) * PLOT_H;
-  assert.ok(at25linear < DZC_MAX, 'peak 25 linear waere ' + at25linear.toFixed(2) + ' px - unter der Kappe');
-  const at25root = (axisUnit(1, 25) / 25) * PLOT_H;
-  assert.ok(Math.abs(at25root - 35.2) < 1e-9, 'peak 25 wurzel: 1 Vorfall = ' + at25root.toFixed(2) + ' px');
-  /* Was der Achsleiter in der linearen Zone wirklich liefert (peak / step <= 5): */
-  for (const max of [1, 4, 6, 11, 15, 16, 20]) {
-    const { peak } = axisScale(max);
-    assert.ok(peak <= LINEAR_PEAK, 'max ' + max + ': peak ' + peak + ' faellt aus der linearen Zone');
-    assert.ok(PLOT_H / peak >= DZC_MAX, 'max ' + max + ': peak ' + peak + ' -> '
-      + (PLOT_H / peak).toFixed(2) + ' px kurzester Koerper unter der Kappe');
-  }
-  for (const max of [21, 25, 50, 129]) {
-    const { peak } = axisScale(max);
-    assert.ok(peak > LINEAR_PEAK, 'max ' + max + ': peak ' + peak + ' waere noch linear');
-    const body = (axisUnit(1, peak) / peak) * PLOT_H;
-    assert.ok(body >= DZC_MAX, 'max ' + max + ': peak ' + peak + ' -> kurzester Koerper '
-      + body.toFixed(2) + ' px unter der Kappe');
-  }
-  // Monotonie in beiden Zweigen: die Skala darf Vergleiche nicht umdrehen.
-  for (const p of [4, 15, 20, 50, 5000]) {
-    const vals = [1, 2, 3, 6, 129, 1250, 3931].filter((v) => v <= p);
-    const units = vals.map((v) => axisUnit(v, p));
-    for (let i = 1; i < units.length; i++) {
-      assert.ok(units[i] > units[i - 1], 'nicht monoton bei peak ' + p + ': ' + units[i] + ' <= ' + units[i - 1]);
+test('Achse: die Gitterlinien sind Dekaden und Spitze, hoechstens fuenf Intervalle', () => {
+  assert.deepEqual(axisTicks(5000), [0, 1, 10, 100, 1000, 5000]);
+  assert.deepEqual(axisTicks(400), [0, 1, 10, 100, 400]);
+  assert.deepEqual(axisTicks(250), [0, 1, 10, 100, 250]);
+  assert.deepEqual(axisTicks(20), [0, 1, 10, 20]);
+  assert.deepEqual(axisTicks(10), [0, 1, 10]);
+  assert.deepEqual(axisTicks(5), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(axisTicks(6), [0, 2, 4, 6]);
+  assert.deepEqual(axisTicks(1), [0, 1]);
+  for (const max of [1, 4, 6, 11, 15, 16, 21, 25, 50, 129, 400, 4502, 9000]) {
+    const { peak, ticks } = axisScale(max);
+    assert.ok(peak >= max, 'peak ' + peak + ' unter dem groessten Intervall ' + max);
+    assert.equal(ticks[0], 0, 'keine Null-Linie bei peak ' + peak);
+    assert.equal(ticks[ticks.length - 1], peak, 'die Spitze fehlt bei peak ' + peak);
+    assert.ok(ticks.length - 1 <= 5, 'peak ' + peak + ': ' + (ticks.length - 1) + ' Gitterintervalle');
+    for (let i = 1; i < ticks.length; i++) {
+      assert.ok(ticks[i] > ticks[i - 1], 'Gitterlinien nicht steigend bei peak ' + peak);
+      const gapPx = bodyAt(ticks[i], peak, Math.min(...PLOT_HS)) - bodyAt(ticks[i - 1], peak, Math.min(...PLOT_HS));
+      assert.ok(gapPx >= 8, 'peak ' + peak + ': Intervall ' + ticks[i - 1] + ' -> ' + ticks[i]
+        + ' nur ' + gapPx.toFixed(2) + ' px - die Linien kleben aneinander');
     }
   }
 });
 
-test('Achse: der kleinste Wert bleibt unter einem Gitterintervall (kein uebertriebener Balken)', () => {
-  // peak 5000, step 1000: die Gitterlinie bei 1000 steht auf sqrt(1000/5000) = 44,72 % der Hoehe.
-  const gridline = axisUnit(1000, 5000) / 5000;
-  assert.ok(Math.abs(gridline - Math.sqrt(0.2)) < 1e-12, 'Gitterlinien-Position ' + gridline);
-  const smallest = axisUnit(1, 5000) / 5000;
-  assert.ok(smallest < gridline / 4, 'kleinster Wert ' + smallest + ' raeumt zu viel Plot-Raum ein');
-  // Die groesste Kappe (8,50 px) ist bei 176 px Plot-Hoehe 4,83 % und bei 132 px 6,44 % - weit
-  // unter einem Gitterintervall. Sie ist keine Untergrenze am Balken: die Balkenhoehe bleibt
-  // der Achsenwert (Invarianz-Test unten), die Kappe ist das, was begrenzt wird.
-  assert.ok(DZC_MAX / PLOT_H < gridline / 4, 'Kappe zu hoch (Desktop): ' + (DZC_MAX / PLOT_H * 100).toFixed(2) + ' %');
-  assert.ok(DZC_MAX / Math.min(...PLOT_HS) < gridline / 4,
-    'Kappe zu hoch (Mobil): ' + (DZC_MAX / Math.min(...PLOT_HS) * 100).toFixed(2) + ' %');
+test('Achse: die Kappe bleibt unter einem Drittel des Korpers - der Grund gegen den Keil', () => {
+  assert.equal(CAP_RATIO, 1 / 3, 'CAP_RATIO ist ' + CAP_RATIO);
+  // Die Ausgangslage, nachgerechnet: Wurzel bei peak 400 und Plot 176 px gab 8,80 px Koerper,
+  // die alte --dmax 0,05 gab 6,79 px Kappe (6,7908 px bei 961 px Content, Zelle 30,87 px).
+  const oldBody = Math.sqrt(1 / 400) * 176;
+  const oldCap = cellAt(961, 0.05).dzc;
+  assert.ok(Math.abs(oldBody - 8.8) < 1e-9 && Math.abs(oldCap - 6.79) < 0.01,
+    'Ausgangslage: Koerper ' + oldBody.toFixed(2) + ' px, Kappe ' + oldCap.toFixed(2) + ' px');
+  assert.ok(oldCap / oldBody > 0.7, 'die alte Kappe war ' + (oldCap / oldBody).toFixed(2)
+    + '-mal so hoch wie ihr eigener Koerper');
+  for (const max of [1, 4, 6, 11, 15, 16, 20, 21, 25, 50, 129, 400, 4502, 9000]) {
+    const { peak } = axisScale(max);
+    for (const plotH of PLOT_HS) {
+      const body = bodyAt(1, peak, plotH);
+      const cap = capAt(peak, plotH);
+      assert.ok(cap <= body * CAP_RATIO + 1e-9, 'peak ' + peak + ' bei Plot ' + plotH + ' px: Kappe '
+        + cap.toFixed(2) + ' px ueber einem Drittel des Korpers ' + body.toFixed(2) + ' px');
+      assert.ok(cap >= 1, 'peak ' + peak + ' bei Plot ' + plotH + ' px: Kappe ' + cap.toFixed(2)
+        + ' px - unter 1 px ist keine Flaeche mehr zu sehen');
+      assert.ok(body >= cap, 'peak ' + peak + ' bei Plot ' + plotH + ' px: Koerper '
+        + body.toFixed(2) + ' px unter seiner eigenen Kappe');
+    }
+  }
+  // Die groesste Kappe, die je gezeichnet wird, bleibt klein gegen die Plot-Hoehe.
+  assert.ok(DZC_MAX / PLOT_H < 0.05, 'groesste Kappe ' + (DZC_MAX / PLOT_H * 100).toFixed(2) + ' % der Plot-Hoehe');
 });
 
-test('Achse: lineare Hoehen waeren unter der Sichtbarkeit (der Grund der Wurzel-Skala)', () => {
-  const plotH = 176;
-  // Nachrechnen (peak 5000, Plot-Hoehe 176 px): linear 1 -> 0,035 px, 2 -> 0,07 px,
-  // 6 -> 0,21 px, 129 -> 4,54 px. Die ersten drei sind unter jeder Kantensichtbarkeit.
-  const linear = [1, 2, 6].map((v) => (v / 5000) * plotH);
-  for (const h of linear) assert.ok(h < 1, 'linear war ' + h + ' px - unter der Kanten-Sichtbarkeit');
-  assert.ok((129 / 5000) * plotH < 5, '129 Vorfaelle waren linear ' + (129 / 5000) * plotH + ' px');
-  // Wurzel-Skala: 1 -> 2,49 px, 2 -> 3,52 px, 6 -> 6,10 px, 129 -> 28,27 px, 3931 -> 156,06 px.
-  const root = [1, 2, 6, 129, 3931].map((v) => (axisUnit(v, 5000) / 5000) * plotH);
-  assert.ok(root[0] > 2.4 && root[0] < 2.6, 'Wurzel: 1 Vorfall = ' + root[0] + ' px');
-  assert.ok(root[1] > 3.4 && root[1] < 3.6, 'Wurzel: 2 Vorfaelle = ' + root[1] + ' px');
-  assert.ok(root[2] > 6 && root[2] < 6.2, 'Wurzel: 6 Vorfaelle = ' + root[2] + ' px');
-  assert.ok(root[3] > 28 && root[3] < 28.4, 'Wurzel: 129 Vorfaelle = ' + root[3] + ' px');
-  assert.ok(root[4] > 156 && root[4] < 156.2, 'Wurzel: 3931 Vorfaelle = ' + root[4] + ' px');
-  // Die Abstufung bleibt erhalten: 129 ist weiterhin gut ein Zehntel von 3931, nicht ein
-  // Unsichtbarer und kein Gleichstand mit 1.
-  assert.ok(root[4] / root[3] > 5 && root[4] / root[3] < 6, 'Verhaeltnis 3931/129 = ' + root[4] / root[3]);
+test('Achse: linear waere bei grossen Spitzen unsichtbar (der Grund der Log-Skala)', () => {
+  const linear = [1, 2, 6].map((v) => (v / 5000) * PLOT_H);
+  for (const h of linear) assert.ok(h < 1, 'linear war ' + h.toFixed(3) + ' px - unter der Kanten-Sichtbarkeit');
+  const log = [1, 2, 6, 129, 3931].map((v) => bodyAt(v, 5000, PLOT_H));
+  assert.ok(log[0] > 15, 'log: 1 Vorfall = ' + log[0].toFixed(2) + ' px - zu klein, um verglichen zu werden');
+  assert.ok(log[4] / log[3] < 3, 'log: 3.931 gegen 129 = ' + (log[4] / log[3]).toFixed(2)
+    + ' - die Spitze darf den Rest nicht erschlagen');
+  assert.ok(log[4] / log[0] > 10, 'log: 3.931 gegen 1 = ' + (log[4] / log[0]).toFixed(2) + ' - die Spitze verschwindet nicht');
+  // Der kleinste Wert raumt deutlich weniger als ein Viertel des Plots ein.
+  assert.ok(bodyAt(1, 5000, PLOT_H) / PLOT_H < 0.15, '1 Vorfall bei peak 5000 = '
+    + (bodyAt(1, 5000, PLOT_H) / PLOT_H * 100).toFixed(2) + ' % der Plot-Hoehe');
 });
 
 test('Markup: Gitterlinie und Saulenhoehe haengen an derselben Achsenfunktion', () => {
@@ -505,15 +512,16 @@ test('Höhe: Prisma und Wertemarke der hoechsten Säule bleiben im Plot', () => 
   assert.ok(Math.abs(bhMax - plotH) < 1e-9, 'Säule bei peak fuellt nicht die volle Plot-Hoehe');
   assert.ok(baseH + bhMax + dz + labelGap + labelFont <= baseH + plotH + dz + labelH,
     'Wertemarke der peak-Säule ragt ueber den Plot');
-  /* peak 5000 ist der Extremfall der Achse: die Grenze senkt die Tiefe von 6,79 px auf 2,49 px,
-     und die Kappe sitzt dann exakt auf dem kleinsten Koerper (2,49 px). Die Balkenhoehe bleibt
-     dabei der Achsenwert - sie wird nicht angehoben. */
+  /* peak 5000 ist der Extremfall der Achse: die Grenze senkt die Tiefe von 6,79 px auf 5,64 px,
+     und die Kappe ist dann genau ein Drittel des kurzesten Korpers (16,93 px). Die Balkenhoehe
+     bleibt dabei der Achsenwert - sie wird nicht angehoben. */
   const bounded = cellAt(961, dmaxRatioAt(peak));
   const bh1 = (axisUnit(1, peak) / peak) * plotH;
   assert.ok(bounded.d < d, 'peak ' + peak + ': die Achsen-Grenze begrenzt die Tiefe nicht ('
     + bounded.d.toFixed(2) + ' px gegen ' + d.toFixed(2) + ' px)');
-  assert.ok(Math.abs(bounded.d * DEPTH_SKEW_K - bh1) < 1e-9, 'peak ' + peak + ': Kappe '
-    + (bounded.d * DEPTH_SKEW_K).toFixed(2) + ' px gegen kurzesten Koerper ' + bh1.toFixed(2) + ' px');
+  assert.ok(Math.abs(bounded.d * DEPTH_SKEW_K - bh1 * CAP_RATIO) < 1e-9, 'peak ' + peak + ': Kappe '
+    + (bounded.d * DEPTH_SKEW_K).toFixed(2) + ' px gegen ein Drittel des kurzesten Korpers '
+    + (bh1 * CAP_RATIO).toFixed(2) + ' px');
 });
 
 test('Mobil: unter 380 px Content fallen die Scherflächen, die Zellenrechnung bleibt wahr', () => {
@@ -589,16 +597,16 @@ test('Wertemarken: Duennung ist nachgerechnet und die Zahl bleibt ohne Marke err
   assert.ok(src.includes('aria-label="'), 'Intervall traegt kein aria-label mit der Zahl');
 });
 
-/* Achsen-Grenze der Tiefe: die Kappe ist 1 * Tiefe hoch und darf auf keiner Saeule hoeher
- * sein als ihr Koerper - sonst steht ein Deckel auf einer Bodenplatte, und die scheinbare Hoehe
- * ist ein Vielfaches des wahren Wertes. profile3d begrenzt die Tiefe auf
- * (kurzeste gezeichnete Saeulenhoehe / Achsenmaximum) / 1 * Plot-Hoehe. Damit ist die
- * Invarianz eine Gleichung, keine nachtraegliche Klammer am Balken. */
-test('Tiefe: profile3d begrenzt die Tiefe auf den kurzesten Koerper (Kappe <= Koerper)', () => {
+/* Achsen-Grenze der Tiefe: die Kappe ist 1 * Tiefe hoch und darf auf keiner Saeule hoeher sein
+ * als ein Drittel ihres Korpers - sonst steht ein Deckel auf einer Bodenplatte, und die
+ * scheinbare Hoehe ist ein Vielfaches des wahren Wertes. profile3d begrenzt die Tiefe auf
+ * CAP_RATIO * (kurzeste gezeichnete Saeulenhoehe / Achsenmaximum) / 1 * Plot-Hoehe. Damit ist
+ * die Invarianz eine Gleichung, keine nachtraegliche Klammer am Balken. */
+test('Tiefe: profile3d begrenzt die Tiefe auf ein Drittel des kurzesten Korpers', () => {
   const css = stripComments(styleCss);
   assert.match(ruleBody('.vt-profile'), /--d:\s*min\(max\(4px,\s*calc\(var\(--col-w\) \* 0\.22\)\),\s*8\.5px,\s*calc\(var\(--plot-h\) \* var\(--dmax,\s*1\)\)\)/,
     '--d ist nicht durch die Achsen-Grenze begrenzt');
-  assert.match(src, /const depthRatio = \(smallestUnit \/ peak\) \/ DEPTH_SKEW_K;/, 'depthRatio fehlt in profile3d');
+  assert.match(src, /const depthRatio = \(\(smallestUnit \/ peak\) \* CAP_RATIO\) \/ DEPTH_SKEW_K;/, 'depthRatio fehlt in profile3d');
   assert.match(src, /--dmax:' \+ depthRatio\.toFixed\(4\)/, '--dmax laeuft nicht in die Profil-Wurzel');
   assert.doesNotMatch(src, /depthCap|--dcap/, 'der alte Daten-Deckel --dcap ist zurueck');
   assert.doesNotMatch(css, /--dcap/, '--dcap ist in der CSS zurueck');
@@ -613,31 +621,48 @@ test('Tiefe: profile3d begrenzt die Tiefe auf den kurzesten Koerper (Kappe <= Ko
     for (const content of [460, 961, 1600]) {
       const c = cellAt(content, ratio);
       const body = (axisUnit(1, peak) / peak) * plotH;
-      assert.ok(c.d * DEPTH_SKEW_K <= body + 1e-9, 'peak ' + peak + ' / ' + content + ' px: Kappe '
-        + (c.d * DEPTH_SKEW_K).toFixed(2) + ' px auf kurzem Koerper ' + body.toFixed(2) + ' px');
+      assert.ok(c.d * DEPTH_SKEW_K <= body * CAP_RATIO + 1e-9, 'peak ' + peak + ' / ' + content + ' px: Kappe '
+        + (c.d * DEPTH_SKEW_K).toFixed(2) + ' px ueber einem Drittel des kurzesten Korpers ' + body.toFixed(2) + ' px');
       assert.ok(c.d >= 2, 'peak ' + peak + ' / ' + content + ' px: Tiefe ' + c.d.toFixed(2)
         + ' px - unter der Kantensichtbarkeit');
     }
   }
   /* Das live gezeichnete 24-h-Profil (peak 50, Content 961 px): die Grenze laesst die volle
-     Tiefe, das Profil behaelt sein Volumen. 1 Vorfall = 24,89 px Koerper, Grenze 24,89 px. */
+     Tiefe, das Profil behaelt sein Volumen. 1 Vorfall = 36,67 px Koerper, Kappe 6,79 px = 0,19
+     davon - die Grenze greift hier noch gar nicht (sie laesst 12,22 px). */
   const rich = cellAt(961, dmaxRatioAt(50));
   assert.ok(Math.abs(rich.d - DEPTH_K * cellAt(961).col) < 1e-9, 'peak 50: Tiefe ' + rich.d.toFixed(2)
     + ' px - die Achsen-Grenze nimmt dem Profil das Volumen');
   assert.ok((axisUnit(1, 50) / 50) * plotH > rich.dzc, 'peak 50: kurzester Koerper '
     + ((axisUnit(1, 50) / 50) * plotH).toFixed(2) + ' px unter der Kappe ' + rich.dzc.toFixed(2) + ' px');
-  /* Der alte Fehler bleibt nachgerechnet: lineare Achse bis peak 50 mit Daten-Deckel. */
+  /* Der alte Fehler bleibt nachgerechnet: die lineare Achse bis peak 50 gab 4,16 px - kaum ueber
+     der 4-px-Untergrenze, und bei peak 5000 waere es ein 0,04-px-Streifen gewesen. Log gibt an
+     derselben Stelle 36,67 px, also das 8,8-fache. */
   const oldBody = (1 / 50) * plotH;
-  assert.ok(oldBody < 4, 'mit der alten linearen Achse bis peak 50 waere der kurzeste Koerper '
-    + oldBody.toFixed(2) + ' px - eine Haarlinie, kein Prisma');
-  /* Ausserhalb dieses Bereichs folgt die Tiefe der Achse: peak 40000 (ein 40.000-Vorfall-
-     Intervall neben einem 1-Vorfall-Intervall) laesst nur 0,88 px Tiefe - das Profil wird
-     duenn, weil die kurzeste Saeule 0,88 px hoch ist. Ein Balken, der auf diese Hoehe angehoben
-     wuerde, zeigte eine Zahl, die nicht gemessen wurde. */
-  const extreme = cellAt(961, dmaxRatioAt(axisScale(40000).peak));
-  assert.ok(extreme.d < 2, 'peak 40000: Tiefe ' + extreme.d.toFixed(2) + ' px - die Grenze wurde uebergangen');
-  assert.ok(extreme.d * DEPTH_SKEW_K <= (axisUnit(1, 40000) / 40000) * plotH + 1e-9,
-    'peak 40000: Kappe ' + (extreme.d * DEPTH_SKEW_K).toFixed(2) + ' px ueber dem Koerper');
+  assert.ok(oldBody < 4.5, 'lineare Achse bis peak 50: kurzester Koerper ' + oldBody.toFixed(2)
+    + ' px - der Abstand zur 4-px-Untergrenze ist kein Spielraum');
+  assert.ok(((axisUnit(1, 50) / 50) * plotH) / oldBody > 8, 'peak 50: Log gibt '
+    + (((axisUnit(1, 50) / 50) * plotH) / oldBody).toFixed(2) + '-mal so viel Koerper wie linear');
+  /* Ausserhalb dieses Bereichs folgt die Tiefe der Achse: peak 40000 (ein 40.000-Vorfall-Intervall
+     neben einem 1-Vorfall-Intervall) laesst 4,54 px Tiefe gegen 6,79 px - das Profil wird duenner,
+     weil die kurzeste Saeule nur 13,61 px hoch ist, und die Kappe bleibt ein Drittel davon. Ein
+     Balken, der auf diese Hoehe angehoben wuerde, zeigte eine Zahl, die nicht gemessen wurde. */
+  const extremePeak = axisScale(40000).peak;
+  const extreme = cellAt(961, dmaxRatioAt(extremePeak));
+  const extremeBody = (axisUnit(1, extremePeak) / extremePeak) * plotH;
+  assert.ok(extreme.d < cellAt(961).d, 'peak ' + extremePeak + ': Tiefe ' + extreme.d.toFixed(2)
+    + ' px - die Grenze wurde uebergangen');
+  assert.ok(Math.abs(extreme.d * DEPTH_SKEW_K - extremeBody * CAP_RATIO) < 1e-9, 'peak ' + extremePeak
+    + ': Kappe ' + (extreme.d * DEPTH_SKEW_K).toFixed(2) + ' px gegen ein Drittel von ' + extremeBody.toFixed(2) + ' px');
+  /* Die Grenze trifft die 4-px-Untergrenze der Tiefe erst bei peak ~165.000, geloest aus
+     208 * ln(2) / (3 * ln(1 + peak)) = 4. Bis dahin ist die Kappe immer mindestens 4 px und damit
+     noch eine Flaeche. Darueber gewinnt die Invarianz: die Kappe sinkt unter die Untergrenze,
+     weil ein Deckel, der hoeher ist als sein Koerper, die Skala bricht. */
+  const atFloor = (peak) => cellAt(961, dmaxRatioAt(peak)).d;
+  assert.ok(atFloor(160000) >= 4, 'peak 160000: Tiefe ' + atFloor(160000).toFixed(2)
+    + ' px - die Grenze liegt frueher als nachgerechnet');
+  assert.ok(atFloor(170000) < 4, 'peak 170000: Tiefe ' + atFloor(170000).toFixed(2)
+    + ' px - die Grenze liegt spaeter als nachgerechnet');
 });
 
 /* Peer-Ebene (Vergleichs-Ebene 2026-10-16): die Ausfallrate bekommt ihren Vergleich erst durch

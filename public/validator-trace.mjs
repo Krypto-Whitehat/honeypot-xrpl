@@ -65,42 +65,42 @@ export function axisScale(max) {
   const m = Math.max(1, max);
   for (const s of [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000]) {
     const peak = Math.ceil(m / s) * s;
-    if (peak / s <= 5) return { peak, step: s };
+    if (peak / s <= 5) return { peak, step: s, ticks: axisTicks(peak) };
   }
   const s = Math.ceil(m / 5);
-  return { peak: s * 5, step: s };
+  const peak = s * 5;
+  return { peak, step: s, ticks: axisTicks(peak) };
 }
 
-// Achsenposition eines Wertes, in Achseneinheiten (peak entspricht --peak / 100 %).
-//
-// Die Skala ist quadratwurzel-bezogen, weil die Vorfall-Zahlen ueber ein Fenster extrem schief
-// liegen: 4.502 Abweichungen in einem Intervall neben 1 in einem anderen. Linear waere das
-// Intervall mit 1 ein 0,03-px-Streifen - unsichtbar, und das Profil wirkte leer, obwohl etwas
-// gemessen wurde (gemessen am 2026-10-16 live: peak 5000, Hoehen 0,03 / 0,06 / 4,53 / 138 / 158 px).
-// sqrt erhaelt die Reihenfolge und die Vergleiche zwischen Intervallen, macht kleine Werte aber
-// sichtbar; die Gitterlinien bleiben die wahren Zahlen, nur ihre Abstaende folgen derselben Skala.
-// Die Abbildung selbst ist ohne Untergrenze: sonst werden 1 und 2 auf derselben Hoehe gleich
-// (eine flache Stelle in einer Skala, die vergleichen soll). Die Sichtbarkeit kleiner Werte ist
-// eine Rendering-Regel und steht in CSS (--bh, Untergrenze --dzc fur nicht-leere Saulen); die
-// Achse bleibt exakt. Die wahren Zahlen stehen in Readout und aria-label.
-//
-// Die Wurzel-Skala gilt ab peak 25. Darunter ist sie eine Verschlechterung: gemessen
-// 2026-10-16 (7-Tage-Fenster, peak 4, Plot-Hoehe 176 px) standen 1 / 2 / 3 / 4 Vorfaelle auf
-// 88,0 / 124,4 / 152,4 / 176,0 px - ein einziger Vorfall auf der halben Plot-Hoehe, die
-// Stufen auf 36 px zusammengeschoben, und das Profil las sich als Kamm lauter halbhher Saeulen.
-// Linear sind es 44,0 / 88,0 / 132,0 / 176,0 px: jede Stufe genau ein Gitterintervall.
-//
-// Die Schwelle ist nachgerechnet, nicht gefuehlt. Linear ist ehrlich, solange der kurzeste
-// gezeichnete Koerper (plotH / peak) mindestens so hoch ist wie die eigene Kappe --dzc; sonst
-// hebt die CSS-Untergrenze die Saeule und die Achse zeigt eine andere Hoehe als der Balken.
-// Die groesste Kappe ist durch den Tiefen-Deckel gegeben: --d <= 8,5 px, also
-// --dzc <= 8,5 * 1 = 8,50 px. Linear verlangt damit 176 / peak >= 8,50, also peak <= 20,71.
-// Der Achsleiter (axisScale) liefert in diesem Bereich peak 20 (176 / 20 = 8,80 px, 3,5 % Luft
-// gegen die Kappe) und peak 25 (176 / 25 = 7,04 px - unter der Kappe, dort darf die Achse nicht
-// linear sein). peak 20 ist der letzte Achssprung, der die groesste Kappe noch zulaesst. Ab
-// peak 25 ist die Wurzel am kurzesten Koerper 176 * sqrt(1 / 25) = 35,20 px - weit ueber jeder
-// Kappe, die Untergrenze greift nie.
-export const LINEAR_PEAK = 20;
+// Die Gitterlinien einer logarithmischen Achse: Dekaden und die Spitze, nicht Achsschritte.
+// Achsschritte waeren auf einer Log-Achse oben zusammengedrueckt - bei peak 5000 stuenden
+// 1000 / 2000 / 3000 / 4000 / 5000 auf 81 / 89 / 94 / 97 / 100 % der Hoehe, vier Linien auf den
+// letzten 19 %. Dekaden tragen die wahren Zahlen und sind nahezu gleich abstaendig - den Preis
+// (und die nachgerechneten Verhaeltnisse 0,7404 / 0,9961) steht in axisUnit.
+// Unterhalb von peak 10 sind es die ganzen Zahlen selbst. Die Zahl der Intervalle bleibt durch
+// den Achsleiter (peak / step <= 5) auf fuenf begrenzt.
+export function axisTicks(peak) {
+  const p = Math.max(1, Math.round(Number(peak) || 1));
+  const ticks = [0];
+  if (p < 10) {
+    const st = p <= 5 ? 1 : 2;
+    for (let v = st; v < p; v += st) ticks.push(v);
+    ticks.push(p);
+    return ticks;
+  }
+  for (let d = 1; d <= p; d *= 10) ticks.push(d);
+  if (ticks[ticks.length - 1] !== p) ticks.push(p);
+  return ticks;
+}
+
+// Kappe zu Koerper: eine Deckflaeche, die hoeher ist als der Koerper darunter, kippt die Lesung
+// - aus einer Saeule wird ein Keil, und die scheinbare Hoehe ist ein Vielfaches des wahren
+// Wertes in einer Skala, die vergleichen soll. Ein Drittel ist die Grenze, bei der die Kappe
+// noch als Flaeche und der Koerper noch als Saeule gelesen wird. Gemessen 2026-10-16 live im
+// ausgelieferten Overlay (7d-Fenster, peak 400, Plot 176 px, Zelle 30,88 px): 6,78 px Kappe an
+// 8,80 px Koerper = 0,77, Silhouette 30,88 px breit gegen 15,58 px hoch. Das war der schraegen
+// Eindruck - nicht der Winkel, und auch nicht die Tiefe allein.
+export const CAP_RATIO = 1 / 3;
 
 // Dasselbe tan(45deg) wie CSS --dz-k: die Kappe ist --dc * 1 hoch, also ist die groesste Tiefe,
 // die auf einen Koerper von einer gegebenen Hoehe passt, genau diese Hoehe / 1. Eine waagerechte
@@ -110,12 +110,28 @@ export const LINEAR_PEAK = 20;
 // Ein Wertepaar wie 15/13 ware nur fuer eine einzige Breite geschlossen - hier ist es eine Zahl.
 export const DEPTH_SKEW_K = 1;
 
+// Achsenposition eines Wertes, in Achseneinheiten (peak entspricht --peak / 100 %).
+//
+// Die Skala ist logarithmisch in log(1 + v), weil die Vorfall-Zahlen ueber ein Fenster extrem
+// schief liegen: 4.502 Abweichungen in einem Intervall neben 1 in einem anderen. Linear waere
+// ein Vorfall bei peak 5000 ein 0,04-px-Streifen (208 px Plot) - unsichtbar, und das Profil
+// wirkte leer, obwohl etwas gemessen wurde. log(1 + v) ist ohne Untergrenze exakt (peak -> peak),
+// macht kleine Werte sichtbar und legt 1 und 2 nicht auf dieselbe Hoehe. Die Dekaden sind dabei
+// gerade NICHT gleich abstaendig: der Abstand waechst mit den Werten und bleibt von unten unter
+// dem asymptotischen Dekadenabstand peak * ln(10) / ln(1 + peak). 1 -> 10 misst immer 0,7404
+// davon, 100 -> 1000 immer 0,9961 - die peak-Faktoren kuerzen sich heraus, die Verhaeltnisse sind
+// also unabhaengig von der Achshoehe. Nachgerechnet im Guard der Markup-Tests.
+//
+// Warum Log und nicht die alte Wurzel: die Kappe --dzc ist je Profil eine feste Zahl, und die
+// Wurzel gab bei peak 400 den kurzesten gezeichneten Koerper 8,80 px (Plot 176 px) - zu kurz fuer
+// jede Kappe, die als Flaeche lesbar bleibt. Log gibt bei demselben peak 24,05 px (Plot 208 px):
+// die Kappe bleibt unter einem Drittel des Korpers, siehe CAP_RATIO.
+// Die wahren Zahlen stehen in Gitterlinie, Wertemarke, Readout und aria-label.
 export function axisUnit(value, peak) {
   const v = Number(value) || 0;
   const p = Math.max(1, Number(peak) || 1);
   if (v <= 0) return 0;
-  if (p <= LINEAR_PEAK) return Math.min(v, p);
-  return p * Math.sqrt(v / p);
+  return (p * Math.log1p(v)) / Math.log1p(p);
 }
 
 export function createValidatorTrace(h) {
@@ -332,7 +348,7 @@ export function createValidatorTrace(h) {
       states[stateOf(cell)] += 1;
       signs[signStateOf(cell, shapeLayer)] += 1;
     }
-    const { peak, step } = axisScale(Math.max(...cells.map((x) => x.total)));
+    const { peak, ticks: gridTicks } = axisScale(Math.max(...cells.map((x) => x.total)));
     // Die Kappe muss auf ihren Koerper passen, und zwar fuer die kurzeste Saeule des Profils.
     // --dzc = --dc * tan(45deg), also ist die groesste zeichnbare Tiefe die kurzeste
     // Saeulenhoehe / tan. Angegeben als Anteil der Plot-Hoehe, damit sie mit der kleineren
@@ -340,13 +356,15 @@ export function createValidatorTrace(h) {
     // einem 4.502-Vorfall-Intervall eine Kappe, die hoeher ist als ihr eigener Koerper, und die
     // scheinbare Hoehe ist dann ein Vielfaches des wahren Wertes - in einer Skala, die
     // Vergleichen soll. Die Grenze ist je Profil eine Zahl, nicht je Saeule eine Klammer:
-    // alle 24 Intervalle behalten dieselbe Projektion.
+    // alle 24 Intervalle behalten dieselbe Projektion. Die Grenze ist CAP_RATIO mal dem
+    // kurzesten gezeichneten Koerper: eine Kappe ueber einem Drittel davon macht aus der Saeule
+    // einen Keil, und der Keil ist das, was schraeg aussieht.
     const heights = cells.map((cell) => axisUnit(cell.total, peak));
     const drawn = heights.filter((u) => u > 0);
     const smallestUnit = drawn.length ? Math.min(...drawn) : peak;
-    const depthRatio = (smallestUnit / peak) / DEPTH_SKEW_K;
+    const depthRatio = ((smallestUnit / peak) * CAP_RATIO) / DEPTH_SKEW_K;
     const grid = [];
-    for (let v = 0; v <= peak; v += step) {
+    for (const v of gridTicks) {
       grid.push('<div class="vt-gridline' + (v === 0 ? " vt-zero" : "") + '" style="bottom:'
         + ((axisUnit(v, peak) / peak) * 100).toFixed(3) + '%"><span class="vt-gridlabel">' + h.esc(String(v)) + "</span></div>");
     }
@@ -396,7 +414,7 @@ export function createValidatorTrace(h) {
     const signLegend = SIGN_STATES.map((k) => '<li><span class="vt-sign-key vt-sign-' + k + '"></span>'
       + h.esc(h.t("vt.sign." + k)) + " " + h.esc(String(signs[k])) + "</li>").join("");
     const spanLabel = (ms) => new Date(ms).toISOString().slice(5, 16).replace("T", " ");
-    const scale = peak <= LINEAR_PEAK ? h.t("vt.axisScaleLinear") : h.t("vt.axisScaleRoot");
+    const scale = h.t("vt.axisScaleLog");
     const meta = h.t("vt.profileMeta", { buckets: BUCKETS, from: spanLabel(from), to: spanLabel(now), peak, scale });
     const shapeNote = shapeLayer
       ? h.t("vt.signCoverage", { seen: num(coverage.shapeSeen), missing: num(coverage.shapeMissing) })

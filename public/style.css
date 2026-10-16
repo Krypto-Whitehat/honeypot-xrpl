@@ -3094,7 +3094,7 @@ body[data-a6] {
    Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
    --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
    Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 176px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 208px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
@@ -3124,12 +3124,25 @@ body[data-a6] {
 .vt-col.vt-state-network .vt-base { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
 .vt-col.vt-state-unknown .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
 .vt-col.vt-state-none .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
+/* Die Bodenplatte ist eine Ebene, kein Streifen: sie traegt dieselbe Deckflaeche wie die Prismen
+   (Hoehe --dzc, geschert um --skew) und dieselbe Tiefe --dc. Ohne sie hat die Scherung keinen
+   Grund, auf dem sie steht - dann ist die Tiefe ein Kippen der ganzen Grafik, kein Volumen, und
+   die saemtlichen Kappen sind gleich grosse Flecken ueber unterschiedlich hohen Koerpern. Mit ihr
+   sitzt jede Saeule auf einem Koerper, und die Luecken zwischen den Saeulen zeigen, wie weit die
+   Ebene nach hinten reicht. Die Zustand-Farbe der Ebene ist dieselbe wie die des Streifens. */
+.vt-base::after { content: ""; position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-clean .vt-base::after { background: color-mix(in srgb, var(--a6-success) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 55%, transparent); }
+.vt-col.vt-state-solo .vt-base::after { background: color-mix(in srgb, var(--a6-ink) 8%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
+.vt-col.vt-state-cohort .vt-base::after { background: color-mix(in srgb, var(--a6-accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-accent) 70%, transparent); }
+.vt-col.vt-state-network .vt-base::after { background: color-mix(in srgb, var(--a6-accent) 28%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-accent) 70%, transparent); }
+.vt-col.vt-state-unknown .vt-base::after { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-col.vt-state-none .vt-base::after { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
 .vt-col { --bh: calc(var(--u) * var(--n, 0)); --dc: var(--d); --dzc: calc(var(--dc) * var(--dz-k)); }
 /* Die Invariante "Kappe <= Koerper" wird nicht an der Saeulenhoehe geheilt - ein
    max(--dzc, ...) auf --bh wuerde den Balken ueber seinen Achsenwert heben und eine Skala
    unlesbar machen, die vergleichen soll - sondern ueber die Tiefe: --d ist durch
-   Plot-Hoehe * --dmax begrenzt, und --dmax ist genau so gewaehlt, dass die Kappe auf die
-   kurzeste gezeichnete Saeule passt. Die Balkenhoehe bleibt damit exakt der Achsenwert:
+   Plot-Hoehe * --dmax begrenzt, und --dmax ist genau so gewaehlt, dass die Kappe hoechstens
+   CAP_RATIO - ein Drittel - der kurzesten gezeichneten Saeulenhoehe ist. Die Balkenhoehe bleibt damit exakt der Achsenwert:
    Gitterlinie und Balken zeigen dieselbe Zahl. Die exakte Zahl steht zusaetzlich als
    Wertemarke ueber dem Prisma sowie in Readout und aria-label. */
 /* Die Bodenplatte ist keine Achsenregel: sie ist in jeder Säule gleich hoch, ob ein Balken
@@ -3324,7 +3337,7 @@ body[data-a6] {
 @media (max-width: 760px) {
   /* Tiefe, Säulenabstand und Achsen-Gutter folgen der Containerbreite (cqw) – hier braucht nur
      die Plot-Höhe ein Mobilmaß; die Kantenbeziehung dz = d · tan 45° gilt unverändert. */
-  .vt-profile { --plot-h: 132px; }
+  .vt-profile { --plot-h: 156px; }
   .vt-rc-metrics { grid-template-columns: 1fr 1fr; }
   .vt-fp { grid-template-columns: 1fr 1fr; }
   .vt-atk { grid-template-columns: 1fr 1fr; }
@@ -3335,7 +3348,7 @@ body[data-a6] {
    In erzwungenen Kontrastfarben bleiben Prismen- und Streifenflächen erhalten, Text und Achsen
    folgen Systemfarben. */
 @media (forced-colors: active) {
-  .vt-bar, .vt-side, .vt-top, .vt-base, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
+  .vt-bar, .vt-side, .vt-top, .vt-base, .vt-base::after, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
   .vt-col:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
   .vt-hyp.vt-st-measured { border-color: CanvasText; }
 }
