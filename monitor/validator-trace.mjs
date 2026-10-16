@@ -14,8 +14,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { addLoadSample, createTracker } from "../lib/validator-trace.mjs";
+import { addLedgerRiskSample, createTracker, TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
 import { classifyShape, createShapeTracker, SIGNATURE_TAGS } from "../lib/tx-forensics.mjs";
+import { isSignatureTag } from "../lib/validator-retrace.mjs";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
 import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured, normalizeDay } from "../lib/validator-trace-store.mjs";
 
@@ -40,6 +41,10 @@ const TX_SHAPE = process.env.TRACE_TX_SHAPE !== "0";
 // Forensik-Detail je Ledger mit Abweichung. Der Deckel schützt die Tagesdatei; bei Erreichen
 // wird die älteste Forensik verworfen und das offen markiert (nie still).
 const LEDGER_STATS_CAP = 6000;
+// Spaet-Validierungen je Tag: 1.200 Eintraege sind bei ~20.000 Ledern ein Tag mit vielen
+// spaeten Knoten. Aeltere Eintraege fallen zuerst (die jungsten sind die, die ein Betreiber
+// gerade nachvollziehen will); die Verkuerzung ist markiert, nicht still.
+const LATE_VOTES_CAP = 1200;
 // Ledger-Ebene Anomalien inklusive der Transaktions-Signaturen: nur diese gehen in die
 // Risikovergleichsrechnung ein (Wie oft fällt ein Ledger MIT dieser Form aus, im Vergleich zu
 // Ledgern ohne sie). new-tx-type:* und type-burst:* sind über das Präfix zählbar.
@@ -84,7 +89,15 @@ function emptyDay(date) {
     // Abdeckung der Transaktions-Forensik: wie viele Ledger wirklich eine Tx-Form haben und wie
     // viele erwartet, aber nicht erfasst wurden. Ohne diese Zähler wäre "keine Signatur" nicht
     // von "keine Beobachtung" zu trennen.
-    shapeSeen: 0, shapeMissing: 0 };
+    shapeSeen: 0, shapeMissing: 0,
+    // Spaet-Validierungen je Tag: { l: Ledger, m: Master, ms: Latenz nach dem Close, t: Ankunft }.
+    // Ohne diese Liste ist die Frage "zu spaet abgestimmt oder nie abgestimmt?" aus der
+    // Aufzeichnung nicht beantwortbar.
+    lateVotes: [], lateVotesTruncated: false,
+    // Feature-Zähler über ALLE beobachteten Ledger: Nenner und Zähler für die Frage, ob Ledger mit
+    // einem bestimmten Amendment (oder UNLModify) häufiger ausfallen. Aus der Detail-Abfrage allein
+    // wären Nenner und Zähler identisch - der Lift wäre dann per Definition 1,0.
+    featureLedgers: {}, featureFail: {} };
 }
 function dayObj(date) {
   if (!days.has(date)) {
@@ -121,6 +134,20 @@ function recordResult(r, detailNote) {
   else if (TX_SHAPE && r.txCount > 0) d.shapeMissing += 1;
   d.ledgers += 1;
   if (!r.hasQuorum) d.quorumFail += 1;
+  // Feature-Ebene dieses Ledgers aus dem Transaktions-Strom. Sie gilt für JEDES Ledger, nicht nur
+  // für die mit Ausfall - sonst gibt es keinen Vergleich. Die Tags bleiben aus den Incident-Gründen
+  // heraus: ein Amendment ist ein Ledger-Fakt, keine Ursache, die einem Vorfall angehängt wird.
+  const feats = featureSeen.get(r.ledgerIndex);
+  featureSeen.delete(r.ledgerIndex);
+  const featureTags = [];
+  if (feats) {
+    for (const id of feats.amendments) featureTags.push("amendment:" + id.toUpperCase());
+    if (feats.unlModify) featureTags.push("unl-modify");
+  }
+  for (const tag of featureTags) {
+    d.featureLedgers[tag] = (d.featureLedgers[tag] ?? 0) + 1;
+    if (r.incidents.length) d.featureFail[tag] = (d.featureFail[tag] ?? 0) + 1;
+  }
   // Aufzeichnungsspanne + Stunden-Buckets: Stundenzähler machen die Overlay-
   // Zusammenfassung fenster-genau (Tageszähler können das nicht leisten).
   if (!d.firstMs || r.closeMs < d.firstMs) d.firstMs = r.closeMs;
@@ -128,11 +155,43 @@ function recordResult(r, detailNote) {
   const hk = Math.floor(r.closeMs / 3600000);
   const hb = (d.hourly[hk] ??= { l: 0, v: {} });
   hb.l += 1;
+  // Angriffs- und Last-Zähler je Stunde, aus derselben Quelle wie die Ausfall-Zähler. Ohne sie
+  // ist die Zeit-Ebene (lib/attack-impact.mjs) auf die client-gemeldete History angewiesen —
+  // und deren Cluster tragen nur firstSeen/lastSeen, also Stunden, an denen fast nie etwas
+  // aufgezeichnet ist. Diese fünf Felder machen die Angriffsseite stunden-genau und damit
+  // überhaupt vergleichbar. Sie werden nie auf 0 gesetzt, wenn die Ebene fehlt: fehlend bleibt
+  // fehlend (null im Lesepfad), damit "nicht erfasst" nicht wie "keine Angriffe" aussieht.
+  const hourTags = r.ledgerTags ?? [];
+  const hourAnomaly = hourTags.some(isAnomalyTag);
+  const hourSignature = hourTags.some(isSignatureTag);
+  hb.a = (hb.a ?? 0) + (hourAnomaly ? 1 : 0);
+  hb.s = (hb.s ?? 0) + (hourSignature ? 1 : 0);
+  if (r.incidents.length) {
+    hb.af = (hb.af ?? 0) + (hourAnomaly ? 1 : 0);
+    hb.sf = (hb.sf ?? 0) + (hourSignature ? 1 : 0);
+  }
+  hb.tx = (hb.tx ?? 0) + (Number(r.txCount) || 0);
+  hb.mx = Math.max(hb.mx ?? 0, Number(r.txCount) || 0);
+  // Netz-Vote-Latenz je Stunde, ueber ALLE Ledger (nicht nur die mit Abweichung): die Referenz,
+  // an der "mein Vote war spaet" erst ein Vergleich hat. fvN = Ledger mit Vote-Zeitstempel,
+  // fvS = Summe der Latenz des ersten Netzvotes, fvX = Maximum, fvL = Ledger, deren erster Vote
+  // erst nach dem Gnadenfenster eintraf. Fehlend bleibt fehlend: ein Tag ohne diese Felder hat
+  // keine Netzlatenz aufgezeichnet, nicht "Latenz null".
+  const firstVote = r.forensics?.firstVoteMs;
+  if (Number.isFinite(firstVote)) {
+    hb.fvN = (hb.fvN ?? 0) + 1;
+    hb.fvS = (hb.fvS ?? 0) + firstVote;
+    hb.fvX = Math.max(hb.fvX ?? 0, firstVote);
+    hb.fvL = (hb.fvL ?? 0) + (firstVote > TRACE_DEFAULTS.graceMs ? 1 : 0);
+  }
   const bad = new Set(r.incidents.map((i) => i.master));
-  // Last-Achse je Ledger (nicht nur je Ausfall-Ledger): die Ausfallrate pro Tx-Stufe ist die
-  // einzige Zahl, die einem Betreiber sagt, ab welcher Last sein Knoten zurueckfaellt - und ob
-  // dieselbe Last bei den anderen durchgeht.
-  addLoadSample(d, r.txCount, [...bad]);
+  // Last- UND Quorum-Achse je Ledger (nicht nur je Ausfall-Ledger): die Ausfallrate pro Tx-Stufe
+  // sagt, ab welcher Last ein Knoten zurueckfaellt; die Ausfallrate pro Quorum-Reserve sagt, ab
+  // welcher Quorum-Knappe er zurueckfaellt. Beide aus demselben Ledger, sonst vergleicht die
+  // Risikoflaeche Last und Quorum auf verschiedenen Ledger-Mengen. margin kommt aus der
+  // Quorum-Forensik, die fuer JEDES bewertete Ledger anfaellt - sie wurde bisher nur fuer
+  // Ausfall-Ledger gespeichert, wodurch die Margin-Analyse ohne Nenner dastand.
+  addLedgerRiskSample(d, { txCount: r.txCount, margin: r.forensics?.margin ?? null, failedMasters: [...bad] });
   for (const m of MEMBERS) {
     const v = (d.validators[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
     const hv = (hb.v[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
@@ -145,7 +204,10 @@ function recordResult(r, detailNote) {
     else if (inc.type === "partial") { v.partial++; hv.partial++; }
     else if (inc.type === "wrong-hash") { v.wrongHash++; hv.wrongHash++; }
     else if (inc.type === "no-quorum") { v.noQuorum = (v.noQuorum ?? 0) + 1; hv.noQuorum = (hv.noQuorum ?? 0) + 1; }
-    d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined });
+    // vd: Latenz des eigenen Votes, wenn einer da war (partial / wrong-hash / spaeter missed-Vote).
+    // null = kein Vote aufgezeichnet, nicht "schnell abgestimmt".
+    // h: die Hash-Linie dieses Knotens in diesem Ledger. Ohne sie bleibt wrong-hash ein Etikett.
+    d.incidents.push({ l: r.ledgerIndex, m: inc.master, t: r.closeMs, type: inc.type, r: inc.reasons, n: detailNote || undefined, vd: Number.isFinite(inc.voteDelayMs) ? inc.voteDelayMs : null, h: hexOrNull(inc.votedHash) });
   }
   // Forensik je Ledger mit Abweichung: Quorum-Rand, Hash-Spaltung, Close-Abstand, Last und
   // die Betroffenheit je Typ. Das ist der Unterschied zwischen "Validator hat verpasst" und
@@ -165,6 +227,17 @@ function recordResult(r, detailNote) {
       sh: shapeRes?.form ? (({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }) => ({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }))(shapeRes.form) : null,
       sev: shapeRes ? Object.fromEntries(classifyShape(shapeRes.form, shapeRes.base).map((x) => [x.tag, x.evidence])) : {},
       sweep: shapeRes?.sweep ?? null,
+      // Vote-Latenz des Netzes in diesem Ledger: erster und letzter Vote nach dem Close.
+      // fv ist die Referenz, an der "mein Vote war spaet" erst ein Vergleich hat.
+      fv: f.firstVoteMs ?? null, lv: f.lastVoteMs ?? null,
+      // ah/rh: die Netzmehrheit und die Runner-Up-Linie dieses Ledgers. Zusammen mit dem Vote-Hash
+      // der Incidents ergibt sich die Divergenz-Klasse jedes Vorfalls.
+      ah: hexOrNull(f.acceptedHash), rh: hexOrNull(f.runnerHash),
+      // am/unl: die Feature-Fakten DIESSES Ledgers, aus dem Transaktions-Strom; falls dort nichts
+      // ankam, die nachträglich abgerufenen Amendment-IDs der Detail-Abfrage.
+      am: feats && feats.amendments.size ? [...feats.amendments].map((x) => x.toUpperCase())
+        : (Array.isArray(r.amendments) ? r.amendments.filter((x) => typeof x === "string" && HEX64.test(x)).map((x) => x.toUpperCase()) : []),
+      unl: feats ? feats.unlModify === true : false,
     });
   }
   // Anomalie-Zähler auf Ledger-Ebene: Nenner und Zähler für den Risikovergleich. Ohne sie wäre
@@ -178,7 +251,43 @@ function recordResult(r, detailNote) {
   dirty.add(date);
 }
 
+// Spaet-Validierung: eine Validation traf ein, nachdem dieses Ledger schon bewertet war
+// (Gnadenfenster abgelaufen, Ledger noch im Bewertungs-Ring). Das ist die einzige Stelle,
+// die "zu spaet abgestimmt" von "nie abgestimmt" trennen kann - und sie zaehlt fuer JE DEN
+// Validator, damit die Latenz eines Knotens ein Netz-Vergleich hat.
+// hb.l wird hier nicht erhoeht: der Ledger ist schon gezaehlt, nur sein spaeter Vote kam an.
+function recordLateVotes(list) {
+  for (const lv of list ?? []) {
+    if (!lv || !Number.isFinite(lv.ledgerIndex) || !lv.master || !Number.isFinite(lv.closeMs)) continue;
+    const ms = Number.isFinite(lv.delayMs) ? Math.round(lv.delayMs) : null;
+    const date = dayOf(lv.closeMs);
+    const d = dayObj(date);
+    const hk = Math.floor(lv.closeMs / 3600000);
+    const hb = (d.hourly[hk] ??= { l: 0, v: {} });
+    const v = (d.validators[lv.master] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
+    const hv = (hb.v[lv.master] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
+    v.late = (v.late ?? 0) + 1;
+    hv.late = (hv.late ?? 0) + 1;
+    // Der Incident bekommt die Latenz und das Reason-Tag, wenn derselbe Knoten in diesem
+    // Ledger als missed gefuehrt ist: aus "verpasst" wird "verpasst, aber der Vote kam
+    // nach der Bewertung an". Das ist ein anderer Befund - er zeigt einen langsamen Pfad,
+    // keinen ausgefallenen Knoten.
+    const inc = d.incidents.find((i) => i.l === lv.ledgerIndex && i.m === lv.master && i.type === "missed");
+    if (inc) {
+      if (ms !== null) inc.vd = ms;
+      inc.r = [...new Set([...(inc.r ?? []), "vote-late"])];
+    }
+    if (d.lateVotes.length >= LATE_VOTES_CAP) { d.lateVotes.shift(); d.lateVotesTruncated = true; }
+    // h/fu: auch der spaete Vote hat eine Linie. Ein spaeter Vote AUF der Netzmehrheit ist ein
+    // langsamer Pfad; ein spaeter Vote auf einer anderen Linie heißt, der Knoten hat auf einem
+    // anderen Stand abgestimmt - das ist ein anderer Fehler mit anderer naechsten Pruefung.
+    d.lateVotes.push({ l: lv.ledgerIndex, m: lv.master, ms, t: Number.isFinite(lv.arrivalMs) ? lv.arrivalMs : null, h: hexOrNull(lv.hash), fu: lv.full !== false });
+    dirty.add(date);
+  }
+}
+
 // Lokal: alle Tage schreiben (atomar). Remote: nur geänderte Tage, Fehler bleiben dirty.
+let daySaveSeq = 0;
 async function flush() {
   if (REMOTE) {
     for (const date of [...dirty]) {
@@ -190,9 +299,20 @@ async function flush() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   for (const date of dirty) {
     const file = path.join(DATA_DIR, date + ".json");
-    const tmp = file + ".tmp";
-    fs.writeFileSync(tmp, JSON.stringify(days.get(date)));
-    fs.renameSync(tmp, file);
+    // Derselbe Grund wie in lib/history.mjs: ein fester tmp-Name pro Tag verzahnt
+    // zwei gleichzeitige Schreibende zu einer unparsebaren Tagesdatei.
+    const text = JSON.stringify(days.get(date));
+    const tmp = `${file}.${process.pid}.${Date.now()}.${++daySaveSeq}.tmp`;
+    try {
+      fs.writeFileSync(tmp, text);
+      if (fs.statSync(tmp).size !== Buffer.byteLength(text, "utf8")) {
+        throw new Error("Schreibpruefung: tmp-Datei hat eine andere Byte-Laenge.");
+      }
+      fs.renameSync(tmp, file);
+    } catch (err) {
+      fs.rmSync(tmp, { force: true });
+      throw err;
+    }
   }
   dirty.clear();
 }
@@ -212,6 +332,25 @@ let rpcId = 100;
 const rpcPending = new Map();
 let tracker = null;
 const shapeTracker = createShapeTracker();
+// Feature-Ebene je Ledger, aus dem Transaktions-Strom (kein zusätzlicher Stream, keine Abfrage):
+// EnableAmendment und UNLModify sind die beiden Ledger, auf denen sich die Bewertungsregeln des
+// Netzes ändern. Genau dort trennt sich ein Knoten, der ein Feature nicht trägt, von einem Knoten,
+// der nur langsam ist. Der Ring ist ein Deckel, keine Auswahl: was herausfällt, ist nicht erfasst.
+const FEATURE_RING = 4096;
+const featureSeen = new Map();   // ledgerIndex -> { amendments: Set, unlModify: boolean }
+function featureEntry(idx) {
+  let e = featureSeen.get(idx);
+  if (!e) {
+    e = { amendments: new Set(), unlModify: false };
+    featureSeen.set(idx, e);
+    while (featureSeen.size > FEATURE_RING) featureSeen.delete(featureSeen.keys().next().value);
+  }
+  return e;
+}
+// Hash-Prüfung vor dem Speichern: die Validierungs-Hashes kommen von außen. Ein String, der kein
+// 64-stelliges Hex ist, wäre in der Divergenz-Auswertung eine Linie, die es nicht gibt.
+const HEX64 = /^[0-9A-Fa-f]{64}$/;
+const hexOrNull = (x) => (typeof x === "string" && HEX64.test(x) ? x.toUpperCase() : null);
 const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0 };
 let detailQueue = [];
 let detailBusy = false;
@@ -292,7 +431,12 @@ function onMessage(ev) {
     stats.txShape++;
     // Tx dem Ledger zuordnen, in dem sie validiert wurden. Fehlt die Indexangabe, gehört sie
     // zum zuletzt geschlossenen Ledger — nie zu einem erfundenen.
-    shapeTracker.addTxTo(Number(m.ledger_index ?? lastLedger), m);
+    const txIdx = Number(m.ledger_index ?? lastLedger);
+    shapeTracker.addTxTo(txIdx, m);
+    if (Number.isFinite(txIdx)) {
+      if (m.TransactionType === "EnableAmendment" && typeof m.Amendment === "string" && HEX64.test(m.Amendment)) featureEntry(txIdx).amendments.add(m.Amendment);
+      else if (m.TransactionType === "UNLModify") featureEntry(txIdx).unlModify = true;
+    }
   }
 }
 
@@ -342,12 +486,15 @@ async function main() {
   connect();
   const evalTimer = setInterval(() => {
     for (const r of tracker.evaluate(Date.now())) enqueue(r);
+    // Spaet-Validierungen nach der Bewertung abholen: derselbe Takt, damit ein Vote, der
+    // zwischen zwei Bewertungen eintrifft, nicht im naechsten Ledger untergeht.
+    recordLateVotes(tracker.takeLateVotes());
   }, 5000);
   const flushTimer = setInterval(() => { flush(); }, FLUSH_MS);
   const pruneTimer = setInterval(() => { if (REMOTE) pruneRemote().catch(() => {}); else pruneLocal(); }, 86400000);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped}`);
   }, 60000);
   let stopping = false;
   const stop = async () => {
