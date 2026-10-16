@@ -954,4 +954,12 @@ test('Erfassungs-Grenze: Zelle, Messung und Sammelereignis tragen die nachrechen
   assert.match(src, /vt.evCoverageBound/, 'die Messung hat keine Beschriftung fuer die Grenze');
   assert.match(src, /s.capture/, 'das Sammelereignis wertet die Grenze nicht aus');
   assert.match(src, /vt.atkBound/, 'das Sammelereignis hat keine Beschriftung fuer die Grenze');
+  // Ohne Forensik-Zeile darf die Betroffenheits-Zahl nicht unqualifiziert stehen.
+  assert.match(src, /vt.atkBoundMissing/, 'das Sammelereignis behauptet eine Zahl ohne Grenze, wo keine Forensik da ist');
+});
+
+test('null ist nicht 0: eine nicht erfasste Zahl darf nicht als Messwert erscheinen', () => {
+  // Number(null) === 0. Ohne die null-Vorpruefung wird aus 'nicht erfasst' im Text eine 0.
+  assert.match(src, /v === null \|\| v === undefined/, 'num() unterscheidet null nicht von 0');
+  assert.doesNotMatch(src, /const num = \(v\) => \(Number\.isFinite\(Number\(v\)\)/, 'num() prueft zuerst die Zahl, nicht die Erfassung');
 });

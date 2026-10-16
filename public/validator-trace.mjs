@@ -31,6 +31,11 @@ const CAUSE_ROWS = 12;
 // Nur diese beiden fuehren die Beschriftung des Belegs; 'not-recorded' bekommt keine Basis, weil es
 // keine gibt. Der UI-Name ist absichtlich identisch: dieselbe Vokabel in Analyse und Anzeige.
 const CAPTURE_BASES = new Set(["ledger-index", "stream-gap"]);
+// Ereignis-Arten mit denselben Namen wie CAPTURE_EVENT_KINDS in lib/validator-trace.mjs und wie
+// sie der Rekorder schreibt. 'near' ist kein Ereignis-Typ, sondern die Beschriftung fuer einen
+// Typ, den dieses Overlay nicht kennt: ohne sie waere ein unbekanntes Ereignis als 'Stream neu
+// aufgebaut' dargestellt - eine Aussage, die nicht belegt ist.
+const CAPTURE_EVENT_KINDS = new Set(["open", "close", "stall"]);
 
 // Kohorten-Breite eines Intervalls -> Stufe für Grundriss-Farbe und Kohortenstreifen.
 // NETZ_AB ist dieselbe Schwelle wie RETRACE_DEFAULTS.attackMinValidators in der
@@ -172,7 +177,11 @@ export function createValidatorTrace(h) {
       + h.esc(h.t("vt.peersMore", { n: list.length - PEER_SHOWN })) + "</button>";
   };
 
-  const num = (v) => (Number.isFinite(Number(v)) ? String(Number(v)) : "–");
+  // null ist 'nicht erfasst', 0 ist 'gemessen null'. Number(null) === 0 machte aus jeder
+  // nicht erfassten Zahl eine 0 im Text - eine vorgetaeuschte Messung, die einen Knoten
+  // entlastet oder belastet, fuer den nichts aufgezeichnet wurde.
+  const num = (v) => (v === null || v === undefined
+    ? "–" : Number.isFinite(Number(v)) ? String(Number(v)) : "–");
   const sec = (ms) => (Number.isFinite(ms) ? (Math.round(ms / 100) / 10).toFixed(1) : "–");
   const fac = (r) => (Number.isFinite(r) ? (Math.round(r * 10) / 10).toFixed(1) : "–");
   // Nach einer Nachkommastelle kollabiert eine seltene Rate auf 0,0 % - eigene Rate, Median
@@ -485,7 +494,9 @@ export function createValidatorTrace(h) {
       const base = h.t("vt.evCoverage", {
         top: num(e.topVotes), needed: num(e.needed), observed: num(e.observedValidations),
         hash: e.closedHash ? h.esc(String(e.closedHash).slice(0, 12)) + "…" : h.t("vt.cq.hashMissing"),
-        gap: e.captureGap ? h.t("vt.cq.captureGap") : h.t("vt.cq.noCaptureGap"),
+        gap: e.captureGap === true ? h.t("vt.cq.captureGap")
+          : e.captureGap === false ? h.t("vt.cq.noCaptureGap")
+            : h.t("vt.cq.captureGapUnknown"),
       });
       const bound = Number.isFinite(e.genuineAbsentMax) && Number.isFinite(e.captureArtifactMin)
         ? " · " + h.t("vt.evCoverageBound", {
@@ -506,10 +517,18 @@ export function createValidatorTrace(h) {
       // dieselben Knoten auf demselben Ledger dasselbe Problem hatten.
       const same = Array.isArray(e.sameTypeMasters) ? e.sameTypeMasters.length : null;
       const word = otherWord(e.others || 0);
-      if (same === null) return h.t("vt.evCohort", { n: num(e.affectedValidators), others: num(e.others), otherWord: word });
-      return same === (e.others || 0)
-        ? h.t("vt.evCohortAll", { n: num(e.affectedValidators), others: num(e.others), otherWord: word })
-        : h.t("vt.evCohortSame", { n: num(e.affectedValidators), others: num(e.others), same: num(same), otherWord: word });
+      const base = same === null
+        ? h.t("vt.evCohort", { n: num(e.affectedValidators), others: num(e.others), otherWord: word })
+        : same === (e.others || 0)
+          ? h.t("vt.evCohortAll", { n: num(e.affectedValidators), others: num(e.others), otherWord: word })
+          : h.t("vt.evCohortSame", { n: num(e.affectedValidators), others: num(e.others), same: num(same), otherWord: word });
+      // Die Grenze direkt an der Kohorten-Zahl, nicht erst zwei Zeilen weiter unten: ohne sie
+      // wirkt "19 Validatoren betroffen" wie 19 Knoten-Ausfaelle, obwohl die eigene Rechnung
+      // auf diesem Ledger nur 'max' echte Fehlende zulaesst.
+      const bound = Number.isFinite(e.genuineAbsentMax) && Number.isFinite(e.captureArtifactMin)
+        ? " · " + h.t("vt.evCohortBound", { max: num(e.genuineAbsentMax), min: num(e.captureArtifactMin) })
+        : "";
+      return base + bound;
     }
     if (hy.tag === "drainer-fanout") return h.t("vt.evFanout", { fanout: num(e.fanoutAccounts), txs: num(e.fanoutTxs), ledgerTx: num(e.ledgerTx) });
     if (hy.tag === "sender-burst") return h.t("vt.evBurst", { accountTx: num(e.accountTx), share: pcn(e.share * 100) });
@@ -674,7 +693,10 @@ export function createValidatorTrace(h) {
         ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")
       + (s.capture && Number.isFinite(s.capture.genuineAbsentMax) && Number.isFinite(s.capture.captureArtifactMin)
         ? '<span class="vt-atk-bound">' + h.esc(h.t("vt.atkBound", {
-          absent: num(s.capture.absentCount), max: num(s.capture.genuineAbsentMax), min: num(s.capture.captureArtifactMin) })) + "</span>" : "")
+          absent: num(s.capture.absentCount), max: num(s.capture.genuineAbsentMax), min: num(s.capture.captureArtifactMin) })) + "</span>"
+        // Ohne Forensik-Zeile dieses Ledgers ist die Grenze nicht berechenbar. Die Zahl bleibt
+        // stehen, aber nicht unqualifiziert: es fehlt genau die Ebene, die sie begrenzen koennte.
+        : !s.capture ? '<span class="vt-atk-bound vt-atk-bound-none">' + h.esc(h.t("vt.atkBoundMissing")) + "</span>" : "")
       + "</li>").join("");
     return '<p class="vt-scope"><small>' + h.esc(h.t("vt.attackThreshold", { n: num(a.threshold), total: num(a.total) })) + "</small></p>"
       + '<ul class="vt-list vt-atk-list">' + rows + "</ul>";
@@ -788,7 +810,7 @@ export function createValidatorTrace(h) {
       // Naechstes Erfassungs-Ereignis mit Abstand, nie ein Ereignis "irgendwann an dem Tag":
       // eine Zuordnung ohne Abstand ist eine Behauptung. Ohne Protokoll (Altbestand) steht nichts.
       const evt = r.captureEvent
-        ? " · " + h.esc(h.t(r.captureEvent.kind === "close" ? "vt.cq.captureEventClose" : "vt.cq.captureEventOpen", {
+        ? " · " + h.esc(h.t("vt.cq.event." + (CAPTURE_EVENT_KINDS.has(r.captureEvent.kind) ? r.captureEvent.kind : "near"), {
           l: num(r.captureEvent.ledger), s: Math.round(num(r.captureEvent.deltaMs) / 1000) }))
         : "";
       // Die Grenze aus der Schliessung, nicht aus einer Schaetzung: auf einem geschlossenen

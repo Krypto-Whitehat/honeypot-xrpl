@@ -10,6 +10,8 @@
 //     Der Workflow klont das Daten-Repo und committet diesen Ordner per Deploy-Key.
 // Lücken: Kommt nach einem Ledger-Index ein größerer Sprung, wird die fehlende Spanne als
 // 'gap' gespeichert. Ohne diese Markierung sähe Stille wie 'alle Validatoren ok' aus.
+// Stillstand: ein Mithoerer kann offen bleiben, ohne noch Nachrichten zu liefern. Der
+// Waechter unten erkennt das und trennt selbst; ohne ihn saesse Stille bis zum Laufende.
 // Aufbewahrung: 365 Tage (lokal: Dateien löschen, remote: pruneRemote einmal täglich).
 import fs from "node:fs";
 import path from "node:path";
@@ -61,6 +63,18 @@ const FLUSH_MS = REMOTE ? 300000 : 30000;
 // gezaehlt und der Knoten als 'no-quorum' statt 'ok' gefuehrt. Env TRACE_DUNL_REFRESH_MS.
 const DUNL_REFRESH_MS = Math.max(60000, Number(process.env.TRACE_DUNL_REFRESH_MS) || 600000);
 const RUN_SECONDS = Number(process.env.TRACE_RUN_SECONDS) || 0;
+
+// Stillstands-Grenze: XRPL schliesst alle 3-5 s ein Ledger, und der Validations-Strom laeuft
+// dauernd. Ein Mithoerer, der ueber diese Frist gar keine Nachricht bringt, ist kein ruhiges
+// Netz, sondern ein kaputter Mithoerer. Ohne diese Grenze sitzt der Rekorder bis zum
+// Laufende still, und die Tagesdatei zeigt fuer die Zeit einfach nichts - das ist genau die
+// Stelle, an der am 16.10.2026 1 h 50 min lang nichts aufgezeichnet wurde, waehrend der Job
+// lief. Env TRACE_STALL_MS (Prueftakt: TRACE_STALL_CHECK_MS).
+const STALL_MS = Math.max(5000, Number(process.env.TRACE_STALL_MS) || 90000);
+const STALL_CHECK_MS = Math.max(1000, Number(process.env.TRACE_STALL_CHECK_MS) || 15000);
+// Nach dem eigenen Trennen wird nur so lange auf onclose gewartet, bevor der Naechstversuch
+// direkt gestartet wird - ein halb offener Socket antwortet unter Umstaenden gar nicht mehr.
+const STALL_RECONNECT_MS = 20000;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const toMs = (rippleSec) => (Number(rippleSec) + RIPPLE_EPOCH) * 1000;
@@ -366,6 +380,10 @@ function pruneLocal() {
 
 // ---------- WebSocket ----------
 let ws = null;
+let lastMessageAt = 0;   // letzte Stream-Nachricht; 0 heisst 'noch keine', nie 'kein Strom'
+let currentUrl = null;   // Endpunkt der aktiven Verbindung (steht in den Erfassungs-Ereignissen)
+let currentUrlIdx = 0;   // Position in der Endpunkt-Liste (Rotation nach einem Stillstand)
+let connSeq = 0;         // Nummer der aktiven Verbindung; verhindert zwei Mithoerer nebeneinander
 let rpcId = 100;
 const rpcPending = new Map();
 let tracker = null;
@@ -389,7 +407,7 @@ function featureEntry(idx) {
 // 64-stelliges Hex ist, wäre in der Divergenz-Auswertung eine Linie, die es nicht gibt.
 const HEX64 = /^[0-9A-Fa-f]{64}$/;
 const hexOrNull = (x) => (typeof x === "string" && HEX64.test(x) ? x.toUpperCase() : null);
-const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0 };
+const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0 };
 // Anzeigetext fuer die Netz-Quorum-Achse: 'nicht erfasst' ist eine Aussage ueber den Rekorder,
 // 'kein Quorum' waere eine Aussage ueber das Netz und wird hier nie erzeugt.
 const quorumSampleState = () => {
@@ -559,6 +577,9 @@ function onMessage(ev) {
   let m;
   try { m = JSON.parse(ev.data); } catch { return; }
   if (m.id && rpcPending.has(m.id)) { const cb = rpcPending.get(m.id); rpcPending.delete(m.id); cb(m); return; }
+  // Ab hier gilt die Nachricht als Lebensbeweis des Mithoerers. RPC-Antworten zaehlen bewusst
+  // nicht: ein Socket, der auf server_info noch antwortet, kann seine Subscription verloren haben.
+  lastMessageAt = Date.now();
   if (m.type === "validationReceived") {
     stats.validations++;
     tracker.onValidation({
@@ -586,12 +607,18 @@ function onMessage(ev) {
 
 function connect(urlIdx = 0, backoff = 1000) {
   const url = WSS[urlIdx % WSS.length];
+  connSeq++;
+  const mySeq = connSeq;
+  currentUrl = url;
+  currentUrlIdx = urlIdx % WSS.length;
+  lastMessageAt = Date.now();
   ws = new WebSocket(url);
   ws.onopen = () => {
     stats.connects++;
     recordCaptureEvent("open", url);
     log("verbunden", url);
     backoff = 1000;
+    lastMessageAt = Date.now();
     const streams = ["validations", "ledger"];
     if (TX_SHAPE) streams.push("transactions");
     ws.send(JSON.stringify({ id: 1, command: "subscribe", streams }));
@@ -599,11 +626,36 @@ function connect(urlIdx = 0, backoff = 1000) {
   };
   ws.onmessage = onMessage;
   ws.onclose = () => {
+    // Eine ersetzte Verbindung (Notruf nach Stillstand) darf keinen zweiten Mithoerer starten.
+    if (mySeq !== connSeq) return;
     recordCaptureEvent("close", url);
     log("getrennt, neuer Versuch", WSS[(urlIdx + 1) % WSS.length]);
     setTimeout(() => connect(urlIdx + 1, Math.min(backoff * 2, 60000)), backoff);
   };
-  ws.onerror = () => {};
+  // Ein Fehler war bisher verschluckt. Er ist keine Aussage ueber das Netz, aber er ist ein
+  // Grund, warum nichts ankommt - deshalb wird er genannt, nicht ignoriert.
+  ws.onerror = (e) => { log("Stream-Fehler", url, e && e.message ? e.message : "(ohne Grund)"); };
+}
+
+// Stillstands-Waechter: prueft, ob der Mithoerer noch Nachrichten hoert. Node 22 kennt hier nur
+// close() - terminate() existiert am globalen WebSocket nicht (gemessen am echten Endpunkt am
+// 16.10.2026: typeof ws.terminate === undefined, close() loest onclose nach 0,5 s aus). Das
+// eigene Trennen loest denselben Reconnect-Pfad aus wie ein gerissener Socket, inklusive
+// Endpunkt-Rotation. Das Ereignis bleibt als Erfassungs-Ereignis 'stall' in der Tagesdatei.
+function watchStream() {
+  if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) return;
+  const idleMs = Date.now() - lastMessageAt;
+  if (idleMs < STALL_MS) return;
+  const seq = connSeq;
+  stats.stalls++;
+  recordCaptureEvent("stall", currentUrl);
+  log("Stream still:", Math.round(idleMs / 1000), "s keine Nachricht von", currentUrl, "-> Verbindung wird neu aufgebaut");
+  try { ws.close(); } catch {}
+  setTimeout(() => {
+    if (connSeq !== seq) return;   // onclose hat bereits neu verbunden
+    log("Reconnect nach Stillstand blieb aus -> direkter Naechstversuch");
+    connect(currentUrlIdx + 1, 1000);
+  }, STALL_RECONNECT_MS);
 }
 
 // Remote-Start: heutiger und gestriger Tag werden geladen, damit Lücken-Erkennung und Zähler
@@ -624,6 +676,7 @@ async function preloadRemote() {
 // ---------- Start ----------
 async function main() {
   log(REMOTE ? "Speicher: GitHub (Daten-Repo), Flush alle 5 min" : "Speicher: lokal data/validator-trace, Flush alle 30 s");
+  log("Stillstands-Waechter:", STALL_CHECK_MS / 1000, "s Prueftakt, Grenze", STALL_MS / 1000, "s ohne Stream-Nachricht");
   const dunl = await loadMembers();
   log("dUNL", dunl.members.length, "von", dunl.listed, "zugeordnet, Sequenz", dunl.sequence, dunl.unmatched.length ? "unzugeordnet " + dunl.unmatched.join(",") : "");
   MEMBERS = dunl.members;
@@ -641,15 +694,16 @@ async function main() {
   const pruneTimer = setInterval(() => { if (REMOTE) pruneRemote().catch(() => {}); else pruneLocal(); }, 86400000);
   const quorumTimer = setInterval(() => { sampleNetworkQuorum().catch(() => {}); }, 3600000);
   const dunlTimer = setInterval(() => { refreshMembers().catch(() => {}); }, DUNL_REFRESH_MS);
+  const stallTimer = setInterval(() => { watchStream(); }, STALL_CHECK_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} Stills=${stats.stalls} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
   }, 60000);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer); clearInterval(dunlTimer);
+    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer); clearInterval(dunlTimer); clearInterval(stallTimer);
     await flush();
     if (ws) ws.close();
     log("beendet", dirty.size ? "(" + dirty.size + " Tage nicht gespeichert)" : ", gespeichert");

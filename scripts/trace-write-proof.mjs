@@ -6,6 +6,7 @@ import { WebSocketServer } from "ws";
 import { fileURLToPath } from "node:url";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
 import { quorumCriticality } from "../lib/validator-diagnose.mjs";
+import { CAPTURE_EVENT_KINDS } from "../lib/validator-trace.mjs";
 
 // scripts/trace-write-proof.mjs
 //
@@ -238,6 +239,37 @@ check("Phase B: Versuch ist aufgezeichnet (attempts >= 1, samples = 0)",
   `attempts=${dayB?.networkQuorumAttempts} samples=${dayB?.networkQuorumSamples}`);
 check("Phase B: Grund ist loggiert (nicht still)", /Netz-Quorum nicht meldbar/.test(outB));
 check("Phase A: Grund loggiert (gemeldeter Wert)", /Netz-Quorum: 28/.test(outA));
+
+// ---------- Phase C: Mithoerer bleibt stumm, obwohl die Verbindung offen ist ----------
+// Der Betriebsbefund vom 16.10.2026: der Rekorder-Job lief, der Socket war offen, und 1 h 50
+// min lang kam keine Nachricht - die Tagesdatei zeigte fuer diese Zeit nichts, und der
+// Frische-Check meldete 'frisch'. Der Fixture-Endpunkt antwortet hier auf subscribe, bringt
+// aber keinen Strom. Der Waechter muss die Stille erkennen, selbst trennen, neu verbinden und
+// den Ausfall als Erfassungs-Ereignis 'stall' in der Tagesdatei hinterlassen.
+scenario = null;
+const dirC = path.join(ROOT, "logs", "trace-proof-C");
+const outC = await runMonitor(dirC, 26, { TRACE_STALL_MS: "5000", TRACE_STALL_CHECK_MS: "1000", TRACE_QUORUM_WSS: "" });
+const dayC = readDay(dirC);
+const evC = dayC?.captureEvents ?? [];
+const stallsC = evC.filter((e) => e.e === "stall");
+const opensC = evC.filter((e) => e.e === "open");
+const closesC = evC.filter((e) => e.e === "close");
+log("Phase C Erfassungs-Ereignisse:", evC.map((e) => e.e).join(",") || "keine");
+check("Phase C: Stille wird erkannt und loggiert (nicht verschluckt)", /Stream still/.test(outC),
+  (outC.match(/Stream still.*/m) ?? ["(kein Log)"])[0]);
+check("Phase C: 'stall' steht als Erfassungs-Ereignis in der Tagesdatei", stallsC.length >= 1,
+  JSON.stringify(stallsC.slice(0, 2)));
+check("Phase C: jedes Erfassungs-Ereignis gehoert zur gemeinsamen Vokabel",
+  evC.length > 0 && evC.every((e) => CAPTURE_EVENT_KINDS.includes(e.e)),
+  evC.map((e) => e.e).join(","));
+check("Phase C: nach der Stille wird wirklich neu verbunden",
+  opensC.length >= 2 && opensC.length >= stallsC.length && closesC.length >= 1,
+  `open=${opensC.length} stall=${stallsC.length} close=${closesC.length}`);
+check("Phase C: kein zweiter Mithoerer neben der alten Verbindung (open nie ueber stall + 1)",
+  opensC.length <= stallsC.length + 1, `open=${opensC.length} stall=${stallsC.length}`);
+check("Phase A/B: ohne Stille wird kein Stillstand behauptet",
+  !(outA + outB).includes("Stream still") && !((readDay(dirA)?.captureEvents ?? []).some((e) => e.e === "stall")),
+  "Phase A und B laufen mit der scharfen Grenze nicht in den Stillstand");
 
 // ---------- Bericht ----------
 console.log("");

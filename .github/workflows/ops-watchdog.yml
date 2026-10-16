@@ -7,11 +7,15 @@
 # Chance, dass mindestens ein Scheduler-Slot feuert. Der Tick ist idempotent:
 # /api/advance verarbeitet einfach die anstehenden Blöcke.
 #
-# Zusatz: Frische-Check des Validator-Trace-Recorders. Schreibt der Recorder
-# (geplant alle 5 h) heute noch keine Tagesdatei, wird der Workflow per
-# workflow_dispatch neu angestoßen — dafür wird dasselbe Repo-Secret
-# ADVANCE_CHAIN_TOKEN wie bei der Advance-Kette genutzt (GITHUB_TOKEN darf laut
-# Live-Messung 05.10.2026 nicht dispatchen). Ohne Secret: nur der Heartbeat läuft.
+# Zusatz: Frische-Check des Validator-Trace-Recorders. Frische ist der letzte Ledger-
+# Zeitstempel, den der Recorder erreicht hat (coverage.lastMs) - nicht 'available:true',
+# das auch bei einer zwei Stunden alten Tagesdatei wahr ist. Bleibt der Recorder dahinter
+# zurueck und ist kein Lauf eingestanden, wird der Workflow per workflow_dispatch neu
+# angestossen - dafuer wird dasselbe Repo-Secret ADVANCE_CHAIN_TOKEN wie bei der
+# Advance-Kette genutzt (GITHUB_TOKEN darf laut Live-Messung 05.10.2026 nicht
+# dispatchen). Ohne Secret: nur der Heartbeat laeuft. Der Dispatch bleibt aus, solange
+# bereits ein Lauf queued ist: die Runner-Warteschlange betrug am 16.10.2026 bis zu
+# 1 h 37 min, und jeder Heartbeat (alle 15 min) wuerde sonst einen weiteren Lauf anhaengen.
 name: Ops-Watchdog (Heartbeat + Trace-Frische)
 
 on:
@@ -43,13 +47,45 @@ jobs:
         continue-on-error: true
         env:
           CHAIN_TOKEN: ${{ secrets.ADVANCE_CHAIN_TOKEN }}
+          STALE_MINUTES: "45"
         run: |
-          # Der Recorder schreibt bei laufendem Betrieb eine Tagesdatei je UTC-Tag.
-          # range=1h liefert days>0 nur, wenn heute bereits geschrieben wurde.
+          # available:true ist KEIN Frische-Beweis: es ist auch dann wahr, wenn die Tagesdatei
+          # von vor zwei Stunden stammt. Am 16.10.2026 meldete dieser Check 'frisch', waehrend
+          # der Rekorder 1 h 50 min lang nichts aufzeichnete. Gemessen wird deshalb der letzte
+          # Ledger-Zeitstempel, den der Recorder erreicht hat (coverage.lastMs), gegen die Uhr
+          # dieses Laufs.
           t=$(curl -s --max-time 15 "https://honeypot-xrpl.vercel.app/api/validator-trace?range=1h")
           echo "$t" | head -c 300; echo
-          if echo "$t" | grep -q '"available":true'; then echo "Trace-Daten frisch"; exit 0; fi
-          echo "keine Trace-Datei für heute -> Recorder-Workflow anstoßen"
+          last=$(echo "$t" | grep -o '"lastMs":[0-9]*' | head -1 | cut -d: -f2)
+          if [ -z "$last" ]; then
+            echo "kein lastMs im API -> Frische nicht beurteilbar, nichts angestossen"
+            exit 0
+          fi
+          now=$(($(date -u +%s) * 1000))
+          age=$(( now - last ))
+          # Die Grenze hat einen Default im Skript: ohne ihn waere eine fehlende ENV-Zahl
+          # eine Grenze von 0 ms, also jeder Lauf 'veraltet' - ein Blind-Dispatch alle 15 min.
+          limit=$(( ${STALE_MINUTES:-45} * 60000 ))
+          echo "Trace-Alter $age ms (Grenze $limit ms, letzter Ledger bei $last)"
+          if [ "$age" -le "$limit" ]; then echo "Trace-Daten frisch"; exit 0; fi
+          echo "Trace-Daten veraltet -> erst die Warteschlange pruefen, dann anstossen"
+          # Die Warteschlange wird ohne Status-Filter gelesen. Live gemessen am 16.10.2026:
+          # status=queued und status=requested liefern 0 Treffer, obwohl ein Lauf 'pending' und
+          # einer 'in_progress' war - der Filter ist unzuverlaessig, die Statuswerte der Laeufe
+          # selbst nicht. Ein eingestandener Lauf wird deshalb nicht ueberdispatcht, und eine
+          # unlesbare Warteschlange fuehrt zu keinem Blind-Dispatch.
+          runs=$(curl -s --max-time 10 -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/validator-trace.yml/runs?per_page=10")
+          if ! echo "$runs" | grep -q '"workflow_runs"'; then
+            echo "Warteschlange nicht lesbar -> nichts angestossen (kein Blind-Dispatch)"
+            exit 0
+          fi
+          active=$(echo "$runs" | grep -o '"status":"[a-z_]*"' | grep -vc '"status":"completed"')
+          if [ "${active:-0}" -gt 0 ]; then
+            echo "Recorder-Lauf bereits eingestanden ($active von 10 letzten Laeufen) -> kein Dispatch"
+            exit 0
+          fi
           if [ -z "$CHAIN_TOKEN" ]; then echo "kein CHAIN_TOKEN -> kein Dispatch möglich"; exit 0; fi
           curl -s --max-time 10 -o /dev/null -w "dispatch validator-trace HTTP %{http_code}\n" \
             -X POST \
