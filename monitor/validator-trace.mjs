@@ -14,10 +14,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTracker } from "../lib/validator-trace.mjs";
+import { addLoadSample, createTracker } from "../lib/validator-trace.mjs";
 import { classifyShape, createShapeTracker, SIGNATURE_TAGS } from "../lib/tx-forensics.mjs";
 import { decodeValidatorList, nodePublicB58 } from "../lib/validator-health.mjs";
-import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
+import { saveDayRemote, loadDayRemote, pruneRemote, traceTokenConfigured, normalizeDay } from "../lib/validator-trace-store.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validator-trace");
@@ -92,17 +92,9 @@ function dayObj(date) {
     if (!REMOTE) {
       try { obj = JSON.parse(fs.readFileSync(path.join(DATA_DIR, date + ".json"), "utf8")); } catch { obj = null; }
     }
-    if (obj) {
-      obj.gaps ??= []; obj.incidents ??= []; obj.validators ??= {}; obj.ledgers ??= 0; obj.quorumFail ??= 0;
-      obj.hourly ??= {}; obj.firstMs ??= null; obj.lastMs ??= null;
-      // Altbestand (vor der Forensik-Stufe) hat diese Felder nicht -> explizit anlegen, damit
-      // die Retrace sie nie als "beobachtet: 0" missdeutet, sondern als "nicht erfasst".
-      obj.ledgerStats ??= []; obj.ledgerStatsTruncated ??= false; obj.incidentLedgers ??= 0;
-      obj.anomaly ??= {}; obj.anomalyFail ??= {}; obj.shapeSeen ??= 0; obj.shapeMissing ??= 0;
-      // Altbestand: noQuorum-Zähler fehlen -> 0, damit ++ nicht auf undefined läuft.
-      for (const v of Object.values(obj.validators)) if (v && typeof v === "object") v.noQuorum ??= 0;
-      for (const hb of Object.values(obj.hourly)) for (const v of Object.values(hb?.v ?? {})) if (v && typeof v === "object") v.noQuorum ??= 0;
-    }
+    // Altbestand (vor der Forensik-Stufe) hat diese Felder nicht -> angleichen, damit die
+    // Retrace sie nie als „beobachtet: 0“ missdeutet, sondern als „nicht erfasst“.
+    if (obj) normalizeDay(obj);
     days.set(date, obj ?? emptyDay(date));
   }
   return days.get(date);
@@ -137,6 +129,10 @@ function recordResult(r, detailNote) {
   const hb = (d.hourly[hk] ??= { l: 0, v: {} });
   hb.l += 1;
   const bad = new Set(r.incidents.map((i) => i.master));
+  // Last-Achse je Ledger (nicht nur je Ausfall-Ledger): die Ausfallrate pro Tx-Stufe ist die
+  // einzige Zahl, die einem Betreiber sagt, ab welcher Last sein Knoten zurueckfaellt - und ob
+  // dieselbe Last bei den anderen durchgeht.
+  addLoadSample(d, r.txCount, [...bad]);
   for (const m of MEMBERS) {
     const v = (d.validators[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
     const hv = (hb.v[m] ??= { ok: 0, partial: 0, missed: 0, wrongHash: 0, noQuorum: 0 });
@@ -326,7 +322,9 @@ async function preloadRemote() {
   const yesterday = dayOf(Date.now() - 86400000);
   for (const date of [yesterday, today]) {
     const doc = await loadDayRemote(date);
-    if (doc) { days.set(date, doc); }
+    // Direktes Setzen umgeht dayObj(): ohne Angleichung laufen die Forensik-Zaehler
+    // dieses Tages auf NaN (in der Datei als null) und die Forensik-Liste fehlt ganz.
+    if (doc) { days.set(date, normalizeDay(doc)); }
     const last = doc?.lastLedger;
     if (Number.isFinite(last)) lastLedger = lastLedger === null ? last : Math.max(lastLedger, last);
   }
