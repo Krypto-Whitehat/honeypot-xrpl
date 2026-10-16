@@ -141,7 +141,7 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/flow-state?route=archive&address=…&from=…&to=…&range=30d\|90d` | `{ address, from, to, hops: [{ from, to, type, amountDrops, txHash, ledgerSeq }], truncated, queryDays, range? }` — Rückwärts-Replay über die Flow-Archiv-Tages-Chunks; `type` je Hop seit Kritik-Runde 3 (Parität zum Live-Kantenvertrag); `range` steuert die Lese-Tiefe (30 d = 1 Block, 90 d = 3 Blöcke nötig — bei Default-Kappe 2 ehrlich `truncated: true` + `queryDays: 62`); ungültiger `range` → 400 |
 | `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed). Bedient von der Function `api/flow-state.js` (Zweig `route=block-window`) via Rewrite — Hobby-Limit: max. 12 Serverless Functions pro Deployment |
 | `GET /api/validator-trace?master=<master>&range=1h\|24h\|7d\|all` | `{ available, source, days, master, range, summary, inWindow, coverage, incidents, gaps, patterns, retrace, diagnosis, profile, risk }` — Retrace eines dUNL-Validators: Vorfalls-Zeitachse, Intervall-Profil (24 Intervalle mit Ledger-Abdeckung, Kohorte und Signatur), je Vorfall die messbare Ursache mit Stärkenrang und der Lift-Wert dieser Anomalie, dazu Fingerprint, Ausfallserien, Quorum-Kritikalität und Last-Ausfall-Kurve dieses Knotens |
-| `GET /api/validator-trace?patterns=1&range=…` | `{ incidents, tags, recurring, perValidator, risk, attacks, signatures, split, clusters, windows, load }` — Netz-Sicht: wiederkehrende Muster über alle Validatoren, Risikozeilen (Rate mit Signatur gegen ohne, `lift`), Angriffs-Signale, Signatur-Bord der Transaktions-Formen, Netz-Serien, Kohorten-Cluster und die Last-Ausfall-Kurve des Netzdurchschnitts |
+| `GET /api/validator-trace?patterns=1&range=…` | `{ incidents, tags, recurring, perValidator, risk, attacks, signatures, split, clusters, windows, load, impact }` — Netz-Sicht: wiederkehrende Muster über alle Validatoren, Risikozeilen (Rate mit Signatur gegen ohne, `lift`), Angriffs-Signale, Signatur-Bord der Transaktions-Formen, Netz-Serien, Kohorten-Cluster und die Last-Ausfall-Kurve des Netzdurchschnitts |
 | `GET /…`           | statische Files aus `public/` |
 
 **Datenquellen der Endpunkte (Doku 2026-10-04):** `/api/threats`, `/api/stats`
@@ -253,21 +253,71 @@ MEIN Knoten zurück, und halten die anderen dieselbe Last?“) nicht beantwortba
 Stufen sind über Tage und Validatoren hinweg vergleichbar. Dieselbe Kurve ohne `master` ist die
 Netzseite: ohne den Vergleich wäre die Kurve eines einzelnen Knotens eine Zahl ohne Bedeutung.
 
+**Angriffs-Wirkungs-Ebene (wann es passierte)** (`lib/attack-impact.mjs`, `impact` im Antwortkörper
+der Netz-Sicht): alle bisherigen Ebenen fragen den **Ledger** — Quorum-Rand, Last, Tx-Form dieses
+einen Ledgers. Diese Ebene fragt die **Zeit**: in den Stunden, in denen der Honeypot Drainer,
+Dusting-Wellen und Sweeps sieht, steigt die Ausfallrate der dUNL-Knoten — oder sie steigt nicht.
+Eingabe sind die Stunden-Buckets des Trace-Tagesfiles und die Cluster der Betrugs-Historie
+(`data/history.json`), deshalb sitzt die Ebene dort, wo beide Quellen zusammenkommen:
+`crossValidatorPatterns` (lokaler Server) und `api/stats.js` (Produktion, Cluster über
+`readHistoryGitHub` aus dem Daten-Repo). Beides zu verdrahten ist kein Detail: `vercel.json`
+rewritet `/api/validator-trace` auf `/api/stats?route=trace`, die Produktion läuft also nicht über
+`server/index.mjs`.
+
+Drei Fallen, die die Engine ausdrücklich entschärft — jede einzelne macht ein Werkzeug glaubwürdig,
+das zu früh jubelt:
+
+1. **Tageszeit.** Angriffe und Ausfälle haben Stoßzeiten. Das Urteil hängt an der **gepaarten
+   Gegenprobe** (Angriffsstunden gegen ruhige Stunden derselben UTC-Stunde), nicht am rohen Lift.
+   Der rohe Wert bleibt sichtbar (`zRaw`, `rateWithout`), damit die Falle selbst lesbar bleibt.
+2. **Aufzeichnungs-Lücken.** Eine Stunde ohne Ledger ist keine ruhige Stunde, sondern eine
+   unbeobachtete. Sie verwässert die Gegenprobe nicht, sie wird ausgezählt
+   (`thinCells`, `clustersOutsideRecording`, `incidentsOutsideMeasuredCells`).
+3. **Ein einzelner Knoten.** Gemessen wird auf **Validator-Ledger-Paaren** (Nenner = alle
+   beobachteten Knoten-Slots der Stunde, Zähler = die zurückgefallenen), nicht auf Ledger-Ebene.
+   Auf Ledger-Ebene macht ein einziger Knoten, der eine Stunde komplett verpasst, die Rate zu
+   100 % — genau das ist am 14.10.2026 zwischen 05 und 09 UTC gemessen: ein Knoten verpasste dort
+   jeden einzelnen Ledger (920/920, 921/921, 918/918, 916/916) und ließ jede dieser Stunden wie
+   einen Netz-Zusammenbruch aussehen. Die Ledger-Ebene bleibt sichtbar (`ledgerRateWith` /
+   `ledgerRateWithout`), weil sie die Knoten-Diagnose ist — aber sie trägt kein Netz-Urteil:
+   trägt der Effekt nur eine Minderheit der Knoten
+   (`contributingValidators < minContributingValidators`), heißt das Urteil `node-driven` und
+   nicht `attack-linked`.
+
+Urteile (`IMPACT_VERDICTS`): `attack-linked` / `node-driven` / `no-link` / `thin-overlap` /
+`no-overlap` / `unknown`. `unknown` ist bewusst **nicht** gleich 'kein Zusammenhang': ohne
+Angriffssichtung im Fenster gibt es keine Vergleichsbasis, und eine leere Historie wie einen
+sauberen Befund aussehen zu lassen ist der teuerste Fehler, den diese Ebene machen kann.
+Schwellen (`IMPACT_DEFAULTS`: Stunden-Zelle 60 min, 60 Ledger je Stunde für eine Rate, 4
+Überlappungsstunden, 600 Knoten-Slots je Gruppe, |z| ≥ 2, 3 tragende Validatoren) sind
+Tuning-Defaults und per `opts` überschreibbar — die Zeit-Ebene ist eine Korrelation, kein Beweis.
+
 **3D-Intervall-Profil** (`profileCells`, UI `profile3d`): 24 Intervalle über das
 gewählte Fenster. Säulenöhe = eigene Abweichungen (Achsenmaß identisch zu den
 Gitterlinien), Stapelfarben = Vorfallstyp, Grundriss + Kohortenstreifen =
 Intervall-Zustand (`clean` / `solo` / `few peers` / `network event` /
 `deviation, cohort not recorded` / `no ledger observed`), Signaturmarker +
 Signaturstreifen = Transaktions-Signatur an einem Ausfall-Ledger dieses Intervalls.
-Geometrie ist deterministisch: `--dz = --d x tan(41deg)`, `--d <= --gap` in jedem
-`clamp`-Zweig, Säulen-Zeile, Kohortenstreifen und Signaturstreifen teilen dieselben
-Ränder, denselben Abstand und dieselbe Flex-Basis (Guards:
-`public/validator-trace-markup.test.mjs`). Achse zweigig: bis `peak` 50 linear (ein Gitterintervall
-je Vorfall — bei peak 4 sind das 44/88/132/176 px), ab 51 Wurzel, weil linear bei peak 150 nur
-1,17 px je Vorfall wäre und damit unter der Kantensichtbarkeit liegt. Unter 460 px Content-Breite
-des Containers schaltet CSS die Scherflächen ab: die Tiefe erreicht die 4 px Kantenbreite erst bei
-470,6 px (4 / 0,0085), und im gemessenen Mobilcontainer (260 px Content, 286 px Aussenbreite bei
-390 px Viewport) wären 3,00 px Tiefe an einer 5,91 px-Säule ein Fleck, kein Volumen.
+Geometrie ist deterministisch und **nachgerechnet, nicht gesetzt**: `--skew: 45deg` mit
+`--dz-k = 1` (`DEPTH_SKEW_K`), also `--dz = --d`. Eine feste Tiefe machte aus kleinen Werten
+schiefe Bänder (live gemessen 2026-10-16: peak 5000, `--d` 7,63 px, ein Intervall mit einem
+Vorfall 2,48 px hoch); bei 45deg ist die Scherfläche so hoch wie die Säule tief ist — kanonische
+Kavaliere-Projektion und die Obergrenze dessen, was eine Ansicht von oben zeigen kann.
+Zellenbreite `--col-w = (100cqw - --gutter - 3px - 23 x --gap) / 24` (gemessen 30,86 px bei
+961 px Content), Tiefe `--d = min(max(4px, 0,22 x --col-w), 8,5px, --plot-h x --dmax)`: die
+4-px-Untergrenze greift unter 568 px Content, der 8,5-px-Deckel über 1192 px, und `--dmax`
+(kürzeste gezeichnete Säulenhöhe / Plot-Höhe, aus `profile3d`) begrenzt die Kappe auf die
+kürzeste Säule — kein Intervall darf tiefer wirken, als es hoch ist. Säulen-Zeile,
+Kohortenstreifen und Signaturstreifen teilen dieselben Ränder, denselben Abstand und dieselbe
+Flex-Basis; unter jeder Säule steht dieselbe Bodenplatte (`--base-h: 6px`), und `.vt-plot`
+reserviert `--plot-h + --dz + --base-h + --label-h` (176 + 6,79 + 6 + 15 = 203,79 px), sodass
+höchste Säule und Wertemarke nie abgeschnitten werden (Guards:
+`public/validator-trace-markup.test.mjs`). Achse zweigig: bis `peak` 20 linear (ein
+Gitterintervall je Vorfall; 176 / 20 = 8,80 px, 3,5 % Luft gegen die 8,50-px-Kappe), ab `peak` 25
+Wurzel (176 x sqrt(1/25) = 35,20 px am kürzesten Körper) — linear bei peak 150 ergäbe 1,17 px je
+Vorfall und läge unter der Kantensichtbarkeit. Unter 660 px Content-Breite des Containers dünnen
+`@container`-Regeln die Wertemarken (jede zweite fällt weg), weil vier Ziffern den Abstand ihrer
+Zentren übersteigen.
 
 **Ehrliche Grenzen (bewusst sichtbar, nicht still null):**
 `shapeSeen` / `shapeMissing` trennen „keine Signatur gemessen“ von „Transaktionen
@@ -285,6 +335,40 @@ die Retrace die ganze Ebene als Datenlücke aus), `TRACE_RUN_SECONDS` (0 = bis z
 Abbruch; Workflow setzt 18000), `TRACE_DATA_DIR` (Ziel der Tagesdateien),
 `GITHUB_HISTORY_TOKEN` / `GITHUB_HISTORY_REPO` (Schreibweg; im Workflow stattdessen
 `HISTORY_DEPLOY_KEY`).
+
+**Produktions-Parität der Angriffsseite (gemessen 2026-10-16 an der Live-Site):** die
+Wirkungs-Ebene hängt an den Clustern der Betrugs-Historie — `traceForValidator` erhält sie nur,
+wenn sie mitgegeben werden. Auf Vercel fehlten sie, während der lokale Server sie gab: live war
+`impact` null und die Angriffsstunde fehlte als Ursache. Beide Einstiegspunkte
+(`api/stats.js` für Vercel, `server/index.mjs` für den lokalen Betrieb) geben sie jetzt allen
+drei Konsumenten — `traceForValidator`, `crossValidatorPatterns` und `validatorReport` (der
+maschinenlesbare Selbst-Report trägt `impact` mit `verdict`, `verdictAuthority`,
+`verdictReason`, `attackHours`, `overlapHours`, `clustersInWindow`). Guard:
+`lib/trace-attack-side.test.mjs`.
+
+**`historyError` ist ein Vertrag, kein Fehlerfeld:** eine nicht lesbare Historie ist ein
+anderer Zustand als eine ohne Cluster. `catch { clusters = [] }` machte eine korrumpierte
+Bestandsdatei zu einem Befund ohne Angriffe. Getrennt wird jetzt der Anlege-Fall
+(`ENOENT` → leere Liste, kein Hinweis) von echten Lesefehlern (`historyError`-Text in der
+Antwort, `impact` urteilt `unknown`). Guard: `lib/trace-attack-side.test.mjs`.
+
+**Bestands-Integrität von `data/history.json`:** zwei Defekte, beide gemessen.
+(1) `saveLocalHistory` schrieb immer in denselben `history.json.tmp`. Zwei gleichzeitige
+Schreibende — zwei `server/index.mjs`-Prozesse auf demselben Bestand, Request-Handler plus
+Drainer-Pfad — verzahnten ihre Schreibpositionen in derselben Datei, und der `rename` machte aus
+dem Gemisch den Bestand: valider Kopf (1000 Cluster) plus 6.821 Bytes Fremdschwanz, nicht mehr
+parsebar. Jetzt eigener tmp-Name pro Vorgang (`Datei.PID.Zeit_seqenz.tmp`) und
+Byte-Laengen-Prüfung **vor** dem `rename`; ein fehlgeschlagener Schreibvorgang ersetzt den
+bisherigen Bestand nicht. (2) `sanitizeHistoryList` setzte bei einer Schlüsselkollision den
+Rückgabewert von `mergeFields` (ein Boolean) als Listenwert ein — aus dem Cluster wurde `true`,
+und der nächste Ladevorgang verwarf ihn still; über `mergeHistory` wanderte das bis in den
+GitHub-Bestand. Jetzt bleibt der Cluster erhalten, und `serializeHistoryList` verweigert
+Nicht-Cluster-Einträge laut. Guards: `lib/history-integrity.test.mjs`. Korrumpierte Stände sind
+als `data/history.json.corrupt-<datum>.bak` gesichert.
+
+**Port:** `server/index.mjs` nimmt `PORT` aus der Umgebung und fällt auf `config.json` zurück
+(`Number(process.env.PORT) || config.port`). Vercel setzt `PORT` selbst — ein hart gesetzter
+Port in `config.json` würde die App gegen die Umgebung laufen lassen.
 
 ## Bekannte Grenzen
 

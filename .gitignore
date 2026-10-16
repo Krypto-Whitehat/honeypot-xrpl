@@ -23,3 +23,8 @@ Thumbs.db
 
 .vercel
 .env*
+
+# Werkzeug-Spuren und Sicherungen (gehoeren nicht ins Deploy-Repo)
+.playwright-mcp/
+*.bak
+
