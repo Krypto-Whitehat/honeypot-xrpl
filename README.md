@@ -140,6 +140,8 @@ Monitor und Server können in zwei Terminals parallel laufen; der Server pollt
 | `GET /api/flow-state` | `{ cursor, updatedAt, validatedIndex, clusters: [{ id, label, roles, rolesByAddress, edges, totalDrops, txCount, distinctAccounts, firstSeen, lastSeen, fieldsCapped? }] }` — normalisierte Projektion des persistierten Flow-States (serverseitig baitLabels-gefiltert, Top-200, 7-Tage-Fenster, 30 Tage für Cluster mit Betrugsevidenz — `FLOW_STATE_MALICIOUS_RETENTION_MS`); `fieldsCapped: true` nur wenn die Write-Pfad-Feldkappe (`FLOW_STATE_MEMBER_CAP` 300) `memberAddresses` gekürzt hat — `distinctAccounts` bleibt der je gesehene WAHRE Bestand (monoton, `lib/ledger-walk.mjs` mergeCluster; Vergleich bait-inklusiv vor dem STILL-Filter); ohne Token `200 + reason` (fail-closed) |
 | `GET /api/flow-state?route=archive&address=…&from=…&to=…&range=30d\|90d` | `{ address, from, to, hops: [{ from, to, type, amountDrops, txHash, ledgerSeq }], truncated, queryDays, range? }` — Rückwärts-Replay über die Flow-Archiv-Tages-Chunks; `type` je Hop seit Kritik-Runde 3 (Parität zum Live-Kantenvertrag); `range` steuert die Lese-Tiefe (30 d = 1 Block, 90 d = 3 Blöcke nötig — bei Default-Kappe 2 ehrlich `truncated: true` + `queryDays: 62`); ungültiger `range` → 400 |
 | `GET /api/block-window?range=24h\|3d\|7d` | `{ range, from, to, updatedAt, buckets: [{ t, blocks, txns, flaggedBlocks, maxSeverity }], flagged: [{ i, t, n, f: [{ from, to, type, amountDrops, txHash, ledgerSeq }] }], cursor, validatedIndex }` — rollender Block-Fenster-Bestand (Stunden-Rollups ≤ 168 Zeilen bei 7 d, geflaggte Details im Volltext); Default `24h`, ungültiger `range` → 400; ohne Token `200 + reason` (fail-closed). Bedient von der Function `api/flow-state.js` (Zweig `route=block-window`) via Rewrite — Hobby-Limit: max. 12 Serverless Functions pro Deployment |
+| `GET /api/validator-trace?master=<master>&range=1h\|24h\|7d\|all` | `{ available, source, days, master, range, summary, inWindow, coverage, incidents, gaps, patterns, retrace, profile, risk }` — Retrace eines dUNL-Validators: Vorfalls-Zeitachse, Intervall-Profil (24 Intervalle mit Ledger-Abdeckung, Kohorte und Signatur), je Vorfall die messbare Ursache mit Stärkenrang und der Lift-Wert dieser Anomalie |
+| `GET /api/validator-trace?patterns=1&range=…` | `{ incidents, tags, recurring, perValidator, risk, attacks, signatures }` — Netz-Sicht: wiederkehrende Muster über alle Validatoren, Risikozeilen (Rate mit Signatur gegen ohne, `lift`), Angriffs-Signale und das Signatur-Bord der Transaktions-Formen mit Belegen |
 | `GET /…`           | statische Files aus `public/` |
 
 **Datenquellen der Endpunkte (Doku 2026-10-04):** `/api/threats`, `/api/stats`
@@ -191,6 +193,77 @@ Monitor-Logik:
 - Funding-Kette via `account_tx` mit Marker-Pagination (bis 100 Einträge,
   Tiefe 2). `firstSeen` ist die Ledger-Zeit (`close_time_iso`) der ersten
   Evidence — nicht die Wanduhrzeit des Monitors.
+
+## Validator-Trace: dUNL-Ausfall-Rekonstruktion + Transaktions-Forensik
+
+Der Recorder (`monitor/validator-trace.mjs`, Workflow
+`.github/workflows/validator-trace.yml`, cron `5 */5 * * *`, max. 5 h je Lauf)
+zeichnet den **Validations-Stream** der dUNL dauerhaft auf und schreibt
+Tagesdateien in das private Daten-Repo
+(`Krypto-Whitehat/honeypot-xrpl-history`, `data/validator-trace/<YYYY-MM-DD>.json`,
+Push alle 5 min). Der Stream kommt von `wss://xrplcluster.com` (xrpld) — Clio-
+Endpunkte wie honeycluster liefern **keine** Validations und würden einen
+vollständigen Ausfall vortäuschen.
+
+**Ebene 1 — Validations-Ebene (was passierte):** je Validator und je Ledger
+`missed` / `partial` / `wrong-hash` / `no-quorum`, plus die **Ledger-Kohorte**
+(wie viele dUNL-Validatoren denselben Ledger gleichzeitig falsch standen),
+Quorum-Rand (Top-Stimmen vs. benötigte Stimmen), Hash-Split, Last
+(Tx vs. Median) und Takt-Lücke (Ledger-Abstand vs. Median).
+
+**Ebene 2 — Transaktions-Ebene (warum es passierte):** `lib/tx-forensics.mjs`
+liest den `transactions`-Stream und misst die **Form** der Transaktionen genau
+dieses Ledgers — Absender-/Empfänger-Streuung, Fächerung, Fehlerrate,
+Typ-Mischung, Gebühren, Batch-Verstärkung (`Batch`-Tx mit `InnerTransactions` /
+`RawTransactions`), Kontenerstellungen, Orderbuch- und NFT-Aktivität — gegen die
+rollende Basis der vorangegangenen Ledger. Gemeldete Signaturen:
+`drainer-fanout`, `sweep-window` (dasselbe Konto erreicht über Ledger hinweg
+immer neue Empfänger — die Form, die ein Einzel-Ledger-Fächer nicht zeigt),
+`sender-burst`, `failure-spike`, `batch-amplify`, `fee-spike`, `offer-flood`,
+`nft-flood`, `create-wave`, `feature-change`, `type-burst:<T>`.
+
+**Korrelation (das eigentliche Werkzeug für Validator-Betreiber):**
+`riskProfile` in `lib/validator-retrace.mjs` vergleicht die Ausfallwahrscheinlichkeit
+eines Ledgers **mit** dieser Signatur gegen Ledger **ohne** sie — Nenner und Zähler
+aus vollständigen Tageszählern (`anomaly` / `anomalyFail` über alle beobachteten
+Ledger), nie aus einer Teilmenge. `lift` ist das Verhältnis; `reliable: false` +
+`note: "sample-too-small"` bleibt stehen, solange zu wenige Ledger gezählt wurden —
+ein einzelner Fall ist keine Rate.
+
+**Retrace je Vorfall** (`retraceIncident`, `retraceForValidator`): die messbare
+Ursache mit Stärkenrang `measured` (direkte Ledger-Messung: Quorum-Rand, Hash-Split,
+Last, Takt) > `cohort` (wie viele Nachbarn gleichzeitig betroffen — Netzereignis vs.
+nur dieser Validator) > `correlated` (Ledger-Kontext/Signatur) > `none` (nichts
+Korreliertes gefunden), plus `guidanceFor` (welcher Prüfschritt als nächstes) und
+`dataGaps` (was die Aufzeichnung dazu nicht hergibt).
+
+**3D-Intervall-Profil** (`profileCells`, UI `profile3d`): 24 Intervalle über das
+gewählte Fenster. Säulenöhe = eigene Abweichungen (Achsenmaß identisch zu den
+Gitterlinien), Stapelfarben = Vorfallstyp, Grundriss + Kohortenstreifen =
+Intervall-Zustand (`clean` / `solo` / `few peers` / `network event` /
+`deviation, cohort not recorded` / `no ledger observed`), Signaturmarker +
+Signaturstreifen = Transaktions-Signatur an einem Ausfall-Ledger dieses Intervalls.
+Geometrie ist deterministisch: `--dz = --d x tan(41deg)`, `--d <= --gap` in jedem
+`clamp`-Zweig, Säulen-Zeile, Kohortenstreifen und Signaturstreifen teilen dieselben
+Ränder, denselben Abstand und dieselbe Flex-Basis (Guards:
+`public/validator-trace-markup.test.mjs`).
+
+**Ehrliche Grenzen (bewusst sichtbar, nicht still null):**
+`shapeSeen` / `shapeMissing` trennen „keine Signatur gemessen“ von „Transaktionen
+waren da, Form aber nicht erfasst“; `ledgerStatsTruncated` markiert verworfene
+Forensik-Details (Deckel `LEDGER_STATS_CAP` 6000); `estimated: true` kennzeichnet
+aus Stunden-Buckets verteilte Ledger-Zähler; `note: "no-ledger-counter"` lässt eine
+Signatur ohne Zähler ohne Rate stehen. Alle Schwellen
+(`TRACE_DEFAULTS`, `TX_FORENSICS_DEFAULTS`, `RETRACE_DEFAULTS`) sind
+**TUNING-DEFAULTS ohne Kampagnen-Nachweis** und per `opts` überschreibbar — die
+Signatur ist eine Korrelation im selben Ledger, kein Beweis.
+
+**Umgebungsvariablen des Recorders:** `TRACE_WSS` (Komma-Liste, Default
+`wss://xrplcluster.com`), `TRACE_TX_SHAPE` (Forensik an, nur `=0` aus — dann weist
+die Retrace die ganze Ebene als Datenlücke aus), `TRACE_RUN_SECONDS` (0 = bis zum
+Abbruch; Workflow setzt 18000), `TRACE_DATA_DIR` (Ziel der Tagesdateien),
+`GITHUB_HISTORY_TOKEN` / `GITHUB_HISTORY_REPO` (Schreibweg; im Workflow stattdessen
+`HISTORY_DEPLOY_KEY`).
 
 ## Bekannte Grenzen
 
