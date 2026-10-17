@@ -34,6 +34,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "xrpl";
 import { analyzeLedger, DEFAULT_THRESHOLDS } from "../lib/detector.mjs";
 import { normalizeTag } from "../lib/tag-identity.mjs";
+import { metaOf, movedXrpOf } from "../lib/tx-values.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -256,10 +257,10 @@ function measureSweepRatio(entries, toucher) {
     if (entry?.validated === false) continue;
     const tx = entry.tx_json ?? entry.tx ?? entry;
     if (!tx || tx.TransactionType !== "Payment") continue;
-    const raw = tx.Amount ?? tx.DeliverMax;
-    if (typeof raw !== "string") continue;
-    const drops = Number(raw);
-    if (!Number.isFinite(drops)) continue;
+    // Nachgerechneter Betrag statt Anspruch: DeliverMax-Deckel und abgelehnte
+    // Zahlungen bewegen kein XRP (lib/tx-values.mjs, live belegt 2026-10-17).
+    const drops = movedXrpOf(tx, metaOf(entry));
+    if (drops == null) continue;
     if (tx.Destination === toucher && tx.Account !== toucher) {
       inXrp += drops;
     } else if (tx.Account === toucher && tx.Destination) {

@@ -19,7 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // importiert sie für Destination-Tag-Kantenattribute (normalizeTag,
 // computeTransitFlags); fehlt sie hier, bricht die Modul-Evaluation des
 // Browser-Clusters (404, Muster stride.mjs in server/index.mjs).
-const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs", "live-edges.mjs"]);
+// tx-values.mjs (2026-10-17): DOM-freie Betrags-Pure-Bibliothek - detector.mjs
+// und cluster.mjs importieren sie fuer den nachgewiesenen Geldfluss
+// (movedXrpOf, movedIouOf, isExecuted, metaOf); fehlt sie hier, bricht
+// dieselbe Modul-Evaluation (404).
+const ALLOWED = new Set(["detector.mjs", "cluster.mjs", "sanitize.mjs", "stride.mjs", "rate-gate.mjs", "name-resolve.mjs", "tag-identity.mjs", "pattern-watch.mjs", "live-edges.mjs", "tx-values.mjs"]);
 
 export default async function handler(req, res) {
   try {
