@@ -832,6 +832,11 @@ function attributionBlock(a) {
     if (q && Number.isFinite(q.needed) && q.needed > 0) metrics.push(["vt.metric.quorum", h.t("vt.mQuorum", { top: num(q.topVotes), needed: num(q.needed), margin: num(q.margin) })]);
     if (q && Number.isFinite(q.runnerVotes) && q.runnerVotes > 0) metrics.push(["vt.metric.split", h.t("vt.mSplit", { runner: num(q.runnerVotes), votes: num(q.votes) })]);
     if (l && Number.isFinite(l.txCount)) metrics.push(["vt.metric.load", h.t("vt.mLoad", { tx: num(l.txCount), med: num(l.medianTx), ratio: fac(l.ratio) })]);
+    // Die eigene Tx-Form steht nie ueber der Ledger-Autoritaet: weicht sie ab, ist das eine
+    // eigene Aussage im Karton und keine stillschweigende Zahl.
+    const sa = r.shapeAuthority ?? null;
+    if (sa && sa.state === "match" && Number(sa.dup) > 0) metrics.push(["vt.metric.shape", h.t("vt.mShapeDropped", { form: num(sa.formTx), ledger: num(sa.ledgerTx), dup: num(sa.dup) })]);
+    else if (sa && sa.state !== "match") metrics.push(["vt.metric.shape", h.t("vt.mShapeDeviation", { form: num(sa.formTx), ledger: num(sa.ledgerTx), state: h.t("vt.shape." + sa.state) })]);
     if (Number.isFinite(r.closeGapMs)) metrics.push(["vt.metric.gap", h.t("vt.mGap", { gap: sec(r.closeGapMs) })]);
     metrics.push(["vt.metric.cohort", h.t("vt.mCohort", { n: num(cohort), others: num(a.others), otherWord: otherWord(a.others) })]);
     const metricHtml = metrics.map(([labelKey, value]) => '<li><small>' + h.esc(h.t(labelKey)) + "</small><b>" + h.esc(value) + "</b></li>").join("");

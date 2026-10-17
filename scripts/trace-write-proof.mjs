@@ -60,8 +60,21 @@ const http = createServer();
 const wss = new WebSocketServer({ server: http });
 http.listen(PORT, "127.0.0.1");
 
+// Am echten Endpunkt gemessen (17.10.2026): die Transaktionen eines Ledgers kommen vor seiner
+// Schliess-Meldung an. 'relayCopies' laesst den Knoten dieselbe Transaktion mehrfach relayen -
+// genau das, was eine Netzstockung tut: derselbe Index, dieselben Transaktionen, mehrfach im Strom.
+function emitTx(ws, l) {
+  for (const t of l.txs ?? []) {
+    const send = () => ws.send(JSON.stringify({ type: "transaction", ledger_index: l.index, validated: true,
+      engine_result: "tesSUCCESS", meta: { transaction_state: "tesSUCCESS" },
+      transaction: { TransactionType: "Payment", Account: t.account, Destination: t.destination, Fee: "12", hash: t.hash } }));
+    for (let c = 0; c < (l.relayCopies ?? 1); c++) send();
+  }
+}
+
 function emit(ws, scenario) {
   for (const l of scenario.ledgers) {
+    emitTx(ws, l);
     ws.send(JSON.stringify({ type: "ledgerClosed", ledger_index: l.index, ledger_hash: l.hash,
       ledger_time: rippleSec(l.closeMs), txn_count: l.txCount, close_resolution: 5, validated_ledgers: 1 }));
     for (const v of scenario.votes.filter((x) => x.index === l.index)) {
@@ -385,6 +398,66 @@ check("Phase E: der Grund ist genannt, nicht verschluckt", /Abbruch: kein Ledger
   (outE.match(/Abbruch:.*/m) ?? ["(kein Log)"])[0]);
 check("Phase E: vor dem Abbruch wird gespeichert", (dayE?.captureEvents ?? []).length >= 1,
   JSON.stringify((dayE?.captureEvents ?? []).slice(0, 2)));
+
+// ---------- Phase F: derselbe Ledger wird mehrfach relayt ----------
+// Die Tx-Form ist die Grundlage jeder Drainer-Signatur. Zaehlt sie Nachrichten statt
+// Transaktionen, steht das Doppelte der Wahrheit in der Datei und jede Signatur darin ist eine
+// nachrechenbar falsche Zahl. Genau das war in den aufgezeichneten Tagen messbar (62 Zeilen mit
+// Form = 2 x Ledger-Autoritaet). Hier wird derselbe Vorgang erzeugt und die Korrektur bewiesen.
+const txSet = (idx, n) => Array.from({ length: n }, (_, i) => ({
+  account: "rProofSender" + (i % 3), destination: "rProofDest" + idx + "_" + i,
+  hash: hex64(idx * 1000 + i).slice(0, 40),
+}));
+const dirF = path.join(ROOT, "logs", "trace-proof-F");
+const metaF = {};
+const idxF0 = 107699701;
+const closeF = Date.now() - 90000;
+scenario = { ledgers: [], votes: [] };
+// Eine Forensik-Zeile (und damit die gespeicherte Form) entsteht nur fuer Ledger mit Abweichung
+// (monitor/validator-trace.mjs: if (r.incidents.length)). Ein doppelt relayter Ledger ohne
+// Abweichung waere in der Datei unsichtbar - real ist es genauso: die Doppel-Relays passieren in
+// Netzstockungen, und eine Netzstockung erzeugt genau die Abweichungen, die eine Zeile schreiben.
+// Deshalb fehlt hier je Ledger ein Knoten.
+for (let w = 6; w >= 1; w--) {
+  const wIdx = idxF0 - w, wClose = closeF - w * 5000;
+  scenario.ledgers.push({ index: wIdx, hash: hex64(wIdx), closeMs: wClose, txCount: 4, txs: txSet(wIdx, 4) });
+  for (const s of signable.slice(1)) scenario.votes.push({ index: wIdx, key: s.key, hash: hex64(wIdx), atMs: wClose + 1000 });
+}
+const cleanIdx = idxF0, dblIdx = idxF0 + 1, tripIdx = idxF0 + 2;
+const cleanClose = closeF, dblClose = closeF + 5000, tripClose = closeF + 10000;
+scenario.ledgers.push({ index: cleanIdx, hash: hex64(cleanIdx), closeMs: cleanClose, txCount: 9, txs: txSet(cleanIdx, 9) });
+for (const s of signable.slice(1)) scenario.votes.push({ index: cleanIdx, key: s.key, hash: hex64(cleanIdx), atMs: cleanClose + 1000 });
+scenario.ledgers.push({ index: dblIdx, hash: hex64(dblIdx), closeMs: dblClose, txCount: 9, txs: txSet(dblIdx, 9), relayCopies: 2 });
+for (const s of signable.slice(1)) scenario.votes.push({ index: dblIdx, key: s.key, hash: hex64(dblIdx), atMs: dblClose + 1000 });
+scenario.ledgers.push({ index: tripIdx, hash: hex64(tripIdx), closeMs: tripClose, txCount: 6, txs: txSet(tripIdx, 6), relayCopies: 3 });
+for (const s of signable.slice(1)) scenario.votes.push({ index: tripIdx, key: s.key, hash: hex64(tripIdx), atMs: tripClose + 1000 });
+const outF = await runMonitor(dirF, 25, { TRACE_TX_SHAPE: "1", TRACE_STAT_MS: "4000", TRACE_QUORUM_WSS: "",
+  TRACE_STALL_MS: "60000", TRACE_STALL_CHECK_MS: "5000", TRACE_NO_LEDGER_MS: "60000" }, metaF);
+const dayF = readDay(dirF);
+const rowF = (idx) => (dayF?.ledgerStats ?? []).find((r) => r.l === idx);
+const rClean = rowF(cleanIdx), rDbl = rowF(dblIdx), rTrip = rowF(tripIdx);
+check("Phase F: einfacher Relay - Form gleich der Ledger-Autoritaet, kein verworfener Doppelpfad",
+  rClean?.sh?.n === 9 && rClean?.tx === 9 && rClean?.sh?.dup === 0,
+  `sh.n=${rClean?.sh?.n} tx=${rClean?.tx} dup=${rClean?.sh?.dup}`);
+check("Phase F: zweimal relayt zaehlt einmal - die Form nennt weiterhin die Autoritaet",
+  rDbl?.sh?.n === 9 && rDbl?.sh?.dup === 9 && rDbl?.tx === 9,
+  `sh.n=${rDbl?.sh?.n} dup=${rDbl?.sh?.dup} tx=${rDbl?.tx}`);
+check("Phase F: dreimal relayt zaehlt einmal, die zwolf Doppel-Relays sind als Zahl gemeldet",
+  rTrip?.sh?.n === 6 && rTrip?.sh?.dup === 12 && rTrip?.tx === 6,
+  `sh.n=${rTrip?.sh?.n} dup=${rTrip?.sh?.dup} tx=${rTrip?.tx}`);
+check("Phase F: die Signatur-Belege nennen dieselbe Zahl wie die Form (kein Beleg aus Doppel-Relays)",
+  Object.values(rDbl?.sev ?? {}).every((e) => !Number.isFinite(e.ledgerTx) || e.ledgerTx === 9),
+  JSON.stringify(rDbl?.sev ?? {}));
+check("Phase F: der Tag sammelt seine verworfenen Doppel-Relays (9 + 12)",
+  dayF?.shapeDropped === 21, "shapeDropped=" + dayF?.shapeDropped);
+check("Phase F: die Protokollzeile nennt die verworfenen Doppel-Relays des Laufs",
+  /DoppelRelays=21/.test(outF), (outF.match(/DoppelRelays=\d+/g) ?? ["(keine Zahl)"]).slice(-1)[0]);
+check("Phase F: jede Tx hatte einen Hash, also ist 'ohne Hash' ausgewiesen null",
+  [rClean, rDbl, rTrip].every((r) => r?.sh?.nh === 0),
+  JSON.stringify([rClean?.sh?.nh, rDbl?.sh?.nh, rTrip?.sh?.nh]));
+check("Phase F: der Form-Zaehler des Tags zaehlt Ledger mit Form, nicht Nachrichten",
+  (dayF?.shapeSeen ?? 0) === (dayF?.ledgerStats ?? []).length && dayF?.shapeMissing === 0,
+  "shapeSeen=" + dayF?.shapeSeen + " shapeMissing=" + dayF?.shapeMissing + " Zeilen=" + (dayF?.ledgerStats ?? []).length);
 
 // ---------- Bericht ----------
 console.log("");

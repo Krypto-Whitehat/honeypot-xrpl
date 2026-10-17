@@ -1716,3 +1716,27 @@ test('Achse: der letzte benannte Tick steht auf der letzten Saule', () => {
   const gap = ticks.slice(1).map((v, i) => v - ticks[i]);
   assert.ok(Math.max(...gap) <= 6, "die Ticks stehen zu weit auseinander: " + gap.join(","));
 });
+
+/* Tx-Form gegen die Tx-Zahl ihres Ledgers (2026-10-17). Live-Probe ueber 111 Ledger: 10 822
+ * Tx-Nachrichten, 8 785 eindeutige Hashes, Autoritaet (txn_count) 8 785 - zwei Ledger relayten
+ * jede ihrer Transaktionen doppelt (1 943 + 94 = 2 037 Doppelrelays). Die Form zaehlt seither
+ * eindeutige Hashes; die Abweichung gegen die Autoritaet ist eine eigene Zahl. Ohne sie liest
+ * ein Betreiber 414 als zweimal 207 und keine Engine meldet es. */
+test('Tx-Form: Dedupe, Doppelrelay-Zahl und Autoritaets-Abgleich haengen aneinander', () => {
+  const forensics = read('../lib/tx-forensics.mjs');
+  const retrace = read('../lib/validator-retrace.mjs');
+  const monitor = read('../monitor/validator-trace.mjs');
+  const i18n = read('i18n-validator.mjs');
+  for (const k of ['seen: new Set()', 'shape.dup += 1', 'shape.noHash += 1', 'dup: shape.dup ?? 0', 'noHash: shape.noHash ?? 0'])
+    assert.ok(forensics.includes(k), 'die Form-Lib fuehrt ' + k + ' nicht');
+  for (const k of ['shapeAuthority', 'SHAPE_AUTHORITY_STATES', 'tx-shape-deviation'])
+    assert.ok(retrace.includes(k), 'die Retrace-Lib fuehrt ' + k + ' nicht');
+  for (const k of ['staleSocketMsgs', 'shapeDropped', 'DoppelRelays='])
+    assert.ok(monitor.includes(k), 'der Rekorder fuehrt ' + k + ' nicht');
+  assert.ok(src.includes('r.shapeAuthority'), 'der Retrace-Karton liest die Form-Autoritaet nicht');
+  assert.match(src, /h\.t\("vt\.shape\." \+ sa\.state\)/, 'der Form-Zustand hat keine Beschriftung');
+  for (const k of ['vt.metric.shape', 'vt.mShapeDropped', 'vt.mShapeDeviation', 'vt.datagap.tx-shape-deviation'])
+    assert.equal(i18n.split("'" + k + "'").length - 1, 2, k + ' fehlt in einer Sprache');
+  for (const s of ["match", "over", "legacy-over", "under", "legacy-under", "no-authority", "unknown"])
+    assert.equal(i18n.split("'vt.shape." + s + "'").length - 1, 2, 'vt.shape.' + s + ' fehlt in einer Sprache');
+});

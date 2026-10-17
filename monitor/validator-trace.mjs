@@ -134,7 +134,9 @@ function emptyDay(date) {
     // Abdeckung der Transaktions-Forensik: wie viele Ledger wirklich eine Tx-Form haben und wie
     // viele erwartet, aber nicht erfasst wurden. Ohne diese Zähler wäre "keine Signatur" nicht
     // von "keine Beobachtung" zu trennen.
-    shapeSeen: 0, shapeMissing: 0,
+    // shapeDropped bleibt fehlend, wenn nie ein Doppel-Relay verworfen wurde: die Leseschicht
+    // unterscheidet "kein Doppel-Relay" von "diese Datei fuehrt die Zaehler nicht" (Altbestand).
+    shapeSeen: 0, shapeMissing: 0, shapeDropped: 0,
     // Netz-Anker des Endpunkts, an dem dieser Rekorder haengt (server_info -> validations.quorum).
     // Ohne diesen Wert ist 'Stimmen / needed' eine eigene Zielgroesse und darf nie als Netz-Quorum
     // gelesen werden. Fehlend bleibt fehlend: null heisst 'nicht erfasst', nicht 'kein Quorum'.
@@ -181,6 +183,10 @@ function recordResult(r, detailNote) {
   const shapeSeenNow = Boolean(shapeRes?.form);
   if (TX_SHAPE && shapeSeenNow) d.shapeSeen += 1;
   else if (TX_SHAPE && r.txCount > 0) d.shapeMissing += 1;
+  // shapeDropped: die Doppel-Relays, die dieser Tag verworfen hat. Ohne diese Zahl bliebe ein
+  // verworfener Duplikat-Strom unsichtbar, und "die Form ist gegen die Autoritaet gerechnet"
+  // eine Aussage ohne Beleg.
+  if (TX_SHAPE && shapeRes?.form?.dup) d.shapeDropped = (d.shapeDropped ?? 0) + shapeRes.form.dup;
   d.ledgers += 1;
   // Der Lauf-Zaehler in der Protokollzeile ist dieselbe Aussage wie d.ledgers: gezaehlt
   // wird der aufgezeichnete Ledger, nicht der Close-Rahmen. Ein Rahmen, dessen Gnaden-
@@ -323,7 +329,7 @@ function recordResult(r, detailNote) {
       // genau dann, wenn pg !== l - 1. Ohne pg waere 'cg' ein Etikett ohne Zahl, und die
       // Leseschicht (ledgerClosure) koennte die Luecke nicht gegen die Index-Folge pruefen.
       pg: Number.isFinite(f.previousLedger) ? f.previousLedger : null,
-// so: dieser Ledger wurde als erster nach einem Abo ausgewertet - die Stimmen vor dem
+      // so: dieser Ledger wurde als erster nach einem Abo ausgewertet - die Stimmen vor dem
       // Abo fehlen in dieser Zeile, und die Zeile sagt es.
       so: f.streamOpenCapture === true,
       ov: Number.isFinite(f.observedValidations) ? f.observedValidations : null,
@@ -347,7 +353,9 @@ function recordResult(r, detailNote) {
       c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
       // Tx-Form und die Belege der Signaturen, die in diesem Ledger feuerten. Die Konto-Adresse
       // selbst wird nicht gespeichert: die Signatur ist eine Form-Aussage, kein Konto-Report.
-      sh: shapeRes?.form ? (({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }) => ({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs }))(shapeRes.form) : null,
+      // dup/nh: verworfene Doppel-Relays und Tx ohne Hash dieser Form. Zusammen mit 'tx' (der
+      // Autoritaet des Ledgers) ist damit jede Abweichung der Form nachrechenbar statt deutbar.
+      sh: shapeRes?.form ? (({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs, dup, noHash }) => ({ n, s, d: dst, fo, fd, fa, fl, ac, oc, nf, bt, bi, fx, fm, fs, dup, nh: noHash }))(shapeRes.form) : null,
       sev: shapeRes ? Object.fromEntries(classifyShape(shapeRes.form, shapeRes.base).map((x) => [x.tag, x.evidence])) : {},
       sweep: shapeRes?.sweep ?? null,
       // Vote-Latenz des Netzes in diesem Ledger: erster und letzter Vote nach dem Close.
@@ -734,7 +742,13 @@ function connect(urlIdx = 0, backoff = 1000) {
     ws.send(JSON.stringify({ id: 1, command: "subscribe", streams }));
     sampleNetworkQuorum();
   };
-  ws.onmessage = onMessage;
+  // Nur die Verbindung, die noch die aktuelle ist, darf in die Zaehler sprechen. Eine ersetzte
+  // Verbindung behaelt ihren Haenger: ohne diese Grenze zaehlt sie ihre nachlaufenden Nachrichten
+  // ein zweites Mal mit, und derselbe Ledger steht mit doppelter Tx-Zahl in der Datei.
+  ws.onmessage = (ev) => {
+    if (mySeq !== connSeq) { stats.staleSocketMsgs = (stats.staleSocketMsgs ?? 0) + 1; return; }
+    onMessage(ev);
+  };
   ws.onclose = () => {
     // Eine ersetzte Verbindung (Notruf nach Stillstand) darf keinen zweiten Mithoerer starten.
     if (mySeq !== connSeq) return;
@@ -853,7 +867,7 @@ async function main() {
   const ledgerTimer = setInterval(() => { watchLedger(); }, STALL_CHECK_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} OhneHash=${stats.ledgerNoHash} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} ausserRing=${s.lateVotesOutsideRing} Netz-Quorum=${quorumSampleState()}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} OhneHash=${stats.ledgerNoHash} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} ausserRing=${s.lateVotesOutsideRing} DoppelRelays=${shapeTracker.stats().dropped ?? 0} Altverbindungs-Nachrichten=${stats.staleSocketMsgs ?? 0} TxNachrichten=${stats.txShape} Netz-Quorum=${quorumSampleState()}`);
   }, STAT_MS);
   let stopping = false;
   const stop = async () => {
