@@ -1137,14 +1137,14 @@ test('Risikobasis: die Forensik-Deckung wird ausgesprochen, nicht nur gerechnet'
  * Das Ziel selbst war eine Rechnung, die nie als solche benannt war. Seit 2026-10-17 fuehrt jede
  * Zeile ihre Herleitung: gemessen am Endpunkt, gerechnet aus der dUNL-Liste, oder nicht erfasst. */
 test('Quorum-Ziel: jede Zeile nennt die Herleitung ihres Ziels', () => {
-  assert.match(src, /NEEDED_BASES = new Set\(\["measured", "derived", "not-recorded"\]\)/,
+  assert.match(src, /NEEDED_BASES = new Set\(\["measured", "derived", "not-recorded", "day-measured"\]\)/,
     'das Overlay kennt die Herleitungs-Menge der Lib nicht');
   assert.match(src, /r\.neededBasis/, 'die Kritikalitaets-Zelle liest die Herleitung nicht');
   assert.match(src, /vt\.cq\.neededBasis\./, 'die Herleitung hat keine Beschriftung');
   assert.match(src, /own \+ neededNote \+ evt/, 'die Herleitung haengt nicht an der Zeile');
   const i18n = read('i18n-validator.mjs');
-  assert.equal((i18n.match(/vt\.cq\.neededBasis\./g) || []).length, 6,
-    'die Herleitung muss in beiden Sprachen fuer alle drei Zustaende da sein');
+  assert.equal((i18n.match(/vt\.cq\.neededBasis\./g) || []).length, 8,
+    'die Herleitung muss in beiden Sprachen fuer alle vier Zustaende da sein');
 });
 /* Warm-Lauf und Ziel-Nachrechnung (2026-10-17): die Kritikalitaets-Zelle muss beide Belege
  * zeigen - die Erfassungs-Basis des Warm-Laufs und die aus der dUNL-Groesse nachrechenbare
@@ -1429,5 +1429,16 @@ test('Kopplungs-Luecken: jede deklarierte Luecke hat ein Etikett in beiden Sprac
   for (const g of COUPLING_GAPS) {
     const key = "'vt.coupling.gap." + g + "'";
     assert.equal(i18n.split(key).length - 1, 2, 'Etikett nicht in beiden Sprachen: ' + g);
+  }
+});
+test('Quorum-Ziel: die Herkunft eines am Tag gemessenen Ziels ist in der Zeile lesbar', () => {
+  assert.match(src, /nb === "day-measured"/, 'die Provenienz haengt nur an einem am Tag gemessenen Ziel');
+  assert.match(src, /vt\.cq\.neededProvenance/, 'Endpunkt, Samplezahl und Zeitpunkt haben keine Beschriftung');
+  assert.match(src, /networkQuorumSource/, 'die Zeile liest den benannten Endpunkt nicht');
+  assert.match(src, /networkQuorumSamples/, 'die Zeile liest die Samplezahl nicht');
+  const i18n = read('i18n-validator.mjs');
+  for (const key of ['vt.cq.neededProvenance', 'vt.cq.neededSamples', 'vt.cq.neededProvenanceAt']) {
+    const quoted = String.fromCharCode(39) + key + String.fromCharCode(39);
+    assert.equal(i18n.split(quoted).length - 1, 2, 'Etikett nicht in beiden Sprachen: ' + key);
   }
 });

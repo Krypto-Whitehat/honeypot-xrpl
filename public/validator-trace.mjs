@@ -36,8 +36,10 @@ const CAPTURE_BASES = new Set(["ledger-index", "stream-gap", "stream-open"]);
 const LOAD_TREND_VERDICTS = new Set(["load-dose-rising", "load-dose-flat", "load-dose-falling", "not-comparable", "insufficient-sample"]);
 // Herleitung des Quorum-Ziels mit denselben Namen wie NEEDED_BASES in lib/validator-trace.mjs.
 // "not-recorded" hat ein Label, weil die Zeile trotzdem ein Ziel zeigt: ohne Beschriftung
-// waere "16 / 28" ein Ziel, dessen Herkunft niemand pruefen kann.
-const NEEDED_BASES = new Set(["measured", "derived", "not-recorded"]);
+// waere "16 / 28" ein Ziel, dessen Herkunft niemand pruefen kann. "day-measured" = die
+// Zeile nennt ihre Herleitung nicht, aber derselbe Tag hat genau dieses Ziel am Endpunkt
+// gemessen - ohne diesen Zustand wuerfe die Overlay-Menge jede solche Zeile auf "nicht erfasst".
+const NEEDED_BASES = new Set(["measured", "derived", "not-recorded", "day-measured"]);
 // Ereignis-Arten mit denselben Namen wie CAPTURE_EVENT_KINDS in lib/validator-trace.mjs und wie
 // sie der Rekorder schreibt. 'near' ist kein Ereignis-Typ, sondern die Beschriftung fuer einen
 // Typ, den dieses Overlay nicht kennt: ohne sie waere ein unbekanntes Ereignis als 'Stream neu
@@ -943,7 +945,22 @@ function attributionBlock(a) {
       // Das Ziel selbst hat eine Herkunft: gemessen am Endpunkt oder aus der dUNL-Groesse
       // gerechnet. Ohne diese Angabe ist "16 / 28" ein Ziel ohne Nachweis.
       const nb = NEEDED_BASES.has(r.neededBasis) ? r.neededBasis : "not-recorded";
-      const neededNote = " \u00b7 " + h.esc(h.t("vt.cq.neededBasis." + nb));
+      // Die Herkunft der Herkunft: ein am Tag gemessenes Ziel nennt Endpunkt, Samplezahl und
+      // Zeitpunkt, damit die Zahl bis zur Messung zurueckverfolgbar bleibt. Fehlende Stuecke
+      // fehlen in der Zeile - sie werden nicht mit einem Strich gefuellt.
+      const nqText = nb === "day-measured" && r.capture && typeof r.capture.networkQuorumSource === "string"
+        && r.capture.networkQuorumSource
+        ? " " + h.t("vt.cq.neededProvenance", {
+          endpoint: r.capture.networkQuorumSource,
+          samples: Number.isFinite(r.capture.networkQuorumSamples)
+            ? h.t("vt.cq.neededSamples", { n: num(r.capture.networkQuorumSamples) }) : "",
+          at: Number.isFinite(r.capture.networkQuorumAtMs)
+            ? h.t("vt.cq.neededProvenanceAt", {
+              at: new Date(r.capture.networkQuorumAtMs).toISOString().slice(0, 16).replace("T", " ") + " UTC",
+            }) : "",
+        })
+        : "";
+      const neededNote = " \u00b7 " + h.esc(h.t("vt.cq.neededBasis." + nb) + nqText);
       // Die Nachrechnung des Ziels, wo die Zeile ihre dUNL-Groesse selbst traegt: jeder kann
       // ceil(35 * 0,8) = 28 selbst nachrechnen. Ohne diesen Beleg steht nichts - die Lib
       // behauptet keine Herleitung, sie prueft die aufgezeichnete Zahl gegen die eigene Groesse.
