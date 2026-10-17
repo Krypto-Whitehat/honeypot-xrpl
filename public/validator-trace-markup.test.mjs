@@ -1162,3 +1162,31 @@ test('Peer-Block nennt die Beleg-Deckung seiner Abwesenheits-Zahlen', () => {
   assert.doesNotMatch(i18n, /'vt\.peer\.summary': '[^']*node failures/, 'die englische Peer-Zeile spricht weiterhin von Knotenausfaellen');
   assert.doesNotMatch(i18n, /'vt\.peer\.summary': '[^']*Knotenausf/, 'die deutsche Peer-Zeile spricht weiterhin von Knotenausfaellen');
 });
+/* Grundebene (Design-Korrektur 2026-10-17): die Scherflaeche der Bodenplatte gab es je
+ * Saule und nur unter nicht-leeren Intervallen. Im 24-h-Fenster (6 Saulen, 18 leere
+ * Intervalle, Zelle 30,86 px, --dc 6,78 px) standen 6 Sockel mit 6,78 px Deckflaeche neben
+ * 18 Sockeln ohne Deckflaeche: der Sockel wechselte seine Form von Intervall zu Intervall,
+ * und das wird als Kippung der ganzen Grafik gelesen - derselbe schraege Eindruck, den die
+ * Komma-Fuege und die je-Saeulen-Tiefe vorher schon erzeugt hatten. Die Korrektur ist
+ * geometrisch, nicht dekorativ: eine Ebene ueber die ganze Plot-Breite mit derselben Tiefe
+ * --dc und derselben Deckflaechen-Hoehe --dzc wie jedes Prisma, damit alle Kappen auf
+ * derselben Flaechen stehen und nicht auf 24 unterschiedlich geformten Sockeln. */
+test('Grundebene: ein Koerper unter allen 24 Intervallen, keine je-Saeulen-Scherplatte', () => {
+  const css = stripComments(styleCss);
+  const floor = ruleBody('.vt-floor');
+  const top = ruleBody('.vt-floor-top');
+  assert.match(floor, /left:\s*0;\s*right:\s*var\(--dc\)/, '.vt-floor kuerzt nicht um --dc - die Ebene ist breiter als ihre Prismen');
+  assert.match(floor, /height:\s*var\(--base-h\)/, '.vt-floor Hoehe != --base-h');
+  assert.match(top, /bottom:\s*var\(--base-h\)/, '.vt-floor-top sitzt nicht auf der Vorderkante der Ebene');
+  assert.match(top, /height:\s*var\(--dzc\)/, '.vt-floor-top Hoehe != --dzc - die Ebene hat nicht dieselbe Tiefe wie die Prismen');
+  assert.match(top, /transform:\s*skewX\(calc\(var\(--skew\) - 90deg\)\)/, '.vt-floor-top schert nicht aus --skew - Ebene und Kappen haetten verschiedene Projektionen');
+  assert.doesNotMatch(css, /\.vt-base::after/, 'die je-Saeulen-Scherplatte ist zurueck - 24 Sockel mit unterschiedlicher Form');
+  assert.doesNotMatch(css, /\.vt-nonzero[^{}]*::after/, 'eine Scherflaeche haengt wieder an der Zahl der Vorfaelle statt an der Ebene');
+  const prof = ruleBody('.vt-profile');
+  assert.match(prof, /--dc:\s*var\(--d\)/, '--dc ist nicht auf Profilebene definiert - die Ebene kennt ihre Tiefe nicht');
+  assert.match(prof, /--dzc:\s*calc\(var\(--d\) \* var\(--dz-k\)\)/, '--dzc der Ebene ist nicht aus --skew abgeleitet');
+  assert.match(src, /<span class=\"vt-floor\" aria-hidden=\"true\"><\/span><span class=\"vt-floor-top\" aria-hidden=\"true\"><\/span><div class=\"vt-grid\"/,
+    'die Ebene wird nicht vor dem Gitter gerendert - sie laege vor den Saulen');
+  assert.match(css, /@container\s*\(max-width:\s*\d+px\)\s*\{[^@]{0,260}?\.vt-floor-top\s*\{\s*display:\s*none/,
+    'Mobil: die Deckflaeche der Ebene bleibt stehen, obwohl die Scherflaechen fallen');
+});

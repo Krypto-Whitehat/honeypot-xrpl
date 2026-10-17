@@ -3109,7 +3109,7 @@ body[data-a6] {
    Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
    --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
    Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 208px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --dc: var(--d); --dzc: calc(var(--d) * var(--dz-k)); --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 208px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
@@ -3146,28 +3146,19 @@ body[data-a6] {
    die saemtlichen Kappen sind gleich grosse Flecken ueber unterschiedlich hohen Koerpern. Mit ihr
    sitzt jede Saeule auf einem Koerper, und die Luecken zwischen den Saeulen zeigen, wie weit die
    Ebene nach hinten reicht. Die Zustand-Farbe der Ebene ist dieselbe wie die des Streifens. */
-/* Die Deckflaeche der Bodenplatte gibt es nur, wo ein Koerper steht. Eine leere Platte mit
-   Scherflaeche ist 6 px Platte + 6,78 px Scherung = 12,78 px hoch, davon 53 % reine Scherung:
-   24 solcher Platten nebeneinander sind kein Grund, sondern ein durchgehender schraeger Band
-   - das war der "schrage" Eindruck im 24-h-Fenster (23 leere Platten, eine Saeule). Tiefe ist
-   hier eine Datenaussage, keine Oberflaechenbehandlung: sie erscheint, wo ein Vorfall steht.
-   Die Platte selbst bleibt in jeder Saule gleich (Farbe = Intervall-Zustand, Zeitachse durchgehend). */
-/* Nachgerechnet 2026-10-16 im ausgelieferten Overlay (24-h-Fenster, 987 px Content, Zelle
-   30,86 px, --dc 6,78 px, Abstand 7,69 px): die Deckfläche der Platte war so breit wie die ganze
-   Zelle, also reichte ihre Scherung bis 30,86 + 6,78 = 37,65 px - 6,78 px in den 7,69 px breiten
-   Abstand hinein, es blieben 0,91 px frei. An den Pixeln der Ausfall-Ledger waren 258 von 864
-   Pixeln in den Abständen nahe der Null-Linie bemalt (29,9 %): der Abstand wurde ein durchgehendes
-   schraegen Band, und der Prisma-Fuss stand nicht mehr auf seiner eigenen Platte. Die Platte ist
-   jetzt um --dc eingezogen wie der Balken darueber - Fuss und Prisma haben dieselbe Grundflaeche,
-   die Scherflaeche endet genau an der Zellenkante, und der Abstand bleibt Abstand. */
-.vt-col.vt-nonzero .vt-base::after { content: ""; position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
-.vt-col.vt-state-clean .vt-base::after { background: color-mix(in srgb, var(--a6-success) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 55%, transparent); }
-.vt-col.vt-state-solo .vt-base::after { background: color-mix(in srgb, var(--a6-ink) 8%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
-.vt-col.vt-state-cohort .vt-base::after { background: color-mix(in srgb, var(--a6-accent) 14%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-accent) 70%, transparent); }
-.vt-col.vt-state-network .vt-base::after { background: color-mix(in srgb, var(--a6-accent) 28%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-accent) 70%, transparent); }
-.vt-col.vt-state-unknown .vt-base::after { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
-.vt-col.vt-state-none .vt-base::after { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
-.vt-col { --bh: calc(var(--u) * var(--n, 0)); --dc: var(--d); --dzc: calc(var(--dc) * var(--dz-k)); }
+/* Die Grundebene ist EIN Koerper, nicht 24 Platten. Der fruehere Zustand gab je Saule eine
+   eigene Scherflaeche - und nur dort, wo ein Koerper stand. Im 24-h-Fenster (6 Saulen, 18 leere
+   Intervalle) standen 6 Sockel mit 6,78 px Scherung neben 18 Sockeln ohne Scherung: der Fuss
+   wechselte seine Form von Intervall zu Intervall, und das Auge liest das als Kippung der
+   ganzen Grafik - der "schrage" Eindruck, nicht als Volumen. Eine durchgehende Ebene
+   (Vorderband --base-h, Deckflaeche --dzc, ueber die ganze Plot-Breite, dieselbe Tiefe --dc
+   wie jedes Prisma) gibt der Scherung der Kappen erst den Grund, auf dem sie steht: alle 24
+   Intervalle liegen auf derselben Flaeche, die Luecken zeigen, wie weit die Ebene nach hinten
+   reicht, und die Saulen stehen aufrecht darauf. Die Zustand-Farbe bleibt je Intervall am
+   Vorderband; die Deckflaeche ist neutral und wird von den Balken verdeckt, wo ein Koerper
+   steht. */
+.vt-floor { position: absolute; left: 0; right: var(--dc); bottom: 0; height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
+.vt-floor-top { position: absolute; left: 0; right: var(--dc); bottom: var(--base-h); height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line), inset 0 1px 0 color-mix(in srgb, var(--a6-line) 55%, transparent); }.vt-col { --bh: calc(var(--u) * var(--n, 0)); --dc: var(--d); --dzc: calc(var(--dc) * var(--dz-k)); }
 /* Die Invariante "Kappe <= Koerper" wird nicht an der Saeulenhoehe geheilt - ein
    max(--dzc, ...) auf --bh wuerde den Balken ueber seinen Achsenwert heben und eine Skala
    unlesbar machen, die vergleichen soll - sondern ueber die Tiefe: --d ist durch
@@ -3187,7 +3178,7 @@ body[data-a6] {
    Volumen, und eine 11-px-Ziffer passt nicht in eine 6-px-Spalte. Eine schmale Säule ohne
    Scherflächen ist eine lesbare Spalte; eine breite Säule mit ihnen ist ein Prisma. Die
    Typ-Farbe bleibt in Vorderfläche, Bodenplatte, Kohortenstreifen und Legende. */
-@container (max-width: 380px) { .vt-side, .vt-top, .vt-value { display: none; } .vt-col { --dc: 0px; --dzc: 0px; } }
+@container (max-width: 380px) { .vt-side, .vt-top, .vt-value { display: none; } .vt-floor-top { display: none; } .vt-col { --dc: 0px; --dzc: 0px; } }
 /* Wertemarken-Duennung: die Marke sitzt mittig ueber der Zelle (left: 0, right: 0) und ragt bei
    langen Zahlen ueber die Zelle hinaus. Zwei Nachbarmarken beruehren sich, sobald ihre
    Textbreite den Abstand ihrer Zentren uebersteigt, und der ist --col-w + --gap. Mono hat
@@ -3202,8 +3193,8 @@ body[data-a6] {
    Zahl wie die Marke selbst. */
 @container (max-width: 660px) { .vt-col:nth-child(even) .vt-value { display: none; } }
 .vt-bar { position: absolute; left: 0; right: var(--dc); bottom: 0; height: var(--bh); background-image: var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge), 0 1px 3px color-mix(in srgb, var(--a6-ink) 16%, transparent); transition: transform 160ms ease-out; }
-.vt-side { position: absolute; left: 100%; top: 0; width: var(--dc); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(var(--vt-shade), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
-.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(var(--vt-sheen), var(--vt-sheen)); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+.vt-side { position: absolute; left: 100%; top: 0; width: var(--dc); height: 100%; transform-origin: 0 100%; transform: skewY(calc(-1 * var(--skew))); background-image: linear-gradient(color-mix(in srgb, var(--vt-shade) 45%, transparent), var(--vt-shade)), var(--vt-grad); box-shadow: inset 0 0 0 1px var(--vt-edge); }
+.vt-top { position: absolute; left: 0; bottom: 100%; width: 100%; height: var(--dzc); transform-origin: 0 100%; transform: skewX(calc(var(--skew) - 90deg)); background-color: var(--vt-cap, var(--a6-sev-neutral)); background-image: linear-gradient(color-mix(in srgb, var(--vt-sheen) 130%, transparent), color-mix(in srgb, var(--vt-sheen) 55%, transparent)); box-shadow: inset 0 0 0 1px var(--vt-edge), inset 0 1px 0 color-mix(in srgb, var(--a6-graph-canvas) 45%, transparent); }
 /* Wertemarke: die exakte Zahl über dem Prisma. Die Balkenhöhe ist eine Sichtbarkeits-
    Regelung (Untergrenze 2 px, Achsenrunde), die Zahl ist die Messung - deshalb steht sie
    dort, wo sie auch bei einem 2-px-Balken lesbar bleibt. Sie ist für Screenreader doppelt
@@ -3398,6 +3389,13 @@ body[data-a6] {
 .vt-badge.vt-coupl-node-local-under-stress { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
 .vt-badge.vt-coupl-no-coupling-measured { border-color: var(--a6-success); color: var(--a6-success); }
 .vt-badge.vt-coupl-insufficient-sample, .vt-badge.vt-coupl-not-recorded { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+// Die Dosis-Achse urteilt in dieselben vier Abstufungen: ein gemessener Anstieg ist ein
+// Signal, ein gemessener Rueckgang ist eines, ein flacher Verlauf keins, und ein Urteil ohne
+// Nenner ist offen. Offene Urteile sehen hier offen aus.
+.vt-badge.vt-load-load-dose-rising { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-load-load-dose-falling { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-load-load-dose-flat { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-badge.vt-load-not-comparable, .vt-badge.vt-load-insufficient-sample { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
 .vt-code { font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
 .vt-table tr.vt-hot th[scope="row"], .vt-table tr.vt-hot td { background: var(--a6-warn-soft); border-bottom-color: var(--a6-sev-suspect); }
 .vt-table tr.vt-thin th[scope="row"], .vt-table tr.vt-thin td { border-bottom-style: dashed; color: var(--a6-muted); }
@@ -3426,7 +3424,7 @@ body[data-a6] {
    In erzwungenen Kontrastfarben bleiben Prismen- und Streifenflächen erhalten, Text und Achsen
    folgen Systemfarben. */
 @media (forced-colors: active) {
-  .vt-bar, .vt-side, .vt-top, .vt-base, .vt-base::after, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
+  .vt-bar, .vt-side, .vt-top, .vt-base, .vt-floor, .vt-floor-top, .vt-swatch, .vt-heat-cell, .vt-heat-key, .vt-sign-cell, .vt-sign-key, .vt-mark { forced-color-adjust: none; }
   .vt-col:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
   .vt-hyp.vt-st-measured { border-color: CanvasText; }
 }

@@ -563,7 +563,7 @@ function attributionBlock(a) {
     return '<div class="vt-profile" style="--peak:' + peak + ';--dmax:' + depthRatio.toFixed(4) + '">'
       + '<div class="vt-profile-top"><p class="vt-profile-meta">' + h.esc(meta) + "</p>"
       + '<p class="vt-readout" id="vt-readout" aria-live="polite">' + h.esc(h.t("vt.profileHint")) + "</p></div>"
-      + '<div class="vt-plot"><div class="vt-grid" aria-hidden="true">' + grid.join("") + "</div>"
+      + '<div class="vt-plot"><span class="vt-floor" aria-hidden="true"></span><span class="vt-floor-top" aria-hidden="true"></span><div class="vt-grid" aria-hidden="true">' + grid.join("") + "</div>"
       + '<div class="vt-bars">' + cols + "</div></div>"
       + '<div class="vt-axis" aria-hidden="true">' + ticks + "</div>"
       + '<div class="vt-heat" role="img" aria-label="' + h.esc(h.t("vt.heatAria")) + '">' + heat + "</div>"
