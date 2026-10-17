@@ -14,7 +14,9 @@
 //    diesen Ledger-Index melden. Sonst bleibt die Zeile ohne Hash - die Luecke ist ehrlich, ein
 //    unpruefbarer Hash waere eine Behauptung.
 //  - Sie ueberschreibt nie einen selbst gesehenen Hash: eine Zeile ohne chSource ist eigener
-//    Mithoerbeweis und wird nicht angefasst.
+//    Mithoerbeweis und bleibt der Beweis der Zeile. Seit 2026-10-17 wird gerade dieser Hash
+//    zusaetzlich gegen beide Autoritaeten geprueft und als xc/hashAgree festgehalten - vorher
+//    blieb er ungeprueft (2026-10-17: 72 Zeilen mit eigenem Hash, ohne xc, ohne chVerifiedBy).
 //  - Sie schreibt kein 'cg'. Die Erfassungs-Luecke dieses Rekorders ist eine eigene Messung;
 //    ledgerClosure() leitet sie aus gap/gmed ab, wenn sie nicht gemessen wurde. Ein pauschales
 //    'cg: true' aus einer Fremdquelle waere eine Behauptung ueber die eigene Beobachtung.
@@ -32,6 +34,7 @@
 // POST https://xrplcluster.com { method: "ledger" } (rippled, Mainnet).
 import fs from "node:fs";
 import path from "node:path";
+import { crossCheckNote } from "../lib/validator-trace-store.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const argv = process.argv.slice(2);
@@ -72,7 +75,7 @@ const isoMs = (x) => (typeof x === "string" && !Number.isNaN(Date.parse(x)) ? Da
 const files = fs.existsSync(DIR) ? fs.readdirSync(DIR).filter((f) => f.endsWith(".json")).sort() : [];
 if (!files.length) { console.log("keine Tagesdateien in " + DIR); process.exit(1); }
 
-let rows = 0, ownProof = 0, filled = 0, verified = 0, refused = 0;
+let rows = 0, ownChecked = 0, ownClash = 0, filled = 0, verified = 0, refused = 0;
 let mismatchTx = 0, mismatchTime = 0, noSourceTx = 0, timeSourceDiff = 0;
 let claimLedgerTotal = 0, claimRowTotal = 0, claimFilledTotal = 0, claimAlreadyTotal = 0, claimRefusedTotal = 0;
 const problems = [];
@@ -96,8 +99,13 @@ for (const file of files) {
     if (!Number.isInteger(index) || index <= 0) {
       refused += 1; dropUnproven(); problems.push(file + ": Zeile ohne Ledger-Index"); continue;
     }
-    const ownHash = typeof st.ch === "string" && HEX64.test(st.ch);
-    if (ownHash && st.chSource !== "xrpscan") { ownProof += 1; continue; }
+    // Der Hash selbst, nicht nur die Frage, ob einer da ist: die Gegenprobe muss den Wert
+    // sehen, ein Boolean ist kein Hash.
+    const ownHash = typeof st.ch === "string" && HEX64.test(st.ch) ? st.ch : null;
+    // Eigener Mithoerbeweis: die Zeile behaelt ihren Hash, aber er wird gegen beide
+    // Autoritaeten geprueft. Vorher blieb genau diese Zeilenart ungeprueft (2026-10-17:
+    // 72 Zeilen mit eigenem Hash, ohne xc, ohne chVerifiedBy).
+    const ownOnly = ownHash !== null && st.chSource !== "xrpscan";
     const a = await scanLedger(index);
     if (DELAY) await sleep(DELAY);
     if (!a.ok) { refused += 1; dropUnproven(); problems.push(file + " #" + index + ": xrpscan " + a.error); continue; }
@@ -131,13 +139,27 @@ for (const file of files) {
     if (tMatch === false) { mismatchTime += 1; problems.push(file + " #" + index + ": Close-Zeit eigen " + ownClose + " / xrpscan " + tScan); }
     if (txScan === null) noSourceTx += 1;
     if (tSources === false) { timeSourceDiff += 1; problems.push(file + " #" + index + ": Close-Zeit xrpscan " + tScan + " / Netz " + tNet); }
+    if (ownOnly) {
+      const note = crossCheckNote({ ownHash, ha, hb, txMatch, tMatch, tSources, txScan, tScan, tNet });
+      st.xc = note;
+      if (note.hashAgree) {
+        st.chVerifiedBy = "xrplcluster.com";
+        if (st.cl === undefined) st.cl = true;
+        ownChecked += 1; verified += 1;
+      } else {
+        ownClash += 1;
+        problems.push(file + " #" + index + ": eigener Hash " + ownHash + " / xrpscan " + ha + " / Netz " + hb);
+      }
+      touched += 1;
+      continue;
+    }
     st.ch = ha;
     st.chSource = "xrpscan";
     st.chVerifiedBy = "xrplcluster.com";
     st.chAt = st.chAt || new Date().toISOString();
     if (st.cl === undefined) st.cl = true;
     st.xc = { hashAgree: true, tx: txMatch, t: tMatch, sourcesAgree: tSources, txScan, tScan, tNet };
-    if (ownHash) verified += 1; else filled += 1;
+    if (ownHash !== null) verified += 1; else filled += 1;
     touched += 1;
   }
   // CLAIM-GEBUNDENER NACHTRAG. Eine Zeile, die ein fehlendes Quorum behauptet, braucht den
@@ -200,7 +222,7 @@ for (const file of files) {
 }
 
 console.log("");
-console.log("Dateien " + files.length + " | Ledger-Zeilen " + rows + " | eigener Beweis unangetastet " + ownProof);
+console.log("Dateien " + files.length + " | Ledger-Zeilen " + rows + " | eigener Hash gegengeprueft " + ownChecked + " | eigener Hash abweichend " + ownClash);
 console.log("nachgetragen " + filled + " | gegengeprueft " + verified + " | ohne Nachweis geblieben " + refused);
 console.log("Claim-Ledger ohne Stats-Zeile " + claimLedgerTotal + " (betroffene Incident-Zeilen " + claimRowTotal + ") | Schliess-Beweis nachgetragen " + claimFilledTotal + " | bereits belegt " + claimAlreadyTotal + " | ohne Nachweis " + claimRefusedTotal);
 console.log("Abweichung Tx-Zahl " + mismatchTx + " | Abweichung Close-Zeit " + mismatchTime
