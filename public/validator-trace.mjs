@@ -661,6 +661,8 @@ function attributionBlock(a) {
     if (samePeers.length) groups.push(peerGroup("vt.peersLineSame", samePeers));
     if (otherPeers.length) groups.push(peerGroup("vt.peersLineOther", otherPeers));
     if (capturePeers.length) groups.push(peerGroup("vt.peersLineCapture", capturePeers));
+    const openPeers = Array.isArray(a.openMasters) ? a.openMasters : [];
+    if (openPeers.length) groups.push(peerGroup("vt.peersLineOpen", openPeers));
     const peerLine = !peers.length ? "" : groups.length
       ? '<p class="vt-rc-peers">' + groups.join("") + "</p>"
       : '<p class="vt-rc-peers"><small>' + h.esc(h.t("vt.peersLine", { n: peers.length })) + "</small> " + peerChips(peers) + "</p>";
@@ -791,6 +793,8 @@ function attributionBlock(a) {
       + '<span class="vt-atk-n">' + h.esc(h.t("vt.attackAffected", { n: num(s.affectedValidators) })) + "</span>"
       + '<span class="vt-atk-split">' + h.esc(h.t("vt.attackSplit", {
         fault: num(s.faultValidators), capture: num(s.captureOnlyValidators) })) + "</span>"
+      + (Number.isFinite(s.unattributedValidators) && s.unattributedValidators > 0
+        ? '<span class="vt-atk-split-open">' + h.esc(h.t("vt.attackSplitOpen", { n: num(s.unattributedValidators) })) + "</span>" : "")
       + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span>"
       + (Array.isArray(s.masters) && s.masters.length
         ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")

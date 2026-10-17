@@ -39,11 +39,22 @@ import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
 import { COUPLING_VERDICTS } from '../lib/validator-stress-coupling.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
+import { CAPTURE_GAP_BASES_MEASURED } from '../lib/validator-trace.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, rel), 'utf8');
 
 const traceJs = read('validator-trace.mjs');
+
+/* Beleg-Arten der Erfassungs-Luecke: die UI zaehlt sie selbst auf. Diese Aufzaehlung war am
+ * 2026-10-17 bereits gegen die Bibliothek gedriftet (neue Basis in lib, alte Liste im Audit).
+ * Guard: UI-Liste und Bibliothek muessen wortgleich dieselben Beleg-Arten nennen. */
+test('Erfassungs-Basen: UI und Bibliothek nennen dieselben Beleg-Arten', () => {
+  const decl = src.match(/const CAPTURE_BASES = new Set\(\[([^\]]*)\]\)/);
+  assert.ok(decl, 'die UI listet ihre Beleg-Arten nicht mehr explizit');
+  const ui = (decl[1].match(/"([^"]+)"/g) || []).map((x) => x.slice(1, -1));
+  assert.deepEqual(ui, CAPTURE_GAP_BASES_MEASURED, 'UI und Bibliothek beschreiben verschiedene Beleg-Arten');
+});
 const styleCss = read('style.css');
 
 /* Kommentare streifen (Muster design-assets.test.mjs): die Doku nennt die
@@ -1026,7 +1037,11 @@ test('Kohorten-Aufteilung: Sammelblock trennt Knoten-Ausfall und Erfassungs-Luec
   assert.ok(cssRules.has('.vt-atk-split'), 'Aufteilung im Sammelblock ohne eigene Form');
   assert.ok(cssRules.has('.vt-badge.vt-scope-capture-cohort'), 'Scope-Abzeichen ohne Regel');
   const i18n = read('i18n-validator.mjs');
-  assert.equal((i18n.match(/vt\.attackSplit/g) || []).length, 2, 'die Aufteilung fehlt in einer Sprache');
+  assert.equal((i18n.match(/'vt\.attackSplit'/g) || []).length, 2, 'die Aufteilung fehlt in einer Sprache');
+  assert.equal((i18n.match(/'vt\.attackSplitOpen'/g) || []).length, 2, 'die offene Zuordnung fehlt in einer Sprache');
+  assert.match(src, /s\.unattributedValidators/, 'Sammelblock liest die Zahl der offenen Zuordnungen nicht');
+  assert.match(src, /vt\.peersLineOpen/, 'Retrace ohne Gruppe der Knoten mit offener Zuordnung');
+  assert.ok(cssRules.has('.vt-atk-split-open'), 'offene Zuordnung im Sammelblock ohne eigene Form');
   assert.equal((i18n.match(/vt\.peersLineCapture/g) || []).length, 2, 'die Unerfassten-Gruppe fehlt in einer Sprache');
   assert.equal((i18n.match(/vt\.scope\.capture-cohort/g) || []).length, 2, 'der neue Scope hat kein Label in beiden Sprachen');
   assert.doesNotMatch(i18n, /'vt\.attackAffected': '\{n\} (validators|Validatoren)'/, 'die Sammelzahl spricht weiterhin pauschal von betroffenen Validatoren');

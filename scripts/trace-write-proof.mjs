@@ -74,7 +74,7 @@ function emit(ws, scenario) {
 wss.on("connection", (ws) => {
   ws.on("message", (raw) => {
     let m; try { m = JSON.parse(raw); } catch { return; }
-    if (m.command === "subscribe") { ws.send(JSON.stringify({ id: m.id, result: { status: "success" }, engine_result: "tesSUCCESS" })); if (scenario) setTimeout(() => emit(ws, scenario), 300); return; }
+    if (m.command === "subscribe") { ws.send(JSON.stringify({ id: m.id, result: { status: "success" }, engine_result: "tesSUCCESS" })); if (scenario) { setTimeout(() => emit(ws, scenario), 300); for (const lv of scenario.lateVotes ?? []) setTimeout(() => ws.send(JSON.stringify({ type: "validationReceived", validation_public_key: lv.key, ledger_index: lv.index, ledger_hash: lv.hash, full: true, signing_time: rippleSec(lv.atMs), signature: "A".repeat(112) })), lv.sendAfterMs); } return; }
     if (m.command === "server_info") {
       ws.send(JSON.stringify({ id: m.id, result: { info: { server_state: "full", build_version: "fixture-1.0",
         complete_ledgers: "32570-107699000", validation_quorum: quorumReport, validated_ledger: { seq: 107699000 } } }, engine_result: "tesSUCCESS" }));
@@ -192,6 +192,12 @@ const idx4 = idx0 + 6, close4 = close3 + 5000;
 scenario.ledgers.push({ index: idx4, hash: hex64(idx4), closeMs: close4, txCount: 5 });
 for (const s of signable.slice(1, 29)) scenario.votes.push({ index: idx4, key: s.key, hash: hex64(idx4), atMs: close4 + 1000 });
 
+// Spaeter Vote: der auf L4 fehlende Knoten signiert doch, nur nach der Bewertung dieses
+// Ledgers. Die Datei darf danach nicht mehr 'kein Vote' an diesem Vorfall stehen lassen -
+// sie muss denselben Vorfall als verspaeteten Vote zeigen. Der Vote kommt 8 s nach der
+// Bewertung an, also vor dem Flush am Ende des Laufs.
+scenario.lateVotes = [{ index: idx4, key: missing.key, hash: hex64(idx4), atMs: close4 + 20000, sendAfterMs: 8000 }];
+
 const dirA = path.join(ROOT, "logs", "trace-proof-A");
 const outA = await runMonitor(dirA, 30);
 const dayA = readDay(dirA);
@@ -250,6 +256,12 @@ check("L4: kein einziger fehlender Vote wird dem Knoten zugeschrieben",
 check("ms/cb/gm stehen in jeder Forensik-Zeile (keine Zuordnung ohne Zahl)",
   rows.every((r) => Number.isFinite(r.ms) && Number.isFinite(r.cb) && Number.isFinite(r.gm)),
   rows.map((r) => `#${r.l} ms=${r.ms} cb=${r.cb} gm=${r.gm} aa=${r.aa}`).join(" "));
+// Nachtrag-Spur: der spaet eingetroffene Vote muss an demselben Vorfall stehen. Sonst
+// bleibt in der Datei ein Vorfall ohne Vote stehen, obwohl ein Vote angekommen ist.
+check("L4: der spaet eingetroffene Vote wird am Vorfall sichtbar (vote-late + Messwert)",
+  (dayA.incidents ?? []).some((x) => x.l === idx4 && x.m === missing.master
+    && x.type === "vote-not-observed" && (x.r ?? []).includes("vote-late") && Number.isFinite(x.vd)),
+  JSON.stringify((dayA.incidents ?? []).find((x) => x.l === idx4 && x.m === missing.master) ?? null));
 
 // Diagnose-Ebene liest genau diese Datei: dieselben Bytes, die der Rekorder geschrieben hat.
 const diag = quorumCriticality([dayA], missing.master, { range: "all" });

@@ -9,7 +9,9 @@
 //
 // Pruefungen (alle ohne Netz, aus denselben Tagesdateien):
 //  A) DREIWERTIGKEIT  captureGap ist true | false | null, und die Basis passt: null nur mit
-//     'not-recorded', ein Wert nur mit 'ledger-index' oder 'stream-gap'. Aus 'nicht erfasst'
+//     'not-recorded', ein Wert nur mit einer gemessenen Basis ('ledger-index' Indexlauf,
+//     'stream-gap' Luecken-Log des Tages, 'stream-open' erster Ledger nach einem Abo, siehe H).
+//     Aus 'nicht erfasst' darf nirgends 'gemessen keine Luecke' werden.
 //     darf nirgends 'gemessen keine Luecke' werden.
 //  B) EBENEN-DECKUNG  Kritikalitaets-Zeile, Retrace-Karton und Ursachen-Kandidaten
 //     (vote-not-observed, vote-coverage-thin) nennen fuer denselben Ledger denselben
@@ -26,6 +28,10 @@
 //     bleibt in der Referenz, und die Karten des Endpunkts fuehren dieselben vier Zahlen wie die
 //     Zurechnung. Eine Abweichungszahl ohne diese Nachrechnung ist eine Behauptung ueber den
 //     Knoten, die aus einer Erfassungsbeobachtung kommt.
+//  H) WARMLAUF-BELEG  ein 'stream-open'-Wert braucht das Abo-Ereignis in derselben
+//     Tagesdatei: kein Flag ohne Abo-Offnung, kein Flag auf geschlossenem Ledger ohne
+//     cg = true, keine zwei Flags hintereinander, nie mehr Flags als Abo-Ereignisse. Eine
+//     abgeschnittene Ereignisliste heisst 'nicht pruefbar', nicht 'widerspruchsfrei'.
 //
 // Lauf:  node scripts/audit-coherence.mjs                 (30 d, alle Knoten der Aufzeichnung)
 //        node scripts/audit-coherence.mjs --range=7d
@@ -33,7 +39,7 @@
 // Exit 0 = kein Widerspruch. Exit 1 = mindestens ein Widerspruch (Zeile ausgegeben).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CAPTURE_GAP_BASES, TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
+import { CAPTURE_GAP_BASES, CAPTURE_GAP_BASES_MEASURED, TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
 import { loadDays, traceForValidator } from "../lib/validator-trace-query.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -42,7 +48,10 @@ const args = process.argv.slice(2);
 const QUIET = args.includes("--quiet");
 const rangeArg = args.find((a) => a.startsWith("--range="));
 const RANGE = rangeArg ? rangeArg.split("=")[1] : "30d";
-const GAP_BASES_MEASURED = ["ledger-index", "stream-gap"];
+// 'gemessen' ist keine zweite Liste mehr, sondern die der Bibliothek. Zwei Listen an zwei
+// Orten waren die Ursache dieses Befunds: die Bibliothek bekam eine neue Basis, das Audit
+// blieb bei der alten und erkl?rte eine belegte Messung fuer unzulaessig.
+const GAP_BASES_MEASURED = CAPTURE_GAP_BASES_MEASURED;
 const CLOSED_VERDICTS = new Set(["closed-capture-gap", "closed-quorum-observed", "closed-reception-thin", "closed-observation-gap"]);
 
 const days = loadDays(DIR);
@@ -158,6 +167,45 @@ for (const master of masters) {
   }
 }
 
+// H) WARMLAUF-BELEG  'stream-open' ist nur dann eine Messung, wenn dieselbe Tagesdatei die
+// zugehoerige Abo-Offnung ausweist. Ein Flag ohne Abo-Ereignis, zwei Flags direkt
+// hintereinander, oder ein Flag auf einem geschlossenen Ledger, dessen Schliess-Bilanz nicht
+// 'Luecke' sagt, ist eine Behauptung ohne Beleg. Eine abgeschnittene Ereignisliste fuehrt zu
+// 'nicht pruefbar', nicht zu einem erfundenen Befund und nicht zu einem erfundenen Widerspruch.
+let warmFlags = 0;
+let warmBacked = 0;
+let warmUncheckable = 0;
+let prevOpens = [];
+let prevTruncated = false;
+let prevCarry = 0;
+let prevTrust = true;
+let prevFlagged = false;
+for (const d of days) {
+  const rows = Array.isArray(d.ledgerStats) ? d.ledgerStats : [];
+  const opens = (Array.isArray(d.captureEvents) ? d.captureEvents : []).filter((e) => e && e.e === "open");
+  const truncated = d.captureEventsTruncated === true;
+  const flaggedRows = rows.filter((r) => r && r.so === true);
+  for (const row of rows) {
+    if (!row || row.so !== true) { prevFlagged = false; continue; }
+    if (prevFlagged) bad("H", `${d.date} #${row.l}`, "Warmlauf-Luecke direkt nach der vorherigen: der Abo-Status wurde nicht zurueckgesetzt");
+    prevFlagged = true;
+    if (row.cl !== true) continue;
+    warmFlags += 1;
+    const at = `${d.date} #${row.l}`;
+    if (row.cg !== true) bad("H", at, `Warmlauf-Flag auf geschlossenem Ledger, aber die Schliess-Bilanz sagt cg=${String(row.cg)}`);
+    const backing = [...opens, ...prevOpens].find((e) => e.l === null || (Number.isFinite(e.l) && Number.isFinite(row.l) && e.l < row.l));
+    if (backing) warmBacked += 1;
+    else if (truncated || prevTruncated) warmUncheckable += 1;
+    else bad("H", at, "Warmlauf-Luecke ohne Abo-Ereignis in dieser oder der vorangegangenen Tagesdatei");
+  }
+  if (!truncated && prevTrust && flaggedRows.length > opens.length + prevCarry) {
+    bad("H", `${d.date}`, `${flaggedRows.length} Warmlauf-Luecken, aber nur ${opens.length + prevCarry} Abo-Ereignisse (diese und vorangegangene Tagesdatei)`);
+  }
+  prevCarry = Math.max(0, opens.length + prevCarry - flaggedRows.length);
+  prevTrust = !truncated;
+  prevOpens = opens;
+  prevTruncated = truncated;
+}
 const ledgers = seenLedgers.size;
 const gapsMeasured = [...seenLedgers.values()].filter((f) => f.gap === true).length;
 const gapsOpen = [...seenLedgers.values()].filter((f) => f.gap === null).length;
@@ -167,6 +215,7 @@ if (!QUIET) {
   console.log(`  Forensik-Zeilen: ${rowsChecked} | Ursachen-Zeilen: ${causeRowsChecked} | Retrace-Karten: ${retraceRowsChecked} | Zurechnungen: ${attributionChecked}`);
   console.log(`  Eindeutige Ledger: ${ledgers} | Erfassung gemessen Luecke ${gapsMeasured} | gemessen keine Luecke ${gapsRuledOut} | nicht erfasst ${gapsOpen}`);
 }
+if (!QUIET) console.log(`  Warmlauf-Luecken (stream-open): ${warmFlags} | mit Abo-Ereignis belegt ${warmBacked} | nicht pruefbar (Ereignisliste abgeschnitten) ${warmUncheckable}`);
 if (problems.length) {
   console.log(`\nWIDERSPRUECHE (${problems.length}):`);
   for (const p of problems.slice(0, 60)) console.log("  " + p);

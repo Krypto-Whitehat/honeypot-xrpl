@@ -356,10 +356,14 @@ function recordLateVotes(list) {
     v.late = (v.late ?? 0) + 1;
     hv.late = (hv.late ?? 0) + 1;
     // Der Incident bekommt die Latenz und das Reason-Tag, wenn derselbe Knoten in diesem
-    // Ledger als missed gefuehrt ist: aus "verpasst" wird "verpasst, aber der Vote kam
+    // Ledger ohne Vote gefuehrt ist: aus "verpasst" wird "verpasst, aber der Vote kam
     // nach der Bewertung an". Das ist ein anderer Befund - er zeigt einen langsamen Pfad,
-    // keinen ausgefallenen Knoten.
-    const inc = d.incidents.find((i) => i.l === lv.ledgerIndex && i.m === lv.master && i.type === "missed");
+    // keinen ausgefallenen Knoten. Beide Zaehler meanen dasselbe fuer den Zeitpunkt der
+    // Bewertung (kein Vote gesehen); ob der Knoten schuld war, entscheidet die
+    // Zuordnungsgrenze in lib/validator-trace.mjs, nicht die Spaetankunft. Ein Vorfall ohne
+    // diese Nachtrag-Spur behauptet in der Datei weiter "kein Vote", obwohl einer ankam.
+    const inc = d.incidents.find((i) => i.l === lv.ledgerIndex && i.m === lv.master
+      && (i.type === "missed" || i.type === "vote-not-observed"));
     if (inc) {
       if (ms !== null) inc.vd = ms;
       inc.r = [...new Set([...(inc.r ?? []), "vote-late"])];

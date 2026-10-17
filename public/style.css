@@ -3407,7 +3407,7 @@ body[data-a6] {
 .vt-small { display: block; color: var(--a6-muted); font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .vt-atk { display: grid; grid-template-columns: 150px 170px 150px 1fr; gap: 8px; align-items: baseline; }
 .vt-atk-when, .vt-atk-n { color: var(--a6-muted); }
-.vt-atk-split { color: var(--a6-muted); font-family: var(--a6-mono); font-size: 11px; }
+.vt-atk-split, .vt-atk-split-open { color: var(--a6-muted); font-family: var(--a6-mono); font-size: 11px; }
 @media (prefers-reduced-motion: reduce) {
   .vt-col { animation: none; }
   .vt-bar { transition: none; }
