@@ -1,0 +1,1578 @@
+{
+  "note": "Wortwoertliche Bytes aus dem ausgelieferten Bestand (data/validator-trace des Daten-Repos). Es sind die restlichen Zeilen der live nachgewiesenen Kritikalitaets-Tafel von xrp.vet im 30-Tage-Fenster, die trace-2026-10-16-three-ledgers.json und trace-2026-10-16-cohort-ledger.json nicht abdecken. Hash, Tx-Zahl und Close-Zeit jeder Zeile sind am 2026-10-17 gegen api.xrpscan.com/api/v1/ledger/<index> nachgelesen.",
+  "source": "Krypto-Whitehat/honeypot-xrpl-history data/validator-trace, Stand 2026-10-17",
+  "master": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+  "days": [
+    {
+      "date": "2026-10-16",
+      "ledgers": 17174,
+      "quorumFail": 11,
+      "gaps": [
+        {
+          "from": 107683606,
+          "to": 107683606,
+          "t": 1792109740000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107683621,
+          "to": 107683621,
+          "t": 1792109800000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107683830,
+          "to": 107683830,
+          "t": 1792110601000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107683851,
+          "to": 107683851,
+          "t": 1792110681000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107684237,
+          "to": 107684237,
+          "t": 1792112181000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107684536,
+          "to": 107684536,
+          "t": 1792113350000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107684629,
+          "to": 107684629,
+          "t": 1792113711000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107684723,
+          "to": 107684723,
+          "t": 1792114081000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107684974,
+          "to": 107684974,
+          "t": 1792115050000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107685176,
+          "to": 107685176,
+          "t": 1792115831000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107685271,
+          "to": 107685271,
+          "t": 1792116202000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107685445,
+          "to": 107685445,
+          "t": 1792116881000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107690425,
+          "to": 107690425,
+          "t": 1792136161000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107690753,
+          "to": 107690753,
+          "t": 1792137421000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107693803,
+          "to": 107693822,
+          "t": 1792149261000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107693984,
+          "to": 107694000,
+          "t": 1792149950000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107694021,
+          "to": 107694039,
+          "t": 1792150100000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107694471,
+          "to": 107694471,
+          "t": 1792151771000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107695633,
+          "to": 107695633,
+          "t": 1792156271000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107695701,
+          "to": 107695701,
+          "t": 1792156541000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107695740,
+          "to": 107695740,
+          "t": 1792156700000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107695763,
+          "to": 107695763,
+          "t": 1792156790000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107696316,
+          "to": 107696317,
+          "t": 1792158940000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107696756,
+          "to": 107696756,
+          "t": 1792160652000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107697325,
+          "to": 107697325,
+          "t": 1792162880000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107697495,
+          "to": 107697514,
+          "t": 1792163611000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107697556,
+          "to": 107697556,
+          "t": 1792163781000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107697669,
+          "to": 107697669,
+          "t": 1792164231000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107697998,
+          "to": 107697998,
+          "t": 1792165551000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107698023,
+          "to": 107698040,
+          "t": 1792165712000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107698170,
+          "to": 107698170,
+          "t": 1792166231000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107698623,
+          "to": 107698623,
+          "t": 1792168002000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107698883,
+          "to": 107698883,
+          "t": 1792169032000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107698886,
+          "to": 107698886,
+          "t": 1792169042000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107699074,
+          "to": 107699074,
+          "t": 1792169770000,
+          "reason": "stream-gap"
+        }
+      ],
+      "incidents": [
+        {
+          "l": 107695739,
+          "m": "nHB8QMKGt9VB4Vg71VszjBVQnDW3v3QudM4DwFaJfy96bj4Pv9fA",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHBVACxZaNbUjZZkBfj7gRxF3xgG2vbcP4m48KzVwntdTogi5Tfs",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHDB2PAPYqF86j9j3c6w1F1ZqwvQfiWcFShZ9Pokg9q4ohNDSkAz",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHU3AenyRuJ4Yei4YHkh6frZg8y2RwXznkMAomUE1ptV5Spvqsih",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUcNC5ni7XjVYfCMe38Rm3KQaq27jw7wJpcUYdo4miWwpNePRTw",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUFCyRCrUjvtZmKiLeF8ReopzKuUoKeDeXo3wEUBVSaawzcSBpW",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUfxETNHsA9reyYCVYwNztEbifMg6U9YUdcgVvzMwGNpphKSSf6",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUHeq3QdVyLTUENPHAAJ1d5M1SbvY49rajs31mJS8CEfrvTfjn3",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHULqGBkJtWeNFjhTzYeAsHA3qKKS7HoBh8CV3BAGTGMZuepEhWC",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUP4RcLQdPHh3kMtFm9NFGnjEYLGXiQAyyB7qFsjATHMw2YVxHi",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUrUNXCy4DgPPNABX9C6mUctpoq7CwgLKAUxjw6zYtTfiqsj1ew",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUryiyDqEtyWVtFG24AAhaYjMf9FRLietbGzviF3piJsMm9qyDR",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUvcCcmoH1FJMMC6NtF9KKA4LpCWhjsxk2reCQidsp5AHQ7QY9H",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUVPzAmAmQ2QSc4oE1iLfsGi17qN2ado8PhxvgEkou76FLxAz7C",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107695739,
+          "m": "nHUY14bKLLm72ukzo2t6AVnQiu4bCd1jkimwWyJk3txvLeGhvro5",
+          "t": 1792156691000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHU3AenyRuJ4Yei4YHkh6frZg8y2RwXznkMAomUE1ptV5Spvqsih",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHUbgDd63HiuP68VRWazKwZRzS61N37K3NbfQaZLhSQ24LGGmjtn",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHUge3GFusbqmfYAJjxfKgm2j4JXGxrRsfYMcEViHrFSzQDdk5Hq",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHULqGBkJtWeNFjhTzYeAsHA3qKKS7HoBh8CV3BAGTGMZuepEhWC",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107698041,
+          "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+          "t": 1792165712000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ]
+        },
+        {
+          "l": 107699073,
+          "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHBidG3pZK11zQD6kpNDoAhDxH6WLGui6ZxSbUx7LSqLHsgzMPec",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHBVACxZaNbUjZZkBfj7gRxF3xgG2vbcP4m48KzVwntdTogi5Tfs",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHDH7bQJpVfDhVSqdui3Z8GPvKEBQpo6AKHcnXe21zoD4nABA6xj",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHU2k8Po4dgygiQUG8wAADMk9RqkrActeKwsaC9MdtJ9KBvcpVji",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUcNC5ni7XjVYfCMe38Rm3KQaq27jw7wJpcUYdo4miWwpNePRTw",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUfxETNHsA9reyYCVYwNztEbifMg6U9YUdcgVvzMwGNpphKSSf6",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUge3GFusbqmfYAJjxfKgm2j4JXGxrRsfYMcEViHrFSzQDdk5Hq",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUP4RcLQdPHh3kMtFm9NFGnjEYLGXiQAyyB7qFsjATHMw2YVxHi",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUvcCcmoH1FJMMC6NtF9KKA4LpCWhjsxk2reCQidsp5AHQ7QY9H",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUVPzAmAmQ2QSc4oE1iLfsGi17qN2ado8PhxvgEkou76FLxAz7C",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUwGQrfZfieeLFeGRdGnAmGpHBCZq9wvm5c59wTc2JhJMjoXmd8",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699073,
+          "m": "nHUY14bKLLm72ukzo2t6AVnQiu4bCd1jkimwWyJk3txvLeGhvro5",
+          "t": 1792169761000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHDH7bQJpVfDhVSqdui3Z8GPvKEBQpo6AKHcnXe21zoD4nABA6xj",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHDHzXZKtmMHCkTVgdWY4dqdigDrESiseUF8JkzE93DUtfbt6s3W",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHU2k8Po4dgygiQUG8wAADMk9RqkrActeKwsaC9MdtJ9KBvcpVji",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUbgDd63HiuP68VRWazKwZRzS61N37K3NbfQaZLhSQ24LGGmjtn",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUfPizyJyhAJZzeq3duRVrZmsTZfcLn7yLF5s2adzHdcHMb9HmQ",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUfxETNHsA9reyYCVYwNztEbifMg6U9YUdcgVvzMwGNpphKSSf6",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUvcCcmoH1FJMMC6NtF9KKA4LpCWhjsxk2reCQidsp5AHQ7QY9H",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUVPzAmAmQ2QSc4oE1iLfsGi17qN2ado8PhxvgEkou76FLxAz7C",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUwGQrfZfieeLFeGRdGnAmGpHBCZq9wvm5c59wTc2JhJMjoXmd8",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        },
+        {
+          "l": 107699400,
+          "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+          "t": 1792171040000,
+          "type": "no-quorum",
+          "r": [
+            "no-quorum"
+          ],
+          "vd": null,
+          "h": null
+        }
+      ],
+      "ledgerStats": [
+        {
+          "l": 107695739,
+          "t": 1792156691000,
+          "v": 11,
+          "need": 28,
+          "top": 11,
+          "mg": -17,
+          "sp": 0,
+          "gap": 1000,
+          "gmed": 1000,
+          "tx": 42,
+          "med": 105.5,
+          "c": {
+            "missed": 0,
+            "partial": 0,
+            "wrongHash": 0,
+            "noQuorum": 24
+          },
+          "sh": {
+            "n": 84,
+            "s": 29,
+            "d": 6,
+            "fo": 8,
+            "fd": 1,
+            "fa": 4,
+            "fl": 2,
+            "ac": 0,
+            "oc": 48,
+            "nf": 16,
+            "bt": 0,
+            "bi": 0,
+            "fx": 0,
+            "fm": 48,
+            "fs": 12
+          },
+          "sev": {},
+          "sweep": null,
+          "fv": null,
+          "lv": null,
+          "am": [],
+          "unl": false,
+          "ch": "5766218C0581E6BF42CC64079065257FD9BB80D6AF4E8B587EE82C33765F96F3",
+          "chSource": "xrpscan",
+          "chVerifiedBy": "xrplcluster.com",
+          "chAt": "2026-10-16T17:59:09.520Z",
+          "xc": {
+            "hashAgree": true,
+            "tx": true,
+            "t": true,
+            "sourcesAgree": true,
+            "txScan": 42,
+            "tScan": 1792156691000,
+            "tNet": 1792156691000
+          },
+          "cl": true
+        },
+        {
+          "l": 107698041,
+          "t": 1792165712000,
+          "v": 25,
+          "need": 28,
+          "top": 25,
+          "mg": -3,
+          "sp": 0,
+          "gap": 72000,
+          "gmed": 1000,
+          "tx": 73,
+          "med": 71,
+          "c": {
+            "missed": 0,
+            "partial": 0,
+            "wrongHash": 0,
+            "noQuorum": 10
+          },
+          "sh": {
+            "n": 146,
+            "s": 38,
+            "d": 12,
+            "fo": 50,
+            "fd": 1,
+            "fa": 2,
+            "fl": 24,
+            "ac": 0,
+            "oc": 104,
+            "nf": 2,
+            "bt": 0,
+            "bi": 0,
+            "fx": 0,
+            "fm": 5038,
+            "fs": 10
+          },
+          "sev": {},
+          "sweep": null,
+          "fv": null,
+          "lv": null,
+          "am": [],
+          "unl": false,
+          "ch": "7B4A34FAAA07C05EFE80EA37FCBAEF2AE2D4BD3B2EFA432A82042496AFE8B5AA",
+          "chSource": "xrpscan",
+          "chVerifiedBy": "xrplcluster.com",
+          "chAt": "2026-10-16T17:59:48.556Z",
+          "xc": {
+            "hashAgree": true,
+            "tx": true,
+            "t": true,
+            "sourcesAgree": true,
+            "txScan": 73,
+            "tScan": 1792165712000,
+            "tNet": 1792165712000
+          },
+          "cl": true
+        },
+        {
+          "l": 107699073,
+          "t": 1792169761000,
+          "v": 16,
+          "need": 28,
+          "top": 16,
+          "mg": -12,
+          "sp": 0,
+          "gap": 1000,
+          "gmed": 1000,
+          "tx": 69,
+          "med": 73,
+          "c": {
+            "missed": 0,
+            "partial": 0,
+            "wrongHash": 0,
+            "noQuorum": 19
+          },
+          "sh": {
+            "n": 69,
+            "s": 41,
+            "d": 9,
+            "fo": 17,
+            "fd": 1,
+            "fa": 1,
+            "fl": 1,
+            "ac": 0,
+            "oc": 41,
+            "nf": 3,
+            "bt": 8,
+            "bi": 16,
+            "fx": 0,
+            "fm": 10000,
+            "fs": 12
+          },
+          "sev": {},
+          "sweep": null,
+          "fv": 3000,
+          "lv": 3000,
+          "ah": "7D3097E9B011AC120B3BEEBE5C6A837A5AEADA2B0028668537858B13E9F1AB2D",
+          "rh": null,
+          "am": [],
+          "unl": false,
+          "ch": "7D3097E9B011AC120B3BEEBE5C6A837A5AEADA2B0028668537858B13E9F1AB2D",
+          "chSource": "xrpscan",
+          "chVerifiedBy": "xrplcluster.com",
+          "chAt": "2026-10-16T17:59:52.947Z",
+          "xc": {
+            "hashAgree": true,
+            "tx": null,
+            "t": true,
+            "sourcesAgree": true,
+            "txScan": null,
+            "tScan": 1792169761000,
+            "tNet": 1792169761000
+          },
+          "cl": true
+        },
+        {
+          "l": 107699400,
+          "t": 1792171040000,
+          "v": 18,
+          "need": 28,
+          "top": 18,
+          "mg": -10,
+          "sp": 0,
+          "gap": 8000,
+          "gmed": 1000,
+          "tx": 99,
+          "med": 101,
+          "c": {
+            "missed": 0,
+            "partial": 0,
+            "wrongHash": 0,
+            "noQuorum": 17
+          },
+          "sh": {
+            "n": 198,
+            "s": 48,
+            "d": 25,
+            "fo": 40,
+            "fd": 1,
+            "fa": 2,
+            "fl": 8,
+            "ac": 0,
+            "oc": 104,
+            "nf": 4,
+            "bt": 8,
+            "bi": 24,
+            "fx": 0,
+            "fm": 3000,
+            "fs": 11
+          },
+          "sev": {},
+          "sweep": null,
+          "fv": -1000,
+          "lv": 0,
+          "ah": "B14494D749617E35DF56ADFDB6B4840DCA24376235FF81D045FA3C77B5ACB770",
+          "rh": null,
+          "am": [],
+          "unl": false,
+          "ch": "B14494D749617E35DF56ADFDB6B4840DCA24376235FF81D045FA3C77B5ACB770",
+          "chSource": "xrpscan",
+          "chVerifiedBy": "xrplcluster.com",
+          "chAt": "2026-10-16T17:59:54.854Z",
+          "xc": {
+            "hashAgree": true,
+            "tx": true,
+            "t": true,
+            "sourcesAgree": true,
+            "txScan": 99,
+            "tScan": 1792171040000,
+            "tNet": 1792171040000
+          },
+          "cl": true
+        }
+      ],
+      "hourly": {},
+      "validators": {},
+      "anomaly": {},
+      "anomalyFail": {},
+      "shapeSeen": 0,
+      "shapeMissing": 0,
+      "lastLedger": 107704074,
+      "firstMs": 1792156691000,
+      "lastMs": 1792171040000,
+      "networkQuorum": {
+        "quorum": 28,
+        "atMs": 1792185804628,
+        "endpoint": "wss://s1.ripple.com"
+      },
+      "networkQuorumSamples": 3,
+      "quorumRecorded": true
+    },
+    {
+      "date": "2026-10-17",
+      "ledgers": 6181,
+      "quorumFail": 1,
+      "gaps": [
+        {
+          "from": 107711393,
+          "to": 107711393,
+          "t": 1792217472000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107712660,
+          "to": 107712660,
+          "t": 1792222361000,
+          "reason": "stream-gap"
+        },
+        {
+          "from": 107714653,
+          "to": 107714656,
+          "t": 1792230080000,
+          "reason": "stream-gap"
+        }
+      ],
+      "incidents": [
+        {
+          "l": 107709532,
+          "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHBidG3pZK11zQD6kpNDoAhDxH6WLGui6ZxSbUx7LSqLHsgzMPec",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHBVACxZaNbUjZZkBfj7gRxF3xgG2vbcP4m48KzVwntdTogi5Tfs",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHDHzXZKtmMHCkTVgdWY4dqdigDrESiseUF8JkzE93DUtfbt6s3W",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHU2k8Po4dgygiQUG8wAADMk9RqkrActeKwsaC9MdtJ9KBvcpVji",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHU3AenyRuJ4Yei4YHkh6frZg8y2RwXznkMAomUE1ptV5Spvqsih",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUbgDd63HiuP68VRWazKwZRzS61N37K3NbfQaZLhSQ24LGGmjtn",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUfPizyJyhAJZzeq3duRVrZmsTZfcLn7yLF5s2adzHdcHMb9HmQ",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUge3GFusbqmfYAJjxfKgm2j4JXGxrRsfYMcEViHrFSzQDdk5Hq",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUinfdpmtfXsMUnoSoBeZ93mTwDkPkA2gmCiQTyEi1c1Ybx6unE",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUP4RcLQdPHh3kMtFm9NFGnjEYLGXiQAyyB7qFsjATHMw2YVxHi",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUrUNXCy4DgPPNABX9C6mUctpoq7CwgLKAUxjw6zYtTfiqsj1ew",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUryiyDqEtyWVtFG24AAhaYjMf9FRLietbGzviF3piJsMm9qyDR",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUvcCcmoH1FJMMC6NtF9KKA4LpCWhjsxk2reCQidsp5AHQ7QY9H",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUwGQrfZfieeLFeGRdGnAmGpHBCZq9wvm5c59wTc2JhJMjoXmd8",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        },
+        {
+          "l": 107709532,
+          "m": "nHUY14bKLLm72ukzo2t6AVnQiu4bCd1jkimwWyJk3txvLeGhvro5",
+          "t": 1792210322000,
+          "type": "vote-not-observed",
+          "r": [
+            "vote-not-observed"
+          ],
+          "vd": null,
+          "h": null,
+          "aa": false
+        }
+      ],
+      "ledgerStats": [
+        {
+          "l": 107709532,
+          "t": 1792210322000,
+          "v": 10,
+          "need": 28,
+          "top": 10,
+          "mg": -18,
+          "mm": 35,
+          "nb": "measured",
+          "nq": 28,
+          "sp": 0,
+          "gap": null,
+          "gmed": 0,
+          "ch": "DCBC00B5EBB3708C0EE9A126CA2DBAA24138FBEF356C3845D56423EFF73C6903",
+          "cl": true,
+          "cg": true,
+          "pg": null,
+          "so": true,
+          "ov": 38,
+          "ovb": null,
+          "ot": false,
+          "ms": 10,
+          "cb": null,
+          "gm": 7,
+          "aa": false,
+          "tx": 31,
+          "med": 57,
+          "c": {
+            "missed": 0,
+            "partial": 0,
+            "wrongHash": 0,
+            "noQuorum": 25
+          },
+          "sh": {
+            "n": 31,
+            "s": 18,
+            "d": 6,
+            "fo": 10,
+            "fd": 1,
+            "fa": 1,
+            "fl": 4,
+            "ac": 0,
+            "oc": 18,
+            "nf": 3,
+            "bt": 2,
+            "bi": 5,
+            "fx": 0,
+            "fm": 200,
+            "fs": 12
+          },
+          "sev": {},
+          "sweep": null,
+          "fv": 5000,
+          "lv": 5000,
+          "ah": "DCBC00B5EBB3708C0EE9A126CA2DBAA24138FBEF356C3845D56423EFF73C6903",
+          "rh": null,
+          "am": [],
+          "unl": false
+        }
+      ],
+      "hourly": {},
+      "validators": {},
+      "anomaly": {},
+      "anomalyFail": {},
+      "shapeSeen": 0,
+      "shapeMissing": 0,
+      "lastLedger": 107714693,
+      "firstMs": 1792210322000,
+      "lastMs": 1792210322000,
+      "networkQuorum": {
+        "quorum": 28,
+        "atMs": 1792196604388,
+        "endpoint": "wss://s1.ripple.com"
+      },
+      "networkQuorumSamples": 13,
+      "quorumRecorded": true
+    }
+  ]
+}
