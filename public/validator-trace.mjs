@@ -325,6 +325,12 @@ export function createValidatorTrace(h) {
     const ledgers = h.t("vt.watch.ledgers", {
       measured: n(row.ledgers && row.ledgers.measured), unknown: n(row.ledgers && row.ledgers.unknown),
       gaps: n(row.ledgers && row.ledgers.gapLedgers) });
+    // Eine Stunde ohne jede Aufzeichnung hat keine Ledger-Zahl, die man zaehlen koennte. Sie
+    // als fehlende Ledger zu melden waere eine Schaetzung; als Zeit ist sie die gemessene Tatsache.
+    const uncovered = Array.isArray(row.coverage && row.coverage.uncovered)
+      ? row.coverage.uncovered.reduce((s, u) => s + (Number(u.ms) || 0), 0) : 0;
+    const uncoveredText = uncovered > 0
+      ? " - " + h.t("vt.watch.uncovered", { hours: Math.round(uncovered / 360000) / 10 }) : "";
     // Die Kohorte wird benannt, wo die Auskunft einen Namen hergibt; sonst bleibt der
     // Master-Anfang stehen. Ein Knoten ohne Namen ist dann als namenlos lesbar, nicht als
     // fehlender Knoten.
@@ -343,7 +349,7 @@ export function createValidatorTrace(h) {
       + "<p>" + h.esc(h.t("vt.watch.since", { seen: watchStamp(row.seenAtMs), window: watchWindowText(row.windowMs) }))
       + " - " + h.esc(h.t("vt.watch.verdict." + verdict)) + "</p>"
       + "<p>" + h.esc(lines) + "</p>"
-      + "<p><small>" + h.esc(ledgers) + "</small></p>"
+      + "<p><small>" + h.esc(ledgers + uncoveredText) + "</small></p>"
       + (cap && cap.capped ? "<p><small>" + h.esc(h.t("vt.watch.capped", { days: cap.days })) + "</small></p>" : "")
       + (rows ? "<ul class=\"vt-watch-rows\">" + rows + "</ul>" : "")
       + (row.cohortTruncated ? "<p><small>" + h.esc(h.t("vt.watch.truncated")) + "</small></p>" : "")

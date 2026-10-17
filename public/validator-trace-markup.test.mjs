@@ -1608,6 +1608,10 @@ test("Beobachtungsliste: Lib-Urteil, UI-Menge, Endpunkt und Form haengen aneinan
   assert.ok(src.includes("othersNames"), "die UI benennt die Kohorten-Knoten nicht aus der Auskunft");
   assert.ok(src.includes("row.name"), "die UI zeigt den eigenen Knoten nicht mit seinem Namen");
   assert.ok(server.includes("groundPeers: await groundTruthMap()"), "der Endpunkt holt die Namen nicht aus der Netz-Auskunft");
+  // Eine Stunde ohne Aufzeichnung darf nicht als fehlende Ledger-Zahl erscheinen - die Zahl
+  // waere erfunden. Als Zeit ist sie gemessen und muss in der Zeile stehen.
+  assert.ok(src.includes("vt.watch.uncovered"), "die UI nennt die Zeit ohne Aufzeichnung nicht");
+  assert.equal(i18n.split("'vt.watch.uncovered'").length - 1, 2, "vt.watch.uncovered fehlt in einer Sprache");
   assert.ok(server.includes("/api/validator-watch"), "der Endpunkt fehlt");
   assert.ok(server.includes("watchDelta("), "der Endpunkt ruft die Lib nicht");
   assert.ok(server.includes("watchEntriesFromQuery"), "die Abfrage-Form liegt nicht im Endpunkt");
