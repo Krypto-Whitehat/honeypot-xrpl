@@ -1,0 +1,411 @@
+{
+  "note": "Wortwoertliches Exzerpt aus dem ausgelieferten Bestand Krypto-Whitehat/honeypot-xrpl-history, Tagesdatei 2026-10-16.json. Die Forensik-Zeile und die sieben Vorfaelle sind die ausgelieferten Bytes, in derselben Tagesdatei-Form, die die Website liest. Kein nachgebauter Fixture.",
+  "date": "2026-10-16",
+  "ledgerIndex": 107699168,
+  "ledgers": 17174,
+  "quorumFail": 11,
+  "ledgerStats": [
+    {
+      "l": 107699168,
+      "t": 1792170131000,
+      "v": 28,
+      "need": 28,
+      "top": 28,
+      "mg": 0,
+      "sp": 0,
+      "gap": 1000,
+      "gmed": 1000,
+      "tx": 151,
+      "med": 88.5,
+      "c": {
+        "missed": 7,
+        "partial": 0,
+        "wrongHash": 0,
+        "noQuorum": 0
+      },
+      "sh": {
+        "n": 302,
+        "s": 101,
+        "d": 40,
+        "fo": 38,
+        "fd": 3,
+        "fa": 6,
+        "fl": 16,
+        "ac": 0,
+        "oc": 94,
+        "nf": 8,
+        "bt": 44,
+        "bi": 88,
+        "fx": 0,
+        "fm": 5011,
+        "fs": 20
+      },
+      "sev": {
+        "batch-amplify": {
+          "batchTx": 44,
+          "innerTx": 88
+        },
+        "type-burst:Payment": {
+          "count": 76,
+          "baseline": 13.5,
+          "ratio": 5.62962962962963
+        },
+        "type-burst:Batch": {
+          "count": 44,
+          "baseline": 4,
+          "ratio": 11
+        }
+      },
+      "sweep": null,
+      "fv": 2000,
+      "lv": 4000,
+      "ah": "59F271F8EBE3C698FF41021C7EFFC38E64977099DC3C643F2615C8625CBBB10F",
+      "rh": null,
+      "am": [],
+      "unl": false,
+      "ch": "59F271F8EBE3C698FF41021C7EFFC38E64977099DC3C643F2615C8625CBBB10F",
+      "chSource": "xrpscan",
+      "chVerifiedBy": "xrplcluster.com",
+      "chAt": "2026-10-16T17:59:53.625Z",
+      "xc": {
+        "hashAgree": true,
+        "tx": true,
+        "t": true,
+        "sourcesAgree": true,
+        "txScan": 151,
+        "tScan": 1792170131000,
+        "tNet": 1792170131000
+      },
+      "cl": true
+    }
+  ],
+  "incidents": [
+    {
+      "l": 107699168,
+      "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHDH7bQJpVfDhVSqdui3Z8GPvKEBQpo6AKHcnXe21zoD4nABA6xj",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHUcNC5ni7XjVYfCMe38Rm3KQaq27jw7wJpcUYdo4miWwpNePRTw",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHUxjxKPeErbN7pNk9UWA5Ee7ZPMtesSeRGJtmdqkTxe94tqM2YX",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    },
+    {
+      "l": 107699168,
+      "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+      "t": 1792170131000,
+      "type": "missed",
+      "r": [
+        "no-correlated-cause",
+        "batch-amplify",
+        "type-burst:Payment",
+        "type-burst:Batch"
+      ],
+      "n": "detail-unavailable",
+      "vd": null,
+      "h": null
+    }
+  ],
+  "gaps": [
+    {
+      "from": 107683606,
+      "to": 107683606,
+      "t": 1792109740000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107683621,
+      "to": 107683621,
+      "t": 1792109800000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107683830,
+      "to": 107683830,
+      "t": 1792110601000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107683851,
+      "to": 107683851,
+      "t": 1792110681000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107684237,
+      "to": 107684237,
+      "t": 1792112181000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107684536,
+      "to": 107684536,
+      "t": 1792113350000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107684629,
+      "to": 107684629,
+      "t": 1792113711000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107684723,
+      "to": 107684723,
+      "t": 1792114081000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107684974,
+      "to": 107684974,
+      "t": 1792115050000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107685176,
+      "to": 107685176,
+      "t": 1792115831000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107685271,
+      "to": 107685271,
+      "t": 1792116202000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107685445,
+      "to": 107685445,
+      "t": 1792116881000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107690425,
+      "to": 107690425,
+      "t": 1792136161000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107690753,
+      "to": 107690753,
+      "t": 1792137421000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107693803,
+      "to": 107693822,
+      "t": 1792149261000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107693984,
+      "to": 107694000,
+      "t": 1792149950000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107694021,
+      "to": 107694039,
+      "t": 1792150100000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107694471,
+      "to": 107694471,
+      "t": 1792151771000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107695633,
+      "to": 107695633,
+      "t": 1792156271000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107695701,
+      "to": 107695701,
+      "t": 1792156541000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107695740,
+      "to": 107695740,
+      "t": 1792156700000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107695763,
+      "to": 107695763,
+      "t": 1792156790000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107696316,
+      "to": 107696317,
+      "t": 1792158940000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107696756,
+      "to": 107696756,
+      "t": 1792160652000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107697325,
+      "to": 107697325,
+      "t": 1792162880000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107697495,
+      "to": 107697514,
+      "t": 1792163611000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107697556,
+      "to": 107697556,
+      "t": 1792163781000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107697669,
+      "to": 107697669,
+      "t": 1792164231000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107697998,
+      "to": 107697998,
+      "t": 1792165551000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107698023,
+      "to": 107698040,
+      "t": 1792165712000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107698170,
+      "to": 107698170,
+      "t": 1792166231000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107698623,
+      "to": 107698623,
+      "t": 1792168002000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107698883,
+      "to": 107698883,
+      "t": 1792169032000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107698886,
+      "to": 107698886,
+      "t": 1792169042000,
+      "reason": "stream-gap"
+    },
+    {
+      "from": 107699074,
+      "to": 107699074,
+      "t": 1792169770000,
+      "reason": "stream-gap"
+    }
+  ],
+  "networkQuorum": {
+    "quorum": 28,
+    "atMs": 1792185804628,
+    "endpoint": "wss://s1.ripple.com"
+  },
+  "networkQuorumSamples": 3,
+  "validators": {},
+  "hourly": {},
+  "anomaly": {},
+  "anomalyFail": {}
+}
