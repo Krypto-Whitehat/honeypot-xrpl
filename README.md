@@ -365,6 +365,29 @@ Nachgerechnet am 2026-10-16 (dUNL 35, Ziel 28), alle neun Zeilen mit gesehenen S
 können**. Welche Knoten wirklich fehlten, ist aus einem einzelnen Mithörstrom nicht bestimmbar und
 wird nicht geraten.
 
+**Zurechnung der Abwesenheits-Zähler (Akkuratz-Regel, 2026-10-17):** die Zählerkarten eines Knoten
+führen `verfehlt` und `kein Vote erfasst`. Auf einem bewiesen geschlossenen Ledger ist das eine
+Erfassungsbeobachtung; erst die Netz-Referenz macht daraus eine Knotenaussage — und die ist eine
+Fensterzahl, keine Ledger-Liste. `attributeAbsences` in `lib/validator-truth.mjs` übersetzt die
+Gegenprobe deshalb in die vier Zahlen, die in solchen Zählern stehen dürfen: `absenceClaims` (was
+diese Erfassung behauptet), `attributableMax` (wie viel davon überhaupt diesem Knoten zurechenbar
+ist — nie mehr, als die Referenz für denselben Knoten im selben Fenster nennt), `artifactMin` (der
+Rest ist nachweisbar Lücke dieser Erfassung) und `openClaims` (außerhalb des Referenzfensters, weder
+belegt noch entlastet). Die Summe der letzten drei ist genau die erste Zahl. Die Abweichungsrate
+dieses Knoten ist `attributableMax / observed`, also eine Obergrenze und kein Messwert. Ohne
+verwertbare Referenz ist die Zurechnung `open`: Max und Min sind `null`, nicht 0. Nachgerechnet am
+Knoten xrp.vet (24 h, Referenz 0 verfehlt von 20 398): 5 Behauptungen → 0 zurechenbar, mindestens 5
+Lücken dieser Erfassung, Rate höchstens 0,0 %; dieselbe Frage im 30-Tage-Fenster → 50 Behauptungen,
+5 davon innerhalb der Referenz und alle widerlegt, 45 außerhalb und offen. `npm run audit:coherence`
+prüft diese Summeninvariante für jeden Knoten (Prüfung G) und vergleicht sie mit den Karten.
+
+**Forensik-Deckung wird ausgesprochen (2026-10-17):** die Risikolehne rechnet ihre Lifts nur über
+Tage mit Signatur- und Forensik-Ebene. Diese Deckung wurde gerechnet, aber nirgends gezeigt. Jetzt
+steht sie in der Fußzeile des Risikoprofils: `statsLedgers` gegen `allIncidentLedgers`, der Anteil
+und die Zahl der Tage ohne diese Ebene. Am Bestand am 17.10.: 450 von 11 815 Abweichungs-Ledern
+(3,8 %), 2 von 10 erfassten Tagen — die übrigen 8 Tage stammen aus einer früheren Recorder-Stufe
+und bleiben ohne Profil. Ein Lift auf diesem Bruchteil ist keine Netzregel.
+
 **Dauer-Kontrolle:** `npm run audit:truth` (`scripts/audit-ground-truth.mjs`) prüft jede
 Forensik-Zeile gegen ihre eigenen Rechenregeln (`need == ceil(members × 0.8)`,
 `mg == top − need`, Rekorder-Identität, Hash-Pflicht bei geschlossener Zeile) und jede Zeile mit

@@ -1061,3 +1061,40 @@ test('Gegenprobe: die Zustands-Menge ist deklariert, gleich der Lib, jeder Statu
   assert.deepEqual(states.slice().sort(), [...TRUTH_VERDICTS].sort(), 'UI-Zustande weichen von TRUTH_VERDICTS der Lib ab');
   for (const s of [...states, 'none']) assert.ok(cssRules.has('.vt-truth-' + s), 'Status ohne Form: vt-truth-' + s);
 });
+
+/* Zurechnung (2026-10-17): die Zaehlerkarten fuehren 'kein Vote erfasst'. Auf einem bewiesen
+ * geschlossenen Ledger ist das erst dann eine Abweichung dieses Knoten, wenn die Netz-Referenz
+ * dieselbe Abwesenheit fuer denselben Knoten im selben Fenster nennt. Die Ebene muss in der Lib
+ * stehen, in der Antwort gefuehrt werden und in der Oberflaeche eine Form je Status haben -
+ * sonst bleibt die Karte eine Zahl, die niemand einordnen kann. */
+test('Zurechnung: Lib-Ebene, Antwortfeld und Oberflaeche haengen aneinander', () => {
+  const lib = read('../lib/validator-truth.mjs');
+  const query = read('../lib/validator-trace-query.mjs');
+  const i18n = read('i18n-validator.mjs');
+  assert.ok(lib.includes('export const ATTRIBUTION_STATES'), 'ATTRIBUTION_STATES fehlt in der Lib');
+  assert.ok(lib.includes('export function attributeAbsences'), 'attributeAbsences fehlt in der Lib');
+  assert.ok(query.includes('attributeAbsences'), 'die Leseschicht ruft die Zurechnung nicht');
+  assert.ok(query.includes('attribution,'), 'die Antwort fuehrt kein attribution-Feld');
+  for (const k of ['absenceClaims', 'absenceAttributableMax', 'absenceArtifactMin', 'absenceOpen'])
+    assert.ok(query.includes(k), 'die Zaehlerkarte fuehrt ' + k + ' nicht');
+  assert.ok(src.includes('function attributionBlock('), 'attributionBlock fehlt in der Oberflaeche');
+  assert.ok(src.includes('attributionBlock(d.attribution)'), 'die Zurechnung der Antwort wird nicht gerendert');
+  assert.ok(src.includes('+ attributionLine +'), 'die Zurechnungszeile haengt nicht an den Karten');
+  for (const s of ['bounded', 'open']) assert.ok(lib.includes('"' + s + '"'), 'Zurechnungs-Status fehlt: ' + s);
+  for (const s of ['contradicted', 'covered', 'open']) assert.ok(cssRules.has('.vt-attr-' + s), 'Status ohne Form: vt-attr-' + s);
+  for (const k of ['vt.attr.title', 'vt.attr.bounded', 'vt.attr.open', 'vt.attr.partial', 'vt.attr.unusable'])
+    assert.equal(i18n.split("'" + k + "'").length - 1, 2, k + ' fehlt in einer Sprache');
+});
+
+/* Forensik-Deckung (2026-10-17): die Risikolehne rechnet statsLedgers gegen allIncidentLedgers
+ * und zaehlt daysWithoutForensics - aber keine Zeile der Oberflaeche nannte es. Ein Lift, der auf
+ * einem Bruchteil der Ausfall-Ledger steht, ist ohne diesen Nenner eine Zahl, die zu hoch gelesen
+ * wird. Fehlende Forensik ist eine Luecke, kein Befund ohne Abweichung. */
+test('Risikobasis: die Forensik-Deckung wird ausgesprochen, nicht nur gerechnet', () => {
+  const retrace = read('../lib/validator-retrace.mjs');
+  const i18n = read('i18n-validator.mjs');
+  for (const k of ['allIncidentLedgers', 'forensicsShare', 'daysWithoutForensics', 'daysWithStats', 'statsLedgers'])
+    assert.ok(retrace.includes(k), 'die Lib fuehrt ' + k + ' nicht');
+  assert.ok(src.includes('vt.riskForensics'), 'die Oberflaeche nennt die Forensik-Deckung nicht');
+  assert.equal(i18n.split("'vt.riskForensics'").length - 1, 2, 'vt.riskForensics fehlt in einer Sprache');
+});

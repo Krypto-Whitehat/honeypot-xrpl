@@ -22,6 +22,10 @@
 //     closed Ledger nur mit einem closed-* verdict; cause-check-network-stall nur mit Beleg
 //     (verneinte Schliessung oder gemessen durchgehende Index-Folge an einem Close-Abstand).
 //  F) BETROFFENHEIT  affectedCount == affectedMasters.length + 1 (der eigene Knoten zaehlt mit).
+//  G) ZURECHNUNG  attributableMax + artifactMin + openClaims == absenceClaims, die Obergrenze
+//     bleibt in der Referenz, und die Karten des Endpunkts fuehren dieselben vier Zahlen wie die
+//     Zurechnung. Eine Abweichungszahl ohne diese Nachrechnung ist eine Behauptung ueber den
+//     Knoten, die aus einer Erfassungsbeobachtung kommt.
 //
 // Lauf:  node scripts/audit-coherence.mjs                 (30 d, alle Knoten der Aufzeichnung)
 //        node scripts/audit-coherence.mjs --range=7d
@@ -49,6 +53,7 @@ const seenLedgers = new Map();
 let rowsChecked = 0;
 let causeRowsChecked = 0;
 let retraceRowsChecked = 0;
+let attributionChecked = 0;
 
 for (const master of masters) {
   const out = traceForValidator(days, master, { range: RANGE });
@@ -130,6 +135,27 @@ for (const master of masters) {
       }
     }
   }
+  // G) Zurechnung der Abwesenheits-Zaehler dieses Knoten
+  const a = out.attribution;
+  const at = `attribution ${master.slice(0, 10)}`;
+  attributionChecked += 1;
+  if (!a || !Number.isFinite(a.absenceClaims)) {
+    bad("G", at, "keine Zurechnung fuer die Abwesenheits-Zaehler");
+  } else {
+    const parts = (a.attributableMax ?? 0) + (a.artifactMin ?? 0) + (a.openClaims ?? 0);
+    if (parts !== a.absenceClaims) bad("G", at, `${a.attributableMax} + ${a.artifactMin} + ${a.openClaims} = ${parts} != Behauptungen ${a.absenceClaims}`);
+    if (a.state === "bounded") {
+      if (!(a.attributableMax <= a.groundMissed)) bad("G", at, `Obergrenze ${a.attributableMax} uebersteigt die Referenz ${a.groundMissed}`);
+      if (a.artifactMin !== a.claimsInside - a.attributableMax) bad("G", at, `artifactMin ${a.artifactMin} != claimsInside ${a.claimsInside} - attributableMax ${a.attributableMax}`);
+    } else if (a.attributableMax !== null || a.artifactMin !== null) {
+      bad("G", at, "offene Zurechnung fuehrt Zahlen, die eine Gegenprobe behaupten");
+    }
+    const w = out.inWindow;
+    if (w && (w.absenceClaims !== a.absenceClaims || w.absenceAttributableMax !== a.attributableMax
+      || w.absenceArtifactMin !== a.artifactMin || w.absenceOpen !== a.openClaims)) {
+      bad("G", at, "die Zaehlerkarten und die Zurechnung nennen verschiedene Zahlen");
+    }
+  }
 }
 
 const ledgers = seenLedgers.size;
@@ -138,7 +164,7 @@ const gapsOpen = [...seenLedgers.values()].filter((f) => f.gap === null).length;
 const gapsRuledOut = [...seenLedgers.values()].filter((f) => f.gap === false).length;
 if (!QUIET) {
   console.log(`KOHAEENZ (range=${RANGE}, ${days.length} Tage, ${masters.length} Knoten)`);
-  console.log(`  Forensik-Zeilen: ${rowsChecked} | Ursachen-Zeilen: ${causeRowsChecked} | Retrace-Karten: ${retraceRowsChecked}`);
+  console.log(`  Forensik-Zeilen: ${rowsChecked} | Ursachen-Zeilen: ${causeRowsChecked} | Retrace-Karten: ${retraceRowsChecked} | Zurechnungen: ${attributionChecked}`);
   console.log(`  Eindeutige Ledger: ${ledgers} | Erfassung gemessen Luecke ${gapsMeasured} | gemessen keine Luecke ${gapsRuledOut} | nicht erfasst ${gapsOpen}`);
 }
 if (problems.length) {

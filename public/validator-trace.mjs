@@ -324,6 +324,25 @@ function truthBlock(t) {
     + h.esc(body) + outside + cover + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
 }
 
+// Die Zurechnung der Abwesenheits-Zaehler. Sie steht direkt unter den Karten, weil die Karten
+// sonst als Knoten-Urteil gelesen werden, obwohl sie eine Erfassungsbeobachtung sind: auf
+// bewiesen geschlossenen Ledern ist 'kein Vote erfasst' erst dann eine Abweichung dieses Knoten,
+// wenn die Netz-Referenz dieselbe Abwesenheit fuer denselben Knoten im selben Fenster nennt.
+function attributionBlock(a) {
+  if (!a || !Number.isFinite(a.absenceClaims)) return "";
+  const n = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "–");
+  const rate = (v) => (Number.isFinite(v) ? (Math.round(v * 1000) / 10).toFixed(1) : "–");
+  const state = a.state === "bounded" ? (a.artifactMin > 0 ? "contradicted" : "covered") : "open";
+  const body = a.state === "bounded"
+    ? h.t("vt.attr.bounded", { claims: n(a.absenceClaims), attributable: n(a.attributableMax), artifact: n(a.artifactMin), open: n(a.openClaims), ground: n(a.groundMissed), rate: rate(a.rateMax) })
+    : h.t("vt.attr.open", { claims: n(a.absenceClaims) });
+  const cover = a.coverage === "partial"
+    ? " " + h.t("vt.attr.partial", { covered: n(a.coveredHours) + " h", open: n(a.openHours) + " h" })
+    : a.coverage === "unusable" ? " " + h.t("vt.attr.unusable") : "";
+  return '<p class="vt-attr vt-attr-' + state + '"><small>' + h.t("vt.attr.title") + "</small> "
+    + h.esc(body) + h.esc(cover) + "</p>";
+}
+
   function renderValidator(body, d) {
     overlay.querySelector("#vt-title").textContent = current.title;
     // xrpscan-Referenz (Agreement-Scores aus der Liste) + Master-Key, damit klar ist,
@@ -349,6 +368,7 @@ function truthBlock(t) {
       ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.inWindow")) + (w.estimated ? " · " + h.esc(h.t("vt.estimated")) : "")
         + (w.observedDayOnly > 0 ? " · " + h.esc(h.t("vt.inWindowDayOnly", { ledgers: w.observedDayOnly, days: w.daysPartial ?? 0 })) : "") + "</small></p>"
       : '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small></p>";
+    const attributionLine = attributionBlock(d.attribution);
     const cards = [["ok", src.ok], ["partial", src.partial], ["missed", src.missed], ["no-quorum", src.noQuorum ?? 0], ["wrong-hash", src.wrongHash], ["observed", src.observed]]
       .map(([k, v]) => '<div class="vt-card vt-' + k + '"><small>' + h.esc(h.t("vt.k." + k)) + "</small><b>" + h.esc(String(v)) + "</b></div>").join("");
     const totalLine = w
@@ -358,7 +378,7 @@ function truthBlock(t) {
       ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
       : "";
     body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + scopeTag
-      + '<div class="vt-cards">' + cards + "</div>" + totalLine + noData
+      + '<div class="vt-cards">' + cards + "</div>" + attributionLine + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.causeTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.causeNote")) + "</p>"
       + causeBlock(d.cause)
@@ -712,8 +732,16 @@ function truthBlock(t) {
     const rc = risk.coverage || {};
     const basis = Number.isFinite(rc.daysWithAnomaly)
       ? " " + h.t("vt.riskBasis", { with: num(rc.daysWithAnomaly), without: num(rc.daysWithoutAnomaly ?? 0) }) : "";
+    // Die Forensik-Deckung steht in der Lib, aber niemand sah sie: ohne diese Zeile wirkt die
+    // Risikolehne wie ein Befund ueber alle Abweichungen, obwohl ein Teil der Ausfall-Ledger
+    // gar keine Forensik-Zeile hat (Tage vor dieser Recorder-Stufe). Fehlend ist kein Befund.
+    const fc = Number.isFinite(rc.allIncidentLedgers) && rc.allIncidentLedgers > 0
+      ? " " + h.t("vt.riskForensics", { rows: num(rc.statsLedgers), incidents: num(rc.allIncidentLedgers),
+          share: pc(rc.forensicsShare === null ? null : rc.forensicsShare * 100),
+          with: num(rc.daysWithStats), days: num(rc.daysTotal), without: num(rc.daysWithoutForensics) })
+      : "";
     const note = h.t("vt.riskBase", { ledgers: num(risk.totalLedgers), fails: num(risk.incidentLedgers) })
-      + basis + (risk.statsTruncated ? " " + h.t("vt.riskTrunc") : "");
+      + basis + fc + (risk.statsTruncated ? " " + h.t("vt.riskTrunc") : "");
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
       + '<p class="vt-note">' + h.esc(note) + "</p>";
   }
