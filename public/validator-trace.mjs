@@ -44,7 +44,7 @@ const NEEDED_BASES = new Set(["measured", "derived", "not-recorded", "day-measur
 // sie der Rekorder schreibt. 'near' ist kein Ereignis-Typ, sondern die Beschriftung fuer einen
 // Typ, den dieses Overlay nicht kennt: ohne sie waere ein unbekanntes Ereignis als 'Stream neu
 // aufgebaut' dargestellt - eine Aussage, die nicht belegt ist.
-const CAPTURE_EVENT_KINDS = new Set(["open", "close", "stall"]);
+const CAPTURE_EVENT_KINDS = new Set(["open", "close", "stall", "ledger-no-hash"]);
 // Gegenprobe-Zustaende mit denselben Namen wie TRUTH_VERDICTS in lib/validator-truth.mjs:
 // die UI zeigt genau die drei Urteile, die die Lib rechnen kann - kein eigener Zustand, keine
 // eigene Deutung, kein zusaetzlicher Puffer zwischen Messung und Text.
@@ -391,6 +391,15 @@ function attributionBlock(a) {
       ? '<p class="vt-coverage"><small>' + h.esc(h.t("vt.coverageQuorumLabel")) + "</small> "
         + h.esc(h.t("vt.coverageQuorum", { named: c.quorumShortRows ?? 0, rest: c.quorumCounterUnattributed ?? 0 })) + "</p>"
       : "";
+    // Die Spanne zwischen zwei Tagesdateien: hier wurde kein Ledger bewertet. Das ist eine
+    // Aussage ueber die Aufzeichnung, nicht ueber das Netz, und sie darf nicht zu nichts
+    // passiert zusammengefasst werden.
+    const holeNote = Number(c.unobservedRanges) > 0
+      ? '<p class="vt-coverage"><small>' + h.esc(h.t("vt.coverageHoleLabel")) + "</small> "
+        + h.esc(h.t("vt.coverageHole", { ranges: c.unobservedRanges ?? 0, minutes: Math.round((c.unobservedMs ?? 0) / 60000),
+          from: c.unobservedLargest?.fromIso ? c.unobservedLargest.fromIso.slice(5, 16).replace("T", " ") : "–",
+          to: c.unobservedLargest?.toIso ? c.unobservedLargest.toIso.slice(5, 16).replace("T", " ") : "–" })) + "</p>"
+      : "";
     // Fenster-genaue Karten (Stundenzähler), sonst Tages-Gesamtzähler mit Hinweis.
     const w = d.inWindow;
     const src = w || d.summary;
@@ -407,7 +416,7 @@ function attributionBlock(a) {
     const noData = !d.summary.observed && !(d.incidents || []).length
       ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
       : "";
-    body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + quorumNote + scopeTag
+    body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + quorumNote + holeNote + scopeTag
       + '<div class="vt-cards">' + cards + "</div>" + attributionLine + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.causeTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.causeNote")) + "</p>"
@@ -568,7 +577,12 @@ function attributionBlock(a) {
     }).join("");
     const heat = cells.map((cell) => '<span class="vt-heat-cell vt-state-' + stateOf(cell) + '"></span>').join("");
     const signStrip = cells.map((cell) => '<span class="vt-sign-cell vt-sign-' + signStateOf(cell, shapeLayer) + '"></span>').join("");
-    const ticks = AXIS_TICKS.map((i) => '<span style="left:' + (((i + 0.5) / BUCKETS) * 100).toFixed(3) + '%">'
+    // Die Achse muss auf denselben Intervallen stehen wie die Saulen und die Streifen
+    // darunter. Die Saulen haben eine Flex-Teilung (Saulenbreite + Abstand), die Achse war
+    // gleichmaessig ueber die Plot-Breite verteilt. Nachgerechnet im 24-Intervall-Fenster:
+    // der erste Tick 3,7 px rechts von seiner Saule, der letzte 3,7 px links davon - die
+    // Achse driftet uber das Fenster, obwohl Saulen und Streifen exakt deckungsgleich sind.
+    const ticks = AXIS_TICKS.map((i) => '<span style="left:calc((var(--col-w) + var(--gap)) * ' + i + ' + var(--col-w) / 2)">'
       + h.esc(bucketLabel(from, width, i, range)) + "</span>").join("");
     const legendHtml = PROFILE_TYPES.map((k) => '<li><span class="vt-swatch vt-c-' + k + '"></span>'
       + h.esc(h.t("vt.k." + (k === "wrongHash" ? "wrong-hash" : k === "noQuorum" ? "no-quorum" : k))) + " " + h.esc(String(legend[k])) + "</li>").join("");
@@ -682,7 +696,13 @@ function attributionBlock(a) {
     // Unerfasste Knoten ohne jede zurechenbare Abweichung sind eine eigene Gruppe: sie erklaeren
     // die Kohortenzahl dieser Erfassung, ohne als Ausfall in die Vergleichsgruppe zu gehoeren.
     const capturePeers = Array.isArray(a.captureOnlyMasters) ? a.captureOnlyMasters : [];
-    const peerGroup = (labelKey, list) => '<span class="vt-peer-group"><small>' + h.esc(h.t(labelKey, { n: num(list.length) })) + "</small> " + peerChips(list) + "</span>";
+    // Gegenurteil und Name je benanntem Knoten, indexgleich zur jeweiligen Liste. Die Lib
+    // liefert beides aus derselben Netz-Auskunft, die auch die Kohorten-Bilanz traegt.
+    const peerTruth = a.peerTruth || null;
+    const peerNames = a.peerNames || null;
+    const truthOf = (list) => list.map((m) => (peerTruth && peerTruth[m]) || null);
+    const namesOf = (list) => list.map((m) => ({ master: m, name: (peerNames && peerNames[m]) || null }));
+    const peerGroup = (labelKey, list) => '<span class="vt-peer-group"><small>' + h.esc(h.t(labelKey, { n: num(list.length) })) + "</small> " + peerChips(list, truthOf(list), namesOf(list)) + "</span>";
     const groups = [];
     if (samePeers.length) groups.push(peerGroup("vt.peersLineSame", samePeers));
     if (otherPeers.length) groups.push(peerGroup("vt.peersLineOther", otherPeers));
@@ -691,7 +711,26 @@ function attributionBlock(a) {
     if (openPeers.length) groups.push(peerGroup("vt.peersLineOpen", openPeers));
     const peerLine = !peers.length ? "" : groups.length
       ? '<p class="vt-rc-peers">' + groups.join("") + "</p>"
-      : '<p class="vt-rc-peers"><small>' + h.esc(h.t("vt.peersLine", { n: peers.length })) + "</small> " + peerChips(peers) + "</p>";
+      : '<p class="vt-rc-peers"><small>' + h.esc(h.t("vt.peersLine", { n: peers.length })) + "</small> " + peerChips(peers, truthOf(peers), namesOf(peers)) + "</p>";
+    // Gegenprobe der benannten Kohorte je Karton: widerlegt heisst, die Netz-Referenz sagt,
+    // dieser Knoten hat in seinem Fenster nicht gefehlt. Offen heisst, es gibt keine Zahl, die
+    // ihn belastet oder entlastet. Beides ist nicht dasselbe wie betroffen.
+    const truthSeen = new Map();
+    for (const list of [samePeers, otherPeers, capturePeers, openPeers]) {
+      for (const m of list) {
+        if (truthSeen.has(m)) continue;
+        const t = peerTruth && peerTruth[m];
+        truthSeen.set(m, t && TRUTH_STATES.has(t.verdict) ? t.verdict : "not-comparable");
+      }
+    }
+    const truthCount = { contradicted: 0, consistent: 0, "not-comparable": 0 };
+    for (const v of truthSeen.values()) truthCount[v] += 1;
+    const peersTruthLine = truthSeen.size
+      ? '<p class="vt-rc-peerstruth"><small>' + h.esc(h.t("vt.peersTruth", {
+        n: num(truthSeen.size), contradicted: num(truthCount.contradicted),
+        consistent: num(truthCount.consistent), open: num(truthCount["not-comparable"]),
+      })) + "</small></p>"
+      : "";
     const hyps = (r.hypotheses || []).map((hy) => {
       const lift = hy.lift && hy.lift.reliable && Number.isFinite(hy.lift.lift)
         ? h.t("vt.liftVal", { lift: fac(hy.lift.lift), with: pcn(hy.lift.rateWith * 100), without: pcn(hy.lift.rateWithout * 100) })
@@ -707,7 +746,7 @@ function attributionBlock(a) {
       const peerList = Array.isArray(hy.evidence?.sameTypeMasters)
         ? hy.evidence.sameTypeMasters
         : (Array.isArray(hy.evidence?.peerMasters) ? hy.evidence.peerMasters : []);
-      const hypPeers = peerList.length ? '<span class="vt-ev vt-ev-peers">' + peerChips(peerList) + "</span>" : "";
+      const hypPeers = peerList.length ? '<span class="vt-ev vt-ev-peers">' + peerChips(peerList, truthOf(peerList), namesOf(peerList)) + "</span>" : "";
       return '<li class="vt-hyp vt-st-' + h.esc(hy.strength) + '"><b>' + h.esc(label) + "</b>"
         + '<span class="vt-strength">' + h.esc(h.t("vt.strength." + hy.strength)) + "</span>"
         + (ev ? '<span class="vt-ev">' + h.esc(ev) + "</span>" : "")
@@ -723,7 +762,7 @@ function attributionBlock(a) {
       + '<span class="vt-badge vt-type-' + h.esc(r.type) + '">' + h.esc(h.t("vt.type." + r.type)) + "</span>"
       + '<span class="vt-badge vt-scope-' + h.esc(r.scope) + '">' + h.esc(h.t("vt.scope." + r.scope)) + "</span></header>"
       + seriesLine(r.series)
-      + '<ul class="vt-rc-metrics">' + metricHtml + "</ul>" + peerLine
+      + '<ul class="vt-rc-metrics">' + metricHtml + "</ul>" + peerLine + peersTruthLine
       + '<h4 class="vt-h4">' + h.esc(h.t("vt.hypotheses")) + '</h4><ul class="vt-hyps">' + hyps + "</ul>"
       + (next ? '<h4 class="vt-h4">' + h.esc(h.t("vt.nextCheck")) + '</h4><ul class="vt-next">' + next + "</ul>" : "")
       + (gaps ? '<p class="vt-rc-gaps"><small>' + h.esc(h.t("vt.dataGaps")) + "</small> " + h.esc(gaps) + "</p>" : "")

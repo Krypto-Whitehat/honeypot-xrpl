@@ -3304,6 +3304,7 @@ body[data-a6] {
 .vt-rc-peers small { display: block; font-family: var(--a6-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .vt-peer-group { display: block; }
 .vt-peer-group + .vt-peer-group { margin-top: 6px; }
+.vt-rc-peerstruth { margin: 5px 0 0; font-size: 11px; color: var(--a6-muted); }
 .vt-peer { display: inline-block; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 2px 6px; margin: 3px 4px 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-ink); }
 .vt-peer-more { display: inline-block; border: 1px dashed var(--a6-line); border-radius: var(--a6-r-sm); background: none; padding: 2px 6px; margin: 3px 0 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); cursor: pointer; }
 .vt-peer-more:hover, .vt-peer-more:focus-visible { color: var(--a6-ink); border-color: var(--a6-ink); outline: none; }

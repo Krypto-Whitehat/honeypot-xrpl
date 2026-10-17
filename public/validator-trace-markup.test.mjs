@@ -859,7 +859,7 @@ test('Empfindlichkeits-Ebene: Block, jede Urteil-Farbe und jede Messluecke ist v
  * Guard ist die Verdrahtung der dUNL-Namen in Retrace-Zeile und Sammelblock. */
 test('Kohorten-Namen: Retrace und Sammelblock nennen die betroffenen dUNL-Knoten', () => {
   assert.match(src, /const peerChips = \(/, 'peerChips fehlt - Peer-Namen haben keinen gemeinsamen Aufbau');
-  assert.match(src, /peerChips\(peers\)/, 'Retrace-Zeile zeigt die Peers nicht');
+  assert.match(src, /peerChips\(peers, truthOf\(peers\), namesOf\(peers\)\)/, 'Retrace-Zeile zeigt die Peers nicht oder ohne Gegenurteil');
   assert.match(src, /peerChips\(s\.masters\)/, 'Sammelblock zeigt die Peers nicht');
   assert.match(src, /vt\.peersLine/, 'Retrace-Zeile ohne Aussage, wie viele Knoten mitfielen');
   assert.match(src, /vt\.attackPeers/, 'Sammelblock ohne Aussage ueber die betroffenen Knoten');
@@ -896,7 +896,12 @@ test('Kohorte nach Vorfallstyp: gleichfallende Knoten stehen getrennt von andere
   assert.ok(cssRules.has('.vt-peer-group'), 'Peer-Gruppe ohne Regel');
   assert.match(src, /vt\.evCohortAll/, 'Kohorte ohne Aussage, dass alle denselben Typ hatten');
   assert.match(src, /vt\.evCohortSame/, 'Kohorte ohne Zahl der gleichen Vorfallstypen');
-  assert.match(src, /peerChips\(peerList\)/, 'Hypothese nennt die gleichfallenden Knoten nicht');
+  assert.match(src, /peerChips\(peerList, truthOf\(peerList\), namesOf\(peerList\)\)/, 'Hypothese nennt die gleichfallenden Knoten nicht');
+  assert.match(src, /peerChips\(list, truthOf\(list\), namesOf\(list\)\)/, 'Peer-Gruppe nennt die Knoten ohne Gegenurteil');
+  assert.match(src, /a\.peerTruth/, 'Karton ohne Gegenurteil je benanntem Knoten');
+  assert.match(src, /a\.peerNames/, 'Karton ohne Namen aus der Netz-Auskunft');
+  assert.match(src, /vt\.peersTruth/, 'Kohorten-Gegenprobe des Kartons ohne eigene Aussage');
+  assert.ok(cssRules.has('.vt-rc-peerstruth'), 'Gegenprobe-Zeile ohne Regel');
 });
 /* Gekuerzte Ranglisten (2026-10-16): 8.609 Vorfaelle waren 25 MB JSON. Guard ist, dass das
  * Overlay die Gesamtzahl aus der Antwort nimmt - nicht die Laenge der gekuerzten Liste. */
@@ -1442,3 +1447,18 @@ test('Quorum-Ziel: die Herkunft eines am Tag gemessenen Ziels ist in der Zeile l
     assert.equal(i18n.split(quoted).length - 1, 2, 'Etikett nicht in beiden Sprachen: ' + key);
   }
 });
+/* Der Rekorder-Loecher zwischen Tagesdateien (gemessen 2026-10-16 22:20:52Z -> 2026-10-17
+ * 01:49:22Z auf dem Daten-Repo). Die Spanne steht in keiner Datei, die existiert. Wird sie
+ * nicht benannt, wirkt ein Rekorder-Stop wie nichts passiert - und das ist eine Schaetzung
+ * ueber ein Urteil, das die Engine nicht produzieren darf. */
+test("Rekorder-Loecher: die unbeobachtete Spanne zwischen Tagesdateien ist lesbar", () => {
+  assert.match(src, /const holeNote = Number\(c\.unobservedRanges\) > 0/, "die Spanne wird nicht aus der Zahl gebaut");
+  assert.match(src, /coverageLine \+ quorumNote \+ holeNote \+ scopeTag/, "die Zeile haengt nicht an der Aufzeichnungs-Zeile");
+  assert.match(src, /unobservedLargest/, "die groesste Spanne hat keinen Lesestoff");
+  const i18n = read("i18n-validator.mjs");
+  for (const key of ["vt.coverageHoleLabel", "vt.coverageHole"]) {
+    const quoted = String.fromCharCode(39) + key + String.fromCharCode(39);
+    assert.equal(i18n.split(quoted).length - 1, 2, "Etikett nicht in beiden Sprachen: " + key);
+  }
+});
+

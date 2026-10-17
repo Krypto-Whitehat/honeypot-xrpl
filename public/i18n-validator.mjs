@@ -32,6 +32,7 @@ export const VALIDATOR_DICT = {
     'vt.coverage': 'Recording', 'vt.coverageVal': '{ledgers} ledgers over {days} day(s) · {span} · {gaps} gap ledgers · {qf} ledgers with the leading tracked-member line short of the target',
     'vt.coverageQuorumLabel': 'quorum counter', 'vt.coverageQuorum': '{named} of them named by a forensics row that carries target and leading line · {rest} counted without such a row',
     'vt.inWindow': 'in the selected window', 'vt.estimated': 'estimated',
+    'vt.coverageHoleLabel': 'not observed', 'vt.coverageHole': '{ranges} span(s) between day files with no ledger evaluated, {minutes} min in total · largest {from} -> {to} UTC',
     'vt.inWindowDayOnly': '{ledgers} ledgers at day granularity ({days} half-covered day(s))', 'vt.totals': 'total since recording start',
     'vt.nodata': 'No recording data for this validator in the loaded days — it was healthy during the recorded spans or not yet observed.',
     'vt.profileEmpty': 'No deviations in this window – the profile has nothing to draw.',
@@ -142,6 +143,9 @@ export const VALIDATOR_DICT = {
     'vt.peersLineOther': 'different deviation on this ledger ({n}):',
     'vt.peersLineCapture': 'unseen in this capture, no node fault ({n}):',
     'vt.peersLineOpen': 'attribution open, neither fault nor exoneration ({n}):',
+    // Dieselbe Gegenprobe wie in der Kohorten-Bilanz, hier je Karton: die benannten Knoten
+    // sind nur so viel wert wie die Zahl, die sie entlastet oder belastet.
+    'vt.peersTruth': 'Reference check for the {n} distinct nodes named above, each against its own number in the same window: {contradicted} contradicted by the reference, {consistent} within their count, {open} not comparable.',
     'vt.attackPeers': 'without a vote in this capture ({n}):',
     'vt.atkBound': 'closed ledger: of the {absent} nodes with no seen vote at most {max} can be genuine, at least {min} are recorder gaps',
     'vt.atkBoundMissing': 'boundary not recorded: this ledger has no forensics row, so the count is not bounded',
@@ -337,6 +341,7 @@ export const VALIDATOR_DICT = {
      'vt.cq.event.close': 'stream lost {at}, {s} s from this ledger',
      'vt.cq.event.stall': 'stream silent {at}, {s} s from this ledger - this recorder heard nothing',
      'vt.cq.event.near': 'capture event {at}, {s} s from this ledger',
+     'vt.cq.event.ledger-no-hash': 'ledger frame without a usable hash {at}, {s} s from this ledger - discarded, its index stays unevaluated',
 
      'vt.cq.followOn': 'network had room',
      'vt.netTitle': 'Network event or own problem?',
@@ -828,6 +833,7 @@ export const VALIDATOR_DICT = {
     'vt.coverageQuorumLabel': 'Quorum-Zaehler', 'vt.coverageQuorum': '{named} davon durch eine Forensik-Zeile mit Ziel und führender Linie benannt · {rest} ohne solche Zeile gezaehlt',
     'vt.inWindow': 'im gewählten Zeitraum', 'vt.estimated': 'geschätzt',
     'vt.inWindowDayOnly': '{ledgers} Ledger aus Tagessummen statt Stunden-Buckets ({days} halb gedeckte(r) Tag(e))', 'vt.totals': 'gesamt seit Aufzeichnungsbeginn',
+    'vt.coverageHoleLabel': 'nicht beobachtet', 'vt.coverageHole': '{ranges} Spanne(n) zwischen Tagesdateien ohne bewerteten Ledger, insgesamt {minutes} min · groesste {from} -> {to} UTC',
     'vt.nodata': 'Keine Aufzeichnungsdaten für diesen Validator in den geladenen Tagen – in den aufgezeichneten Spannen war er unauffällig oder noch nicht beobachtet.',
     'vt.profileEmpty': 'Keine Abweichungen in diesem Zeitraum – das Profil hat nichts zu zeichnen.',
     'vt.profileMeta': '{buckets} Zeitintervalle · {from} → {to} UTC · Achsenspitze {peak} ({scale})',
@@ -934,6 +940,7 @@ export const VALIDATOR_DICT = {
     'vt.peersLineOther': 'andere Abweichung auf diesem Ledger ({n}):',
     'vt.peersLineCapture': 'in dieser Erfassung unerfasst, ohne Knotenfehler ({n}):',
     'vt.peersLineOpen': 'Zuordnung offen, weder Ausfall noch Entlastung ({n}):',
+    'vt.peersTruth': 'Gegenprobe für die {n} verschiedenen oben genannten Knoten, jeweils gegen deren eigene Zahl im selben Fenster: {contradicted} durch die Referenz widerlegt, {consistent} innerhalb ihrer Zahl, {open} nicht vergleichbar.',
     'vt.attackPeers': 'ohne Stimme in dieser Erfassung ({n}):',
     'vt.atkBound': 'geschlossener Ledger: von den {absent} Knoten ohne erfassten Vote können höchstens {max} echt sein, mindestens {min} sind Erfassungs-Lücken dieses Recorders',
     'vt.atkBoundMissing': 'Grenze nicht erfasst: dieser Ledger hat keine Forensik-Zeile, die Zahl ist also nicht begrenzt',
@@ -1121,6 +1128,7 @@ export const VALIDATOR_DICT = {
      'vt.cq.event.close': 'Stream verloren {at}, {s} s von diesem Ledger entfernt',
      'vt.cq.event.stall': 'Stream stumm {at}, {s} s von diesem Ledger entfernt - dieser Rekorder hoerte nichts',
      'vt.cq.event.near': 'Erfassungs-Ereignis {at}, {s} s von diesem Ledger entfernt',
+     'vt.cq.event.ledger-no-hash': 'Ledger-Rahmen ohne verwertbaren Hash {at}, {s} s von diesem Ledger entfernt - verworfen, sein Index bleibt unbewertet',
 
      'vt.cq.followOn': 'Netz hatte Spielraum',
      'vt.netTitle': 'Netzereignis oder eigenes Problem?',
