@@ -43,6 +43,14 @@
 //     benennt die Luecke ('count-mismatch' / 'tag-count-mismatch'). Erfassungs-Befunde
 //     ('no-quorum', 'vote-not-observed') duerfen in keiner Rate, keiner Kohorte und keinem
 //     Muster stehen - sie sind der Ausfall selbst, kein Merkmal des Ledgers.
+//  K) QUORUM-ZAEHLER-DECKUNG  der Zaehler 'quorumFail' muss durch Forensik-Zeilen gedeckt sein.
+//     'quorumFail' zaehlt jedes bewertete Ledger, dessen fuehrende dUNL-Linie unter dem Ziel
+//     blieb; eine Zeile mit Ziel und fuehrender Linie gibt es nur je Abweichungs-Ledger. Ein
+//     Ledger ohne Zeile hat keinen Index, keine Marge und keinen benannten Knoten - er darf
+//     nirgends als Knoten-Urteil erscheinen. Die Differenz muss in der Tagesdatei als
+//     'quorum-fail'-Luecke stehen und in der Leseschicht als eigene Zahl ausgewiesen sein
+//     (coverage.quorumShortRows / quorumCounterUnattributed). Eine Differenz ohne benannte
+//     Luecke ist eine Zahl ohne Nachschlageweg, eine benannte Luecke ohne Differenz erfunden.
 //
 // Lauf:  node scripts/audit-coherence.mjs                 (30 d, alle Knoten der Aufzeichnung)
 //        node scripts/audit-coherence.mjs --range=7d
@@ -332,6 +340,61 @@ for (const r of riskProfile(days).rows) {
   if (r.rateWith !== null && r.rateWith > 1) bad("J", "risk " + r.tag, "Ausfallwahrscheinlichkeit " + r.rateWith + " ueber 1");
   if (r.anomalyFailLedgers > r.anomalyLedgers) bad("J", "risk " + r.tag, r.anomalyFailLedgers + " Ausfall-Ledger in " + r.anomalyLedgers + " gezehlten");
 }
+// ---------- K) QUORUM-ZAEHLER-DECKUNG  der Zaehler 'quorumFail' und die Zeilen, die ihn tragen ----------
+// 'quorumFail' (monitor/validator-trace.mjs: if (!r.hasQuorum) d.quorumFail += 1) zaehlt jedes
+// bewertete Ledger, dessen fuehrende dUNL-Linie unter dem Ziel blieb. Eine Forensik-Zeile mit
+// Ziel und fuehrender Linie schreibt derselbe Rekorder nur je Abweichungs-Ledger
+// (monitor/validator-trace.mjs: if (r.incidents.length) { d.incidentLedgers += 1; ... d.ledgerStats.push(...) }).
+// Ein Ledger kann also im Zaehler stehen, ohne dass eine Zeile seine Zahlen nennt: die Linie war
+// zu kurz, aber kein beobachteter Knoten wurde markiert, weil alle gesehenen Mitglieder
+// vollstaendig signierten und sich die Stimmen auf mehrere Hash-Linien verteilten
+// (lib/validator-trace.mjs: ein gesehenes Mitglied ohne Fehlvote erhoht 'ok', nicht die Vorfaelle).
+// Live belegt: ueber die Aufzeichnung sagt der Zaehler 82, nachrechenbar sind 10 Zeilen;
+// 2026-10-16 fuehrt 11 gegen 9, 2026-10-13 bis 2026-10-15 fuehren 2 + 6 + 13 ohne jede Zeile.
+// Fuer eine Engine, die kein Ledger-Urteil ohne Nachschlageweg behaupten darf, ist die Forderung
+// dreifach: die Tagesdatei muss die Differenz benennen, die Leseschicht muss sie ausweisen,
+// und ein Ledger ohne Zeile darf in keiner Ebene zur Knoten-Aussage werden.
+const quorumShortCount = (d) => (Array.isArray(d.ledgerStats) ? d.ledgerStats : []).reduce((n, ls) => {
+  const top = Number(ls?.top), need = Number(ls?.need);
+  return Number.isFinite(top) && Number.isFinite(need) && need > 0 && top < need ? n + 1 : n;
+}, 0);
+let quorumCounterSum = 0, quorumShortSum = 0, quorumDaysChecked = 0, quorumGapDays = 0;
+const quorumGapRows = [];
+for (const d of days) {
+  const counter = Number(d.quorumFail);
+  const short = quorumShortCount(d);
+  if (!Number.isFinite(counter) && short === 0) continue; // weder Zaehler noch Zeile: nichts geprueft
+  const known = Number.isFinite(counter) ? counter : 0;
+  quorumCounterSum += known; quorumShortSum += short; quorumDaysChecked += 1;
+  const declared = Number(d.quorumShortRows);
+  if (Number.isFinite(declared) && declared !== short)
+    bad("K", d.date, `quorumShortRows ${declared} != ${short} Zeilen mit top < need: die Nachrechnung der Lib weicht von den Zeilen ab`);
+  const named = (Array.isArray(d.counterGaps) ? d.counterGaps : []).filter((g) => g && g.tag === "quorum-fail");
+  const diff = Math.abs(known - short);
+  if (counter === short) {
+    if (named.length) bad("K", d.date, `benannte quorum-fail-Luecke, obwohl Zaehler (${known}) und Zeilen (${short}) gleich sind`);
+    continue;
+  }
+  quorumGapDays += 1;
+  if (!named.length) {
+    bad("K", d.date, `quorumFail ${known} gegen ${short} Zeilen: ${diff} Ledger ohne benannte Luecke in der Tagesdatei`);
+    continue;
+  }
+  const sum = named.reduce((n, g) => n + (Number(g.ledgers) || 0), 0);
+  if (sum !== diff) bad("K", d.date, `quorum-fail-Luecke nennt ${sum} Ledger, die Nachrechnung sagt ${diff}`);
+  quorumGapRows.push(`${d.date}: Zaehler ${known}, Zeilen ${short}, ohne Zeile ${diff} (${named.map((g) => g.reason).join(", ")})`);
+}
+for (const master of masters) {
+  const c = traceForValidator(days, master, { range: RANGE }).coverage;
+  const at = String(master).slice(0, 12);
+  const qf = Number(c.quorumFail), qs = Number(c.quorumShortRows), rest = Number(c.quorumCounterUnattributed);
+  if (!Number.isFinite(qf) || !Number.isFinite(qs) || !Number.isFinite(rest)) {
+    bad("K", at, "Quorum-Deckung fehlt in der Leseschicht: quorumShortRows / quorumCounterUnattributed nicht ausgewiesen");
+    continue;
+  }
+  if (rest !== Math.max(0, qf - qs)) bad("K", at, `quorumCounterUnattributed ${rest} != ${qf} Zaehler - ${qs} benannte Ledger`);
+  if (qs > quorumShortSum) bad("K", at, `Leseschicht nennt ${qs} benannte Ledger, die Aufzeichnung fuehrt nur ${quorumShortSum}`);
+}
 
 const ledgers = seenLedgers.size;
 const gapsMeasured = [...seenLedgers.values()].filter((f) => f.gap === true).length;
@@ -348,6 +411,7 @@ if (!QUIET) console.log(`  Raten-Zeilen: ${rateRowsChecked} Empfindlichkeit, ${c
 if (!QUIET) console.log(`  Zaehler-Vokabel nachgefuehrt (no-quorum -> vote-not-observed, Ledger-Zahl): ${countersRenamed}`);
 if (!QUIET) console.log(`  Zaehler-Deckung: ${counterGaps.length} Tag-Signaturen mit mehr Ausfall-Ledern als der Tages-Zaehler nennt` + (counterGaps.length ? " (Rate zurueckgehalten, nicht geschaetzt)" : ""));
 if (!QUIET) console.log(`  Forensik-Deckung der Ausfall-Ledger: ${forensicsCoverage.length} Tage mit Ausfall-Ledern ohne Forensik-Zeile` + (forensicsCoverage.length ? " (incidentLedgers zaehlt nur Ledger mit Forensik - kein Nenner fuer die Grundgesamtheit)" : ""));
+if (!QUIET) console.log(`  Quorum-Zaehler: ${quorumCounterSum} gezaehlt | ${quorumShortSum} durch eine Zeile mit Ziel und fuehrender Linie benannt | ${quorumCounterSum - quorumShortSum} ohne solche Zeile | ${quorumDaysChecked} Tage geprueft, ${quorumGapDays} mit Differenz`);
 if (forensicsCoverage.length) {
   console.log("  FORENSIK-DECKUNG (je Tag):");
   for (const g of forensicsCoverage.slice(0, 20)) console.log("    " + g);
@@ -357,6 +421,11 @@ if (counterGaps.length) {
   console.log("  BENANNTE ZAEHLER-LUECKEN:");
   for (const g of counterGaps.slice(0, 20)) console.log("    " + g);
   if (counterGaps.length > 20) console.log(`    ... ${counterGaps.length - 20} weitere`);
+}
+if (quorumGapRows.length) {
+  console.log("  QUORUM-ZAEHLER OHNE FORENSIK-ZEILE (je Tag, der Zaehler bleibt stehen, die Differenz ist benannt):");
+  for (const g of quorumGapRows.slice(0, 20)) console.log("    " + g);
+  if (quorumGapRows.length > 20) console.log(`    ... ${quorumGapRows.length - 20} weitere`);
 }
 if (problems.length) {
   console.log(`\nWIDERSPRUECHE (${problems.length}):`);

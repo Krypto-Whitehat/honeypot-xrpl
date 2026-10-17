@@ -37,7 +37,7 @@ import { LATENCY_VERDICTS } from '../lib/validator-vote-latency.mjs';
 import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
-import { COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from '../lib/validator-stress-coupling.mjs';
+import { COUPLING_GAPS, COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from '../lib/validator-stress-coupling.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 import { CAPTURE_GAP_BASES_MEASURED } from '../lib/validator-trace.mjs';
 
@@ -1210,6 +1210,105 @@ test('Grundebene: ein Koerper unter allen 24 Intervallen, keine je-Saeulen-Scher
     'Mobil: die Deckflaeche der Ebene bleibt stehen, obwohl die Scherflaechen fallen');
 });
 
+/* Beleuchtungs-Hierarchie der Prismen (Design-Korrektur 2026-10-17, live im Overlay gemessen):
+ * die Kappe hatte background-image: none. Ein color-mix-Anteil von 130 % liegt ausserhalb des
+ * gueltigen Bereichs (0..100 %), die ganze background-image-Deklaration war damit ungueltig,
+ * und die Kappe zeigte genau die Farbe der Vorderflaeche. Ohne Tonstufen zwischen Vorder-,
+ * Tief- und Deckflaeche ist ein Prisma ein flacher Balken mit schraeger Oberkante - derselbe
+ * schraege Eindruck, den vorher die Komma-Fuege und die je-Saeulen-Tiefe erzeugt hatten. Guard:
+ * jeder color-mix-Anteil der Datei gueltig, und die Tonstufen an jeder Signaturfarbe beider
+ * Themes nachgerechnet - nicht als Geschmack, sondern als Kontrastschritt. */
+const colorMixCalls = (css) => {
+  const out = [];
+  const needle = "color-mix(";
+  let i = 0;
+  while ((i = css.indexOf(needle, i)) !== -1) {
+    let depth = 1;
+    let j = i + needle.length;
+    while (j < css.length && depth > 0) {
+      if (css[j] === "(") depth += 1;
+      else if (css[j] === ")") depth -= 1;
+      j += 1;
+    }
+    out.push(css.slice(i, j));
+    i = j;
+  }
+  return out;
+};
+const hexRgb = (hex) => [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
+const mixToward = (base, pct, partner) => base.map((c, k) => c * (pct / 100) + partner[k] * (1 - pct / 100));
+const overAlpha = (base, rgb, alpha) => base.map((c, k) => c * (1 - alpha) + rgb[k] * alpha);
+const meanDelta = (base, tone) => tone.reduce((sum, c, k) => sum + (c - base[k]), 0) / base.length;
+const THEMES = ["[data-a6]", "[data-a6][data-theme=\"noir\"]"];
+
+test('color-mix: jeder Anteil liegt in 0..100 Prozent (130 % machte die Kappe leer)', () => {
+  const calls = colorMixCalls(stripComments(styleCss));
+  assert.ok(calls.length > 20, 'nur ' + calls.length + ' color-mix-Klammern - der Helper greift nicht');
+  for (const call of calls) {
+    for (const m of call.matchAll(/(\d+(?:\.\d+)?)\s*%/g)) {
+      const pct = Number(m[1]);
+      assert.ok(pct >= 0 && pct <= 100, 'Anteil ' + pct + ' % ausserhalb 0..100 % in: ' + call);
+    }
+  }
+});
+
+test('Kappe: zwei aus der Grundfarbe abgeleitete Tonstufen und eine eigene Naht', () => {
+  const cap = ruleBody('.vt-top');
+  const mix = [...cap.matchAll(/color-mix\(in srgb,\s*var\(--vt-cap-face\)\s+(\d+(?:\.\d+)?)%,\s*white\)/g)]
+    .map((m) => Number(m[1]));
+  assert.equal(mix.length, 2, 'die Kappe hat nicht zwei abgeleitete Tonstufen');
+  assert.ok(mix[0] < mix[1], 'die Kappe wird nach hinten heller statt dunkler - die Tiefe wird nicht rueckwaerts schattiert');
+  assert.match(cap, /background-color:\s*var\(--vt-cap-face\)/, 'die Kappe haelt einen Aufloesungs-Fallback statt der aufgelsten Grundfarbe');
+  assert.match(cap, /inset 0 -1px 0 var\(--vt-seam\)/, 'die Naht zwischen Kappe und Koerper fehlt');
+  assert.match(ruleBody('.vt-profile'), /--vt-seam:\s*var\(--a6-face-seam\)/, '--vt-seam ist kein Theme-Token');
+  assert.match(ruleBody('.vt-col'), /--vt-cap-face:\s*var\(--vt-cap,\s*var\(--a6-sev-neutral\)\)/, '--vt-cap-face loest die Kappenfarbe nicht einmal auf');
+  for (const sel of THEMES) {
+    assert.match(ruleBody(sel), /--a6-face-seam:\s*rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0?\.\d+\s*\)/, sel + ' hat keine eigene Naht-Stufe');
+  }
+});
+
+test('Tiefflaeche: schattiert entlang der Tiefe ab und traegt eine eigene Kantenstufe', () => {
+  const side = ruleBody('.vt-side');
+  assert.match(side, /background-image:\s*linear-gradient\(\s*to right,/, 'die Tiefflaeche schattiert nicht entlang der Tiefe');
+  assert.match(side, /,\s*var\(--vt-shade\)\),\s*var\(--vt-grad\)/, 'unter der Schattierung fehlt der Typstapel der Vorderflaeche');
+  const front = Number(side.match(/var\(--vt-shade\)\s+(\d+(?:\.\d+)?)%/)[1]);
+  assert.ok(front < 100, 'die Schattierung startet an der Vorderkante bei 100 % - es gibt kein Tiefengefaelle');
+  assert.match(side, /box-shadow:\s*inset 0 0 0 1px var\(--vt-edge-side\)/, 'die Tiefflaeche traegt weiterhin die helle Vorderkantenlinie');
+  const edge = ruleBody('.vt-profile').match(/--vt-edge-side:\s*color-mix\(in srgb,\s*var\(--a6-face-edge\)\s+(\d+(?:\.\d+)?)%,\s*transparent\)/);
+  assert.ok(edge, '--vt-edge-side ist keine abgeleitete Stufe aus --a6-face-edge');
+  assert.ok(Number(edge[1]) < 100, '--vt-edge-side ist so hell wie die Vorderkante');
+});
+
+test('Tonstufen: an jeder Signaturfarbe beider Themes nachgerechnet, nicht gefuehlt', () => {
+  const capMix = [...ruleBody('.vt-top').matchAll(/var\(--vt-cap-face\)\s+(\d+(?:\.\d+)?)%,\s*white/g)].map((m) => Number(m[1]));
+  const sideStart = Number(ruleBody('.vt-side').match(/var\(--vt-shade\)\s+(\d+(?:\.\d+)?)%/)[1]);
+  const WHITE = [255, 255, 255];
+  let checked = 0;
+  for (const sel of THEMES) {
+    const body = ruleBody(sel);
+    const shade = body.match(/--a6-face-shade:\s*rgba\(\s*(\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\s*\)/);
+    assert.ok(shade, sel + ': --a6-face-shade fehlt');
+    const shadeRgb = [Number(shade[1]), Number(shade[2]), Number(shade[3])];
+    const shadeAlpha = Number(shade[4]);
+    for (const m of body.matchAll(/--a6-sev-(malicious|suspect|info|neutral):\s*(#[0-9a-f]{6})/g)) {
+      const base = hexRgb(m[2]);
+      const capFront = meanDelta(base, mixToward(base, capMix[0], WHITE));
+      const capBack = meanDelta(base, mixToward(base, capMix[1], WHITE));
+      const sideFront = meanDelta(base, overAlpha(base, shadeRgb, shadeAlpha * (sideStart / 100)));
+      const sideBack = meanDelta(base, overAlpha(base, shadeRgb, shadeAlpha));
+      const at = sel + ' ' + m[1] + ' ' + m[2];
+      assert.ok(capFront >= 12, at + ': Kappe nur ' + capFront.toFixed(1) + ' im Mittel heller als die Vorderflaeche');
+      assert.ok(capBack >= 6, at + ': Kappe an der hinteren Kante nur ' + capBack.toFixed(1) + ' heller');
+      assert.ok(capBack < capFront, at + ': die Kappe faellt nach hinten nicht ab');
+      assert.ok(sideFront <= -14, at + ': Tiefflaeche nur ' + sideFront.toFixed(1) + ' im Mittel dunkler');
+      assert.ok(sideBack <= -20, at + ': Tiefflaeche an der Hinterkante nur ' + sideBack.toFixed(1) + ' dunkler');
+      assert.ok(sideBack < sideFront, at + ': die Tiefe wird nach hinten nicht dunkler');
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 8, 'nur ' + checked + ' Signaturfarben geprueft - beide Themes brauchen vier');
+});
+
 /* Die Last-Dosis-Achse der Kopplungsebene wird gerechnet (lib/validator-stress-coupling.mjs:
  * loadAxis + loadTrend) und war zunachst nirgends sichtbar: couplingBlock renderte verdict,
  * coverage, axes, findings, peaks, signatures, local, gaps - nur die Achse selbst fehlte.
@@ -1294,4 +1393,41 @@ test('Warm-Lauf-Zelle: eigener Empfang und eigener Median stehen als zwei Zahlen
     'die deutsche Zeile liest sich weiterhin als Anteil');
   assert.match(i18n, /'vt\.cq\.ownBaseline': '[^']*\{seen\}[^']*\{base\}[^']*'/,
     'die Zelle nennt beide Zahlen nicht');
+});
+
+/* Netz-Stall-Etikett in der Kritikalitaets-Tafel (2026-10-17, durch die Historie belegt).
+ * cd3762a (2026-10-16 15:08) brachte die Wirkungs-Spalte mit 'quorum-critical' und die
+ * Abweichungs-Spalte mit 'no vote (network stall)'. 2883ef9 (2026-10-16 18:30) nahm beide
+ * heraus: xrpscan und xrplcluster.com weisen genau diese Ledger (107690236, 107694001,
+ * 107695059) als geschlossen aus - eine Netzstockung waere dort eine Behauptung gegen zwei
+ * Autoritaeten. Guard: die beiden Spalten haengen an deklarierten Mengen, kein Etikett dieser
+ * Spalten darf eine Netzstockung oder ein Quorum-Urteil behaupten, und das tote Etikett
+ * 'vt.cq.critical' (von keiner Zeile mehr benutzt) ist aus beiden Sprachen heraus. */
+test('Kritikalitaets-Tafel: ein geschlossener Ledger wird nicht zur Netzstockung', () => {
+  assert.match(src, /h\.t\("vt\.type\." \+ \(DIAG_TYPE\[r\.type\] \|\| r\.type\)\)/,
+    'die Abweichungs-Spalte haengt nicht an den Typ-Etiketten');
+  assert.match(src, /h\.t\("vt\.cq\.verdict\." \+ r\.verdict\)/, 'die Wirkungs-Spalte haengt nicht an den Verdikt-Etiketten');
+  assert.match(src, /\+ closureCell\(r\) \+/, 'die Schliess-Spalte fehlt in der Zeile');
+  const i18n = read('i18n-validator.mjs');
+  const labels = [...i18n.matchAll(/'(vt\.type\.[a-z-]+|vt\.cq\.verdict\.[a-z-]+)': '([^']*)'/g)];
+  assert.ok(labels.length >= 14, 'die Etiketten der beiden Spalten sind nicht vollstaendig auffindbar');
+  for (const [key, text] of labels) {
+    assert.ok(!/stall|stockung/i.test(text), key + ' behauptet eine Netzstockung in der Tafel: ' + text);
+    assert.ok(!/quorum-critical|quorum-kritisch/i.test(text), key + ' behauptet ein Quorum-Urteil in der Tafel: ' + text);
+  }
+  assert.equal(i18n.split("'vt.cq.critical'").length - 1, 0, 'das alte Wirkungs-Etikett ist nicht mehr im Woerterbuch');
+});
+
+/* Messluecken der Kopplungsebene (2026-10-17).
+ * Jede Luecke, die lib/validator-stress-coupling.mjs deklarativ in COUPLING_GAPS aufnimmt,
+ * muss in beiden Sprachen ein Etikett haben: das Overlay rendert sie ueber 'vt.coupling.gap.' + id.
+ * Eine Luecke ohne Etikett waere eine Zahl ohne Aussage - und eine Achse, die duenn ist, ohne
+ * dass sie es benennt, ist genau die Schaetzung, die die Engine nicht produzieren darf. */
+test('Kopplungs-Luecken: jede deklarierte Luecke hat ein Etikett in beiden Sprachen', () => {
+  assert.ok(COUPLING_GAPS.has('population-counters-partial'), 'die Duennheit der Bevoelkerungs-Achse ist nicht deklariert');
+  const i18n = read('i18n-validator.mjs');
+  for (const g of COUPLING_GAPS) {
+    const key = "'vt.coupling.gap." + g + "'";
+    assert.equal(i18n.split(key).length - 1, 2, 'Etikett nicht in beiden Sprachen: ' + g);
+  }
 });

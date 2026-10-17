@@ -381,6 +381,14 @@ function attributionBlock(a) {
       : "–";
     const coverageLine = '<p class="vt-coverage"><small>' + h.esc(h.t("vt.coverage")) + "</small> "
       + h.esc(h.t("vt.coverageVal", { ledgers: c.ledgers ?? 0, days: c.days ?? 0, span, gaps: c.gapLedgers ?? 0, qf: c.quorumFail ?? 0 })) + "</p>";
+    // Der Quorum-Zaehler bekommt seinen nachrechenbaren Anteil direkt daneben: die
+    // Zahl der Ledger, deren Ziel und fuehrende Linie in einer Forensik-Zeile steht,
+    // und die Zahl der Ledger, die nur im Zaehler stehen. Ohne diese Zeile waere
+    // '11 unter Ziel' eine Aussage, die kein Betreiber nachschlagen kann.
+    const quorumNote = Number(c.quorumFail) > 0
+      ? '<p class="vt-coverage"><small>' + h.esc(h.t("vt.coverageQuorumLabel")) + "</small> "
+        + h.esc(h.t("vt.coverageQuorum", { named: c.quorumShortRows ?? 0, rest: c.quorumCounterUnattributed ?? 0 })) + "</p>"
+      : "";
     // Fenster-genaue Karten (Stundenzähler), sonst Tages-Gesamtzähler mit Hinweis.
     const w = d.inWindow;
     const src = w || d.summary;
@@ -397,7 +405,7 @@ function attributionBlock(a) {
     const noData = !d.summary.observed && !(d.incidents || []).length
       ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
       : "";
-    body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + scopeTag
+    body.innerHTML = keyLine + refLine + truthBlock(d.truth) + coverageLine + quorumNote + scopeTag
       + '<div class="vt-cards">' + cards + "</div>" + attributionLine + totalLine + noData
       + '<h3 class="vt-h">' + h.esc(h.t("vt.model3d")) + "</h3>" + profile3d(d.incidents, d.range, d.profile, d.coverage)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.causeTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.causeNote")) + "</p>"
@@ -1468,9 +1476,13 @@ function attributionBlock(a) {
       cohort: num(cov.cohortRows), unnamed: num(cov.namedMastersIncompleteRows),
       shape: num(cov.shapeRows), latency: num(cov.latencyRows), cadence: num(cov.cadenceRows),
     })) + "</p>";
+    // Die Bevoelkerungs-Achse ist die einzige der vier, die nicht auf Forensik-Zeilen steht:
+    // ihr Nenner ist jeder erfasste Ledger. Ein Befund auf dieser Achse gehoert deshalb an die
+    // Achsen-Zeile, nicht nur in die Liste der Befunde. Ohne Antwort steht ein Gedankenstrich.
     const axisLine = '<p class="vt-note">' + h.esc(h.t("vt.coupling.axesLine", {
       node: h.t("vt.coupling.verdict." + ax.node), mass: h.t("vt.coupling.verdict." + ax.mass),
       network: h.t("vt.coupling.verdict." + ax.network), netLift: pp(ax.networkLift),
+      population: ax.population ? h.t("vt.coupling.verdict." + ax.population) : "–",
       massNodes: num(th.simultaneityNodes), highNodes: num(th.massNodes), minSample: num(th.minSample),
     })) + "</p>";
     const findings = (c.findings || []).map((f) => "<li>" + h.esc(h.t("vt.coupling.axis." + f.axis)) + " · "
