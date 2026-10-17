@@ -32,6 +32,10 @@
 //     Tagesdatei: kein Flag ohne Abo-Offnung, kein Flag auf geschlossenem Ledger ohne
 //     cg = true, keine zwei Flags hintereinander, nie mehr Flags als Abo-Ereignisse. Eine
 //     abgeschnittene Ereignisliste heisst 'nicht pruefbar', nicht 'widerspruchsfrei'.
+//  I) ZUORDNUNG  ein 'missed'-Vorfall ist ein Knoten-Urteil und braucht den Beleg der
+//     Zuordnungsgrenze ('aa === true' am Vorfall oder an der Forensik-Zeile desselben Ledgers).
+//     Ohne Beleg muss er als Erfassungs-Aussage stehen, und der Zaehler muss mitgewandert sein:
+//     die Vorfallsliste und die Zaehler je Knoten derselben Datei fuehren dieselbe 'missed'-Zahl.
 //
 // Lauf:  node scripts/audit-coherence.mjs                 (30 d, alle Knoten der Aufzeichnung)
 //        node scripts/audit-coherence.mjs --range=7d
@@ -206,6 +210,37 @@ for (const d of days) {
   prevOpens = opens;
   prevTruncated = truncated;
 }
+// I) ZUORDNUNG  'missed' heisst: dieser Knoten hat in diesem Ledger gefehlt. Das ist ein
+// Urteil ueber den Knoten, und es darf nur stehen, wenn die eigene Erfassung dafuer vollstaendig
+// war - belegt durch 'aa === true' am Vorfall oder an der Forensik-Zeile desselben Ledgers.
+// Der Altbestand (Bestand vor 2026-10-16) hat diesen Beleg nicht; dort stellt die Lese-Schicht
+// auf 'vote-not-observed' um und verschiebt den Zaehler. Diese Regel prueft genau das: kein
+// unbelegtes Knoten-Urteil, und dieselbe Datei fuehrt dieselbe Zahl in Liste und Zaehlern.
+let missedProven = 0;
+let missedUnproven = 0;
+let missedDaysChecked = 0;
+let missedCounterBad = 0;
+for (const d of days) {
+  const proof = new Map();
+  for (const r of (Array.isArray(d.ledgerStats) ? d.ledgerStats : [])) {
+    if (r && Number.isFinite(r.l) && r.aa === true) proof.set(r.l, true);
+  }
+  let listed = 0;
+  for (const inc of (Array.isArray(d.incidents) ? d.incidents : [])) {
+    if (!inc || inc.type !== "missed") continue;
+    listed += 1;
+    if (inc.aa === true || proof.get(inc.l) === true) { missedProven += 1; continue; }
+    missedUnproven += 1;
+    bad("I", `${d.date} #${inc.l} ${String(inc.m).slice(0, 12)}`, "'missed' ohne Zuordnungsbeleg: aa fehlt oder ist false");
+  }
+  if (!Array.isArray(d.incidents) || !d.validators || typeof d.validators !== "object") continue;
+  const counted = Object.values(d.validators).reduce((sum, v) => sum + (Number.isFinite(Number(v?.missed)) ? Number(v.missed) : 0), 0);
+  missedDaysChecked += 1;
+  if (counted !== listed) {
+    missedCounterBad += 1;
+    bad("I", `${d.date}`, `Zaehler 'missed' = ${counted}, Vorfallsliste = ${listed}: eine Zahl, die niemand nachzaehlen kann`);
+  }
+}
 const ledgers = seenLedgers.size;
 const gapsMeasured = [...seenLedgers.values()].filter((f) => f.gap === true).length;
 const gapsOpen = [...seenLedgers.values()].filter((f) => f.gap === null).length;
@@ -216,6 +251,7 @@ if (!QUIET) {
   console.log(`  Eindeutige Ledger: ${ledgers} | Erfassung gemessen Luecke ${gapsMeasured} | gemessen keine Luecke ${gapsRuledOut} | nicht erfasst ${gapsOpen}`);
 }
 if (!QUIET) console.log(`  Warmlauf-Luecken (stream-open): ${warmFlags} | mit Abo-Ereignis belegt ${warmBacked} | nicht pruefbar (Ereignisliste abgeschnitten) ${warmUncheckable}`);
+if (!QUIET) console.log(`  Knoten-Urteil 'missed': mit Beleg ${missedProven} | ohne Beleg ${missedUnproven} | Tage mit Zaehler-Vergleich ${missedDaysChecked}, Abweichungen ${missedCounterBad}`);
 if (problems.length) {
   console.log(`\nWIDERSPRUECHE (${problems.length}):`);
   for (const p of problems.slice(0, 60)) console.log("  " + p);

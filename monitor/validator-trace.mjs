@@ -256,7 +256,14 @@ function recordResult(r, detailNote) {
       // nc = die Schliess-Ebene dieses Ledgers hat die Schliessung ausdruecklich verneint. Ohne
       // dieses Feld am Incident waere die Aussage nach einem ledgerStats-Truncation nicht mehr
       // nachpruefbar, und normalizeDay duerfte 'no-quorum' nicht umstellen.
-      nc: r.closed === false ? true : undefined });
+      nc: r.closed === false ? true : undefined,
+      // aa am Vorfall selbst (2026-10-17): die Zuordnungs-Grenze haengt an der Forensik-Zeile,
+      // und die Forensik-Liste ist gekuerzt (LEDGER_STATS_CAP). Traegt der Vorfall seinen Beleg
+      // nicht mehr, wenn die Zeile herausfaellt, wird eine belegte Messung beim Lesen zur
+      // offenen Frage - und eine offene Frage ist kein Knoten-Urteil. true | false | fehlend
+      // sind drei verschiedene Aussagen und bleiben drei verschiedene Zustande.
+      aa: r.forensics?.attributableAbsence === true ? true
+        : r.forensics?.attributableAbsence === false ? false : undefined });
   }
   // Forensik je Ledger mit Abweichung: Quorum-Rand, Hash-Spaltung, Close-Abstand, Last und
   // die Betroffenheit je Typ. Das ist der Unterschied zwischen "Validator hat verpasst" und
