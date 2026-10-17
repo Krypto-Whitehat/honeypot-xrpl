@@ -192,6 +192,23 @@ test("Split: der Kern traegt keine vt.*-Texte und das Overlay meldet sein Bundle
   assert.deepEqual(missing, [], "nach der Anmeldung fehlt weiterhin nichts");
 });
 
+// Die Kohorten-Empfehlung vergleicht mit Peers. Was auf einem Ledger ohne gesehenen Vote
+// auffiel, ist eine Zahl ueber DIESE Erfassung; ob die verglichenen Knoten wirklich fehlten,
+// entscheidet erst die Gegenprobe je Knoten. Ein Text, der den Vergleich mit einem Feststellung
+// ueber die Knoten mischt, macht aus einer Beobachtung ein Urteil - dieselbe Klasse Fehler,
+// die am 2026-10-16 durch xrpscan und xrplcluster widerlegt wurde.
+test("Labels: die Kohorten-Empfehlung nennt ihre eigene Erfassung, kein Urteil ueber die Peers", () => {
+  const k = "vt.g.cohort-network";
+  for (const lang of ["en", "de"]) {
+    const label = DICT[lang][k];
+    assert.ok(typeof label === "string" && label.length > 0, k + " fehlt in " + lang);
+    assert.ok(!/missed the same|verfehlten|verpassten denselben/i.test(label),
+      k + " (" + lang + ") behauptet einen Peer-Ausfall: " + label);
+    assert.ok(/this recorder|dieser Rekorder/i.test(label),
+      k + " (" + lang + ") nennt nicht, wer die Kohorte sieht: " + label);
+  }
+});
+
 // Der noQuorum-Zaehler zaehlt, was DIESER Rekorder nicht gesehen hat. Ein Label, das daraus ein
 // fehlendes Netz-Quorum macht, ist eine Behauptung ueber das Netz - am 2026-10-16 durch xrpscan und
 // xrplcluster widerlegt (die Ledger wurden geschlossen, 28 Stimmen waren noetig und waren da).
