@@ -267,6 +267,115 @@ export function createValidatorTrace(h) {
   // die Aussage "kein anderer Validator", die aus Altdaten nicht folgt.
   const cohortText = (c) => (Number.isFinite(c) ? h.t("vt.cohortCount", { n: c }) : h.t("vt.cohortUnknown"));
 
+  // Die Beobachtungsliste. Der letzte Besuch dieses Knoten liegt im eigenen Browser, nicht auf
+  // einem Server: ohne diese Marke gibt es kein "seit", und die Oberflaeche sagt das offen, statt
+  // eine Vergleichszahl zu erfinden. Die Marke wird erst nach dem Vergleich gesetzt - sonst
+  // vergliche ich meinen eigenen Besuch mit mir selbst.
+  const WATCH_KEY = "hx-watch";
+  // Dieselbe Menge wie WATCH_VERDICTS in lib/validator-watch.mjs. Ein Urteil, das hier nicht
+  // bekannt ist, darf nicht still als "nichts Neues" erscheinen.
+  const WATCH_VERDICTS = new Set(["new-incidents", "new-cohort", "quiet", "partial-coverage",
+    "not-evaluated", "no-coverage", "bad-entry"]);
+  const WATCH_TYPES = ["missed", "partial", "wrong-hash", "no-quorum"];
+
+  function watchStore() {
+    try {
+      const raw = localStorage.getItem(WATCH_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch { return {}; }
+  }
+  function watchSeenAtMs(master) {
+    const entry = watchStore()[master];
+    const ms = Number(entry && entry.seenAtMs);
+    return Number.isFinite(ms) && ms > 0 ? ms : null;
+  }
+  function watchMarkVisit(master) {
+    try {
+      const store = watchStore();
+      store[master] = { name: current.title || "", seenAtMs: Date.now() };
+      localStorage.setItem(WATCH_KEY, JSON.stringify(store));
+      return true;
+    } catch { return false; }
+  }
+  function watchWindowText(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return "-";
+    const hrs = Math.round(ms / 360000) / 10;
+    return hrs < 48 ? h.t("vt.watch.windowH", { n: hrs }) : h.t("vt.watch.windowD", { n: Math.round(hrs / 24) });
+  }
+  function watchStamp(ms) {
+    return Number.isFinite(ms) ? new Date(ms).toISOString().slice(5, 16).replace("T", " ") : "-";
+  }
+  function watchMarkup(row) {
+    const n = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "-");
+    const verdict = WATCH_VERDICTS.has(row.verdict) ? row.verdict : "bad-entry";
+    const inc = row.incidents || {};
+    const types = WATCH_TYPES.filter((k) => Number(inc[k]) > 0)
+      .map((k) => h.t("vt.k." + k) + " " + n(inc[k])).join(" / ");
+    const counts = Number(inc.total) > 0
+      ? h.t("vt.watch.counts", { total: n(inc.total), ledgers: n(row.incidentLedgers), types })
+      : h.t("vt.watch.none");
+    const cohort = Number(row.cohortLedgers) > 0
+      ? h.t("vt.watch.cohort", { n: n(row.cohortLedgers) }) : "";
+    const open = Number(row.cohortUnattributed) > 0
+      ? h.t("vt.watch.cohortOpen", { n: n(row.cohortUnattributed) }) : "";
+    // Drei Aussagen, drei getrennte Saetze: die Vorfallszahl, die Kohorte und die offene Frage
+    // duerfen nicht als eine Zahl gelesen werden.
+    const lines = [counts, cohort, open].filter(Boolean).join(" · ");
+    const ledgers = h.t("vt.watch.ledgers", {
+      measured: n(row.ledgers && row.ledgers.measured), unknown: n(row.ledgers && row.ledgers.unknown),
+      gaps: n(row.ledgers && row.ledgers.gapLedgers) });
+    const rows = (row.cohort || []).map((c) => {
+      const kinds = (c.types || []).map((t) => h.t("vt.k." + t)).join(" / ");
+      return "<li><span class=\"vt-watch-ledger\">" + h.esc(String(c.ledgerIndex)) + "</span> "
+        + h.esc(watchStamp(c.timeMs)) + " UTC - " + h.esc(kinds) + " - "
+        + h.esc(h.t("vt.watch.others", { n: n(c.othersCount) })) + " (" + h.esc((c.others || [])
+          .map((m) => m.slice(0, 8) + "...").join(", ")) + ")</li>";
+    }).join("");
+    return "<section class=\"vt-watch vt-watch-" + verdict + "\"><h3>" + h.esc(h.t("vt.watch.title")) + "</h3>"
+      + "<p>" + h.esc(h.t("vt.watch.since", { seen: watchStamp(row.seenAtMs), window: watchWindowText(row.windowMs) }))
+      + " - " + h.esc(h.t("vt.watch.verdict." + verdict)) + "</p>"
+      + "<p>" + h.esc(lines) + "</p>"
+      + "<p><small>" + h.esc(ledgers) + "</small></p>"
+      + (rows ? "<ul class=\"vt-watch-rows\">" + rows + "</ul>" : "")
+      + (row.cohortTruncated ? "<p><small>" + h.esc(h.t("vt.watch.truncated")) + "</small></p>" : "")
+      + "</section>";
+  }
+  async function renderWatch(body) {
+    const master = current.master;
+    if (!master) return;
+    const seenAtMs = watchSeenAtMs(master);
+    if (seenAtMs === null) {
+      body.insertAdjacentHTML("afterbegin", "<p class=\"vt-watch vt-watch-first\"><small>"
+        + h.esc(h.t("vt.watch.title")) + "</small> " + h.esc(h.t("vt.watch.first")) + "</p>");
+      watchMarkVisit(master);
+      return;
+    }
+    let data;
+    try {
+      const q = "masters=" + encodeURIComponent(master)
+        + "&seen=" + encodeURIComponent(master + ":" + seenAtMs);
+      const res = await fetch("/api/validator-watch?" + q, { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      data = await res.json();
+    } catch (err) {
+      console.error("validator-watch failed:", err);
+      // Die Marke bleibt: ein Abruf-Fehler loescht nicht den letzten Besuch, sonst waere der
+      // naechste Vergleich verlustfrei unmoglich.
+      body.insertAdjacentHTML("afterbegin", "<p class=\"vt-watch vt-watch-error\"><small>"
+        + h.esc(h.t("vt.watch.title")) + "</small> " + h.esc(h.t("vt.watch.error")) + "</p>");
+      return;
+    }
+    const row = (data.entries || [])[0];
+    if (!row) {
+      body.insertAdjacentHTML("afterbegin", "<p class=\"vt-watch vt-watch-error\"><small>"
+        + h.esc(h.t("vt.watch.title")) + "</small> " + h.esc(h.t("vt.watch.error")) + "</p>");
+      return;
+    }
+    body.insertAdjacentHTML("afterbegin", watchMarkup(row));
+    watchMarkVisit(master);
+  }
+
   function close() {
     if (overlay) { overlay.remove(); overlay = null; }
     document.removeEventListener("keydown", onKey);
@@ -309,6 +418,9 @@ export function createValidatorTrace(h) {
       if (data.available === false) { body.innerHTML = '<p class="vt-empty">' + h.esc(h.t("vt.unavailable")) + "</p>"; return; }
       if (current.mode === "patterns") renderPatterns(body, data); else renderValidator(body, data);
       wire(body);
+      // Die Beobachtungsliste haengt am Knoten, nicht am Musterblick: sie vergleicht genau diesen
+      // Validator mit dem eigenen letzten Besuch.
+      if (current.mode === "validator") await renderWatch(body);
     } catch (err) { console.error("validator-trace render failed:", err);
       body.innerHTML = '<p class="vt-empty">' + h.esc(h.t("vt.error")) + "</p>";
     }

@@ -33,6 +33,7 @@ import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from ".
 import { SENSITIVITY_FAMILIES, SENSITIVITY_GAPS, SENSITIVITY_HEADLINES, SENSITIVITY_VERDICTS } from "../lib/validator-sensitivity.mjs";
 import { TRUTH_VERDICTS } from "../lib/validator-truth.mjs";
 import { COUPLING_AUTHORITIES, COUPLING_AXES, COUPLING_GAPS, COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from "../lib/validator-stress-coupling.mjs";
+import { WATCH_VERDICTS } from "../lib/validator-watch.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -65,7 +66,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.coupling.authority.", "vt.coupling.axis.", "vt.coupling.gap.", "vt.coupling.verdict.",
     // Die Dosis-Achse hat einen eigenen Namen, weil vt.load.* schon die Last-Kurve der Diagnose-
     // Ebene fuehrt. Beide muessen in der Liste stehen, sonst ist ein Praefix unverprobt.
-    "vt.dose.sample.", "vt.dose.verdict.",
+    "vt.dose.sample.", "vt.dose.verdict.", "vt.watch.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
   // nicht als h.t("Praefix" + ...) - sie gehoeren deshalb nicht in diese Liste.
@@ -141,6 +142,10 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
   // Typ-Namen der Vorfaelle: die Ursache-Tabelle schreibt den Typ in eine vt.k.-Zelle. Ohne
   // Label steht dort der rohe Schluessel - genau dort, wo der Betreiber liest.
   groups.push(["vt.k.", ["ok", "partial", "missed", "no-quorum", "wrong-hash", "observed", "vote-not-observed"]]);
+  // Die Beobachtungsliste urteilt ueber ein Fenster, nicht ueber einen Tag. "partial-coverage"
+  // ist keine Entlastung und "not-evaluated" ist nicht "nichts gefunden" - beide Urteile
+  // muessen in beiden Sprachen dastehen, sonst steht der rohe Schluessel in der Zeile.
+  groups.push(["vt.watch.verdict.", WATCH_VERDICTS]);
   groups.push(["vt.sens.verdict.", SENSITIVITY_VERDICTS], ["vt.sens.gap.", SENSITIVITY_GAPS],
     ["vt.sens.head.", SENSITIVITY_HEADLINES], ["vt.sens.family.", SENSITIVITY_FAMILIES]);
   // Kopplungs-Ebene: das Urteil, die Achse, die Autoritaet und jede Luecke sind Aussagen, die

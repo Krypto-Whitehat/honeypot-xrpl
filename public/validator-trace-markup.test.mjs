@@ -40,6 +40,7 @@ import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
 import { COUPLING_GAPS, COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from '../lib/validator-stress-coupling.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 import { CAPTURE_GAP_BASES_MEASURED } from '../lib/validator-trace.mjs';
+import { WATCH_VERDICTS } from '../lib/validator-watch.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const read = (rel) => readFileSync(path.join(here, rel), 'utf8');
@@ -1581,4 +1582,35 @@ test("Kritikalitaets-Zelle: die nachgerechnete Entlastung steht mit ihren Zahlen
   assert.match(src, /attrib \+ notAttrib \+ bound/, "die Entlastung haengt nicht an der Zeile");
   const i18n = read("i18n-validator.mjs");
   assert.equal(i18n.split("'vt.cq.attribution.notAttributable'").length - 1, 2, "vt.cq.attribution.notAttributable fehlt in einer Sprache");
+});
+
+/* Beobachtungsliste (2026-10-17): "seit deinem letzten Besuch" ist ein Urteil ueber ein Fenster,
+ * nicht ueber einen Tag. Die Lib kennt sieben Urteile; die UI muss dieselben sieben kennen und
+ * jedem eine Form geben - sonst steht ein Lib-Urteil als roher Schluessel in der Zeile oder,
+ * schlimmer, es verschwindet still als "nichts Neues". */
+test("Beobachtungsliste: Lib-Urteil, UI-Menge, Endpunkt und Form haengen aneinander", () => {
+  const lib = read("../lib/validator-watch.mjs");
+  const server = read("../server/index.mjs");
+  const i18n = read("i18n-validator.mjs");
+  assert.ok(lib.includes("export function watchDelta"), "watchDelta fehlt in der Lib");
+  assert.ok(lib.includes("export const WATCH_VERDICTS"), "WATCH_VERDICTS fehlt in der Lib");
+  assert.ok(lib.includes("estimated: 0"), "die Lib fuehrt ihre Schaetzungs-Grenze nicht in der Zeile");
+  assert.ok(server.includes("/api/validator-watch"), "der Endpunkt fehlt");
+  assert.ok(server.includes("watchDelta("), "der Endpunkt ruft die Lib nicht");
+  assert.ok(server.includes("watchEntriesFromQuery"), "die Abfrage-Form liegt nicht im Endpunkt");
+  const decl = src.match(/const WATCH_VERDICTS = new Set\(\[([^\]]*)\]\)/);
+  assert.ok(decl, "die UI listet ihre Urteile nicht explizit");
+  const ui = (decl[1].match(/"([^"]+)"/g) || []).map((x) => x.slice(1, -1));
+  assert.deepEqual(ui.slice().sort(), [...WATCH_VERDICTS].sort(), "UI und Bibliothek urteilen nach verschiedenen Vokabeln");
+  for (const v of ui) {
+    assert.ok(cssRules.has(".vt-watch-" + v), "Urteil ohne Form: vt-watch-" + v);
+    assert.equal(i18n.split("'vt.watch.verdict." + v + "'").length - 1, 2, "vt.watch.verdict." + v + " fehlt in einer Sprache");
+  }
+  // Die Marke liegt im Browser des Betreibers. Ohne sie gibt es kein "seit" - die UI muss das
+  // sagen, statt einen Vergleich mit einer erfundenen Besuchszeit zu zeigen.
+  assert.match(src, /const WATCH_KEY = "hx-watch"/, "die Besuchs-Marke fehlt");
+  assert.match(src, /vt\.watch\.first/, "der erste Besuch hat keinen Text");
+  assert.match(src, /vt\.watch\.error/, "ein Abruf-Fehler loescht die Marke oder verschwindet still");
+  // Der Vergleich wird erst nach dem Rendern markiert: sonst vergliche ich den Besuch mit sich selbst.
+  assert.match(src, /watchMarkup\(row\)\);[\s\S]{0,120}watchMarkVisit\(master\)/, "die Marke geht dem Vergleich voraus");
 });

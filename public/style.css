@@ -3008,6 +3008,20 @@ body[data-a6] {
 .vt-attr-contradicted { border-color: var(--a6-error); background: var(--a6-error-soft); }
 .vt-attr-covered { border-color: var(--a6-success); background: var(--a6-success-soft); }
 .vt-attr-open { border-style: dashed; background: var(--a6-surface-alt); }
+/* Beobachtungsliste: ein Urteil ueber ein Fenster, nicht ueber einen Tag. quiet ist die
+ * einzige Fuellung mit Erfolgsgruen; partial-coverage und not-evaluated sind gestrichelt,
+ * weil sie eine offene Frage sind, keine Entlastung. */
+.vt-watch { margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--a6-control-line); border-radius: var(--a6-r-md); color: var(--a6-body); font-size: 12px; line-height: 1.45; }
+.vt-watch h3 { margin: 0 0 4px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--a6-muted); font-family: var(--a6-mono); font-weight: 600; }
+.vt-watch p { margin: 0 0 4px; }
+.vt-watch small { color: var(--a6-muted); font-family: var(--a6-mono); font-size: 11px; }
+.vt-watch-rows { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 11px; }
+.vt-watch-ledger { font-family: var(--a6-mono); font-variant-numeric: tabular-nums; color: var(--a6-ink); }
+.vt-watch-new-cohort { border-color: var(--a6-error); background: var(--a6-error-soft); }
+.vt-watch-new-incidents { border-color: var(--a6-warn); background: var(--a6-warn-soft); }
+.vt-watch-quiet { border-color: var(--a6-success); background: var(--a6-success-soft); }
+.vt-watch-partial-coverage, .vt-watch-not-evaluated, .vt-watch-no-coverage, .vt-watch-bad-entry, .vt-watch-error { border-style: dashed; background: var(--a6-surface-alt); }
+.vt-watch-first { border-color: var(--a6-info); background: var(--a6-info-soft); }
 .vt-scope { color: var(--a6-muted); }
 [data-master] { cursor: pointer; }
 [data-master]:focus-visible { outline: 3px solid var(--a6-focus); outline-offset: 3px; }

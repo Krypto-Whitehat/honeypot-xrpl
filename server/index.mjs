@@ -44,6 +44,7 @@ import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/vali
 import { groundOf, groundTruthMap } from "../lib/validator-ground.mjs";
 import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
+import { WATCH_DEFAULTS, watchDelta, watchEntriesFromQuery, watchRange } from "../lib/validator-watch.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -205,6 +206,26 @@ app.get("/api/validator-trace", async (req, res) => {
   // der Trace selbst. Ohne sie ist die Ursachen-Engine bei attack-window blind - deshalb stehen
   // die Cluster auch dem Selbst-Report zur Verfuegung.
   res.json({ available: true, source, days: days.length, historyError: side.historyError, ...traceForValidator(days, master, { range, clusters: side.clusters, ground, groundPeers: groundMap }) });
+});
+
+// Die Beobachtungsliste: was seit dem letzten Besuch dieses Betreibers wirklich lief. Kein
+// Tageszaehler, kein Zeitanteil - gezaehlt wird ueber Stunden-Buckets und die zeitgestempelten
+// Vorfaelle, und was dem Fenster nicht zuzuordnen ist, bleibt als unknown in der Zeile stehen.
+app.get("/api/validator-watch", async (req, res) => {
+  const { entries, rejected, truncated } = watchEntriesFromQuery(req.query);
+  if (!entries.length) {
+    return res.status(400).json({ error: "masters und seen fehlen: je Knoten die Besuchszeit in Millisekunden (seen=master:1792225450000).", rejected });
+  }
+  const now = Date.now();
+  const range = watchRange(entries, now);
+  const remote = traceTokenConfigured();
+  let days;
+  try { days = remote ? await loadDaysRemote(range) : loadDays(TRACE_DIR); } catch { return res.status(502).json({ error: "Trace-Speicher nicht lesbar." }); }
+  const source = remote ? "github-daten-repo" : "lokal";
+  if (!days.length) return res.json({ available: false, source, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
+  res.json({ available: true, source, range, storedDays: days.length, rejected, truncated,
+    limits: { maxMasters: WATCH_DEFAULTS.maxMasters, requested: entries.length },
+    ...watchDelta(days, entries, { now }) });
 });
 
 app.get("/api/validators", async (req, res) => {
