@@ -60,6 +60,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CAPTURE_GAP_BASES, CAPTURE_GAP_BASES_MEASURED, TRACE_DEFAULTS, anomalyLayer, isAnomalyTag, isObservationTag } from "../lib/validator-trace.mjs";
 import { loadDays, traceForValidator } from "../lib/validator-trace-query.mjs";
+import { dayFileHoles } from "../lib/trace-day-coverage.mjs";
 import { signatureSensitivity, signatureCohort } from "../lib/validator-sensitivity.mjs";
 import { riskProfile } from "../lib/validator-retrace.mjs";
 
@@ -433,5 +434,11 @@ if (problems.length) {
   if (problems.length > 60) console.log(`  ... ${problems.length - 60} weitere`);
   process.exit(1);
 }
+
+// Die Spanne ZWISCHEN Tagesdateien steht in keiner Datei, die existiert. Sie wird hier
+// benannt, damit ein Rekorder-Stop nicht als Stille im Netz gelesen wird.
+const holes = dayFileHoles(days);
+console.log("\n  UNBEOBACHTETE SPANNEN ZWISCHEN TAGESDATEIEN: " + holes.length);
+for (const h of holes) console.log("    " + h.between + ": " + h.fromIso + " -> " + h.toIso + " = " + h.ms + " ms (nicht bewertet)");
 console.log("\nKein Widerspruch: jede Ebene und jeder Knoten nennt dieselbe Ledger-Tatsache.");
 process.exit(0);

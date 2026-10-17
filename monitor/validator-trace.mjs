@@ -446,7 +446,7 @@ function featureEntry(idx) {
 // 64-stelliges Hex ist, wäre in der Divergenz-Auswertung eine Linie, die es nicht gibt.
 const HEX64 = /^[0-9A-Fa-f]{64}$/;
 const hexOrNull = (x) => (typeof x === "string" && HEX64.test(x) ? x.toUpperCase() : null);
-const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0, streamFallbacks: 0 };
+const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0, streamFallbacks: 0, ledgerNoHash: 0 };
 // Anzeigetext fuer die Netz-Quorum-Achse: 'nicht erfasst' ist eine Aussage ueber den Rekorder,
 // 'kein Quorum' waere eine Aussage ueber das Netz und wird hier nie erzeugt.
 const quorumSampleState = () => {
@@ -607,6 +607,18 @@ function recordCaptureEvent(kind, url) {
 
 function onLedgerClosed(m) {
   const idx = Number(m.ledger_index);
+  // Ein Close-Rahmen ohne gueltigen ledger_hash ist kein Schliess-Beweis und kein
+  // Gegenbeweis. Wuerde er ausgewertet, wird daraus closedHash null -> closed false ->
+  // nc true -> Incident-Typ no-quorum: eine Aussage ueber das Netz, geboren aus einem
+  // fehlenden Feld im eigenen Stream. Der Index bleibt unbewertet und erscheint als
+  // Luecke in der Index-Folge des naechsten Ledgers - die ehrliche Aussage ist: hier
+  // wurde nichts erfasst, nicht: hier hat niemand abgestimmt.
+  if (!hexOrNull(m.ledger_hash)) {
+    stats.ledgerNoHash++;
+    recordCaptureEvent("ledger-no-hash", currentUrl);
+    log("ledgerClosed ohne gueltigen ledger_hash verworfen:", idx);
+    return false;
+  }
   if (lastLedger !== null && idx > lastLedger + 1) {
     const from = lastLedger + 1, to = idx - 1;
     const d = dayObj(dayOf(toMs(m.ledger_time)));
@@ -635,9 +647,10 @@ function onMessage(ev) {
       t: toMs(m.signing_time),
     });
   } else if (m.type === "ledgerClosed") {
-    stats.ledgers++;
     lastLedgerAt = Date.now();
-    onLedgerClosed(m);
+    // Gezaehlt wird nur, was wirklich ausgewertet wird. Ein Rahmen ohne gueltigen Hash
+    // bleibt als ledgerNoHash und als Erfassungs-Ereignis stehen, nicht als Ledger.
+    if (onLedgerClosed(m)) stats.ledgers++;
   } else if (m.type === "transaction" && TX_SHAPE) {
     stats.txShape++;
     // Tx dem Ledger zuordnen, in dem sie validiert wurden. Fehlt die Indexangabe, gehört sie
@@ -793,7 +806,7 @@ async function main() {
   const ledgerTimer = setInterval(() => { watchLedger(); }, STALL_CHECK_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} OhneHash=${stats.ledgerNoHash} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
   }, STAT_MS);
   let stopping = false;
   const stop = async () => {
