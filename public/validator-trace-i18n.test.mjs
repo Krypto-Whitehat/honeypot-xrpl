@@ -237,16 +237,37 @@ test("Labels: die Kohorten-Empfehlung nennt ihre eigene Erfassung, kein Urteil u
   }
 });
 
-// Der noQuorum-Zaehler zaehlt, was DIESER Rekorder nicht gesehen hat. Ein Label, das daraus ein
-// fehlendes Netz-Quorum macht, ist eine Behauptung ueber das Netz - am 2026-10-16 durch xrpscan und
-// xrplcluster widerlegt (die Ledger wurden geschlossen, 28 Stimmen waren noetig und waren da).
+// Zwei Aussagen, zwei Labels. 'vote-not-observed' zaehlt, was DIESER Rekorder auf einem
+// bewiesen geschlossenen Ledger nicht gesehen hat; 'no-quorum' verneint die Schliessung des
+// Netzes. Am 2026-10-16 war beides in einem Wort gemischt - und das Wort sprach ein Quorum ab,
+// das xrpscan und xrplcluster bestaetigt hatten (Ledger geschlossen, 28 Stimmen noetig, 28 da).
+// Der Sammelzaehler der Tagesdatei heisst deshalb Sammelzaehler und darf kein Quorum absprechen;
+// in den Aufschluesselungen steht jede Art als eigene Zahl mit eigenem Wort.
 test("Labels: der Erfassungs-Zaehler darf kein Netz-Quorum absprechen", () => {
-  const keys = ["vt.bucketAria", "vt.bucketReadout", "vt.impact.typesNote", "vt.verdict.network-window"];
-  for (const k of keys) {
+  for (const k of ["vt.k.noQuorumPool", "vt.k.vote-not-observed", "vt.impact.typesNote", "vt.verdict.network-window"]) {
     for (const lang of ["en", "de"]) {
       const label = DICT[lang][k];
       assert.ok(typeof label === "string" && label.length > 0, k + " fehlt in " + lang);
       assert.ok(!/no quorum|kein Quorum|ohne Quorum/i.test(label), k + " (" + lang + ") spricht ein Quorum ab: " + label);
+    }
+  }
+  // In der Saulen-Aufschrift muss die Erfassungs-Art erkennbar bleiben, und die Quorum-Absage
+  // darf nur an ihrer eigenen Zahl haengen - nicht an der Zahl fuer 'kein Vote erfasst'.
+  for (const k of ["vt.bucketAria", "vt.bucketReadout"]) {
+    for (const lang of ["en", "de"]) {
+      const label = DICT[lang][k];
+      assert.ok(label.includes("{voteNotObserved}") && label.includes("{noQuorum}"),
+        k + " (" + lang + ") nennt die beiden Abwesenheits-Arten nicht getrennt: " + label);
+      const wordsAfter = (token) => {
+        const at = label.indexOf(token);
+        const rest = label.slice(at + token.length);
+        const next = rest.indexOf("{");
+        return next < 0 ? rest : rest.slice(0, next);
+      };
+      assert.ok(!/no quorum|kein Quorum|ohne Quorum/i.test(wordsAfter("{voteNotObserved}")),
+        k + " (" + lang + ") haengt die Quorum-Absage an die Erfassungs-Zahl: " + label);
+      assert.ok(/no quorum|kein Quorum/i.test(wordsAfter("{noQuorum}")),
+        k + " (" + lang + ") benennt die Quorum-Absage nicht als solche: " + label);
     }
   }
 });

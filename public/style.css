@@ -226,6 +226,7 @@
   --a6-sev-suspect: #9a5b00;
   --a6-sev-info: #1d4ed8;
   --a6-sev-neutral: #62626b;
+  --a6-sev-quorum: #6d28d9;
 
   /* Konsolidierte Tokens (Design-Audit 2026-10-06): Werte, die bisher als
      hartcodierte Hex mehrfach im Stylesheet standen — dieselben Farben, nur
@@ -339,6 +340,7 @@
   --a6-sev-suspect: #fbbf24;
   --a6-sev-info: #9cc8f0;
   --a6-sev-neutral: #9aa4b0;
+  --a6-sev-quorum: #c4b5fd;
   --a6-ink-fill: #eef2f6;
   --a6-on-ink: #0a0c0f;
   --a6-card-line: rgba(143, 184, 220, 0.28);
@@ -3125,7 +3127,7 @@ body[data-a6] {
    Balkenhöhe und Achse teilen sich ein Maß: --u = Plot-Höhe / Achsenmaximum, ein Balken mit
    --n Vorfällen ist deshalb zwingend so hoch, wie die Gitterlinie bei n sagt.
    Kein WebGL, keine neue Abhängigkeit. */
-.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --dc: var(--d); --dzc: calc(var(--d) * var(--dz-k)); --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 208px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-noQuorum: var(--a6-sev-neutral); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); --vt-seam: var(--a6-face-seam); --vt-edge-side: color-mix(in srgb, var(--a6-face-edge) 55%, transparent); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
+.vt-profile { container-type: inline-size; --skew: 45deg; --dz-k: 1; --dc: var(--d); --dzc: calc(var(--d) * var(--dz-k)); --gap: clamp(4px, 0.8cqw, 11px); --gutter: clamp(20px, 4.2cqw, 42px); --plot-h: 208px; --col-w: calc((100cqw - var(--gutter) - 3px - 23 * var(--gap)) / 24); --d: min(max(4px, calc(var(--col-w) * 0.22)), 8.5px, calc(var(--plot-h) * var(--dmax, 1))); --dz: calc(var(--d) * var(--dz-k)); --u: calc(var(--plot-h) / var(--peak, 1)); --vt-missed: var(--a6-sev-suspect); --vt-partial: var(--a6-sev-info); --vt-wrongHash: var(--a6-sev-malicious); --vt-voteNotObserved: var(--a6-sev-neutral); --vt-noQuorum: var(--a6-sev-quorum); --vt-shade: var(--a6-face-shade); --vt-sheen: var(--a6-face-sheen); --vt-edge: var(--a6-face-edge); --vt-seam: var(--a6-face-seam); --vt-edge-side: color-mix(in srgb, var(--a6-face-edge) 55%, transparent); position: relative; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); background: var(--a6-graph-canvas); padding: 10px 12px 8px; }
 .vt-profile-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .vt-profile-meta, .vt-readout { margin: 0; font-family: var(--a6-mono); font-size: 11px; color: var(--a6-muted); }
 .vt-readout { color: var(--a6-ink); }
@@ -3245,7 +3247,7 @@ body[data-a6] {
    und zeigt, dass die Transaktions-Forensik an einem Ausfall-Ledger dieses Intervalls eine
    Form-Signatur gemessen hat. Er ist schmucklos und absichtlich klein - die Aussage liegt
    im Readout und im Streifen. Am Rand, damit die Wertemarke in derselben Höhe steht. */
-.vt-mark { position: absolute; right: 0; bottom: calc(var(--bh) + var(--dzc) + 1px); width: 6px; height: 6px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
+.vt-mark { position: absolute; right: 0; bottom: calc(var(--bh) + var(--dzc) - 6px); width: 6px; height: 6px; border-radius: 50%; background: var(--a6-accent); box-shadow: 0 0 0 1.5px var(--a6-graph-canvas); }
 .vt-axis { position: relative; height: 14px; margin: 4px 3px 0 var(--gutter); }
 .vt-axis span { position: absolute; top: 0; transform: translateX(-50%); font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); white-space: nowrap; }
 /* Kohortenstreifen: eine Zeile unter der Zeitachse, exakt auf den Intervallen der Säulen
@@ -3278,7 +3280,11 @@ body[data-a6] {
 .vt-swatch.vt-c-missed { background: var(--a6-sev-suspect); }
 .vt-swatch.vt-c-partial { background: var(--a6-sev-info); }
 .vt-swatch.vt-c-wrongHash { background: var(--a6-sev-malicious); }
-.vt-swatch.vt-c-noQuorum { background: var(--a6-sev-neutral); }
+.vt-swatch.vt-c-voteNotObserved { background: var(--a6-sev-neutral); }
+/* Die Quorum-Absage ist die schwerste Abwesenheits-Art: sie verneint, dass das Netz
+   ueberhaupt schloss. Sie bekommt eine eigene Farbe, damit sie im Stapel nicht mit der
+   Erfassungs-Luecke auf einem bewiesen geschlossenen Ledger verwechselt wird. */
+.vt-swatch.vt-c-noQuorum { background: var(--a6-sev-quorum); }
 .vt-heat-key { width: 12px; height: 11px; border-radius: var(--a6-r-xs); background: color-mix(in srgb, var(--a6-graph-grid) 55%, transparent); }
 .vt-heat-key.vt-state-clean { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
 .vt-heat-key.vt-state-solo { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }

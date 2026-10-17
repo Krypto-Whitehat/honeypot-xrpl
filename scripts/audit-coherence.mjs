@@ -30,8 +30,9 @@
 //     Knoten, die aus einer Erfassungsbeobachtung kommt.
 //  H) WARMLAUF-BELEG  ein 'stream-open'-Wert braucht das Abo-Ereignis in derselben
 //     Tagesdatei: kein Flag ohne Abo-Offnung, kein Flag auf geschlossenem Ledger ohne
-//     cg = true, keine zwei Flags hintereinander, nie mehr Flags als Abo-Ereignisse. Eine
-//     abgeschnittene Ereignisliste heisst 'nicht pruefbar', nicht 'widerspruchsfrei'.
+//     cg = true, kein Flag, das sein Abo-Ereignis mit dem vorherigen teilen muesste, nie
+//     mehr Flags als Abo-Ereignisse. Eine abgeschnittene Ereignisliste heisst 'nicht
+//     pruefbar', nicht 'widerspruchsfrei'.
 //  I) ZUORDNUNG  ein 'missed'-Vorfall ist ein Knoten-Urteil und braucht den Beleg der
 //     Zuordnungsgrenze ('aa === true' am Vorfall oder an der Forensik-Zeile desselben Ledgers).
 //     Ohne Beleg muss er als Erfassungs-Aussage stehen, und der Zaehler muss mitgewandert sein:
@@ -189,11 +190,21 @@ for (const master of masters) {
   }
 }
 
-// H) WARMLAUF-BELEG  'stream-open' ist nur dann eine Messung, wenn dieselbe Tagesdatei die
-// zugehoerige Abo-Offnung ausweist. Ein Flag ohne Abo-Ereignis, zwei Flags direkt
-// hintereinander, oder ein Flag auf einem geschlossenen Ledger, dessen Schliess-Bilanz nicht
-// 'Luecke' sagt, ist eine Behauptung ohne Beleg. Eine abgeschnittene Ereignisliste fuehrt zu
-// 'nicht pruefbar', nicht zu einem erfundenen Befund und nicht zu einem erfundenen Widerspruch.
+// H) WARMLAUF-BELEG  'stream-open' ist nur dann eine Messung, wenn ein Abo-Ereignis dieses
+// Rekorders den Ledger als ersten auf diesem Abo ausgewertet hat. Ein Flag ohne Abo-Ereignis,
+// zwei Flags, die sich dasselbe Abo-Ereignis teilen muessten, oder ein Flag auf einem
+// geschlossenen Ledger, dessen Schliess-Bilanz nicht 'Luecke' sagt, ist eine Behauptung ohne
+// Beleg. Eine abgeschnittene Ereignisliste fuehrt zu 'nicht pruefbar', nicht zu einem erfundenen
+// Befund und nicht zu einem erfundenen Widerspruch.
+// Adjazenz in ledgerStats ist kein Beweis fuer einen nicht zurueckgesetzten Abo-Status: die
+// Liste enthaelt nur Ledger mit Vorfaellen, dazwischen liegen bewertete Ledger, und der Rekorder
+// setzt den Status bei jeder Auswertung zurueck (lib/validator-trace.mjs: streamOpenCapture beim
+// Auslesen, streamOpenPending = false am Ende derselben Auswertung, kein frueherer Ausstieg).
+// Geprueft wird deshalb das Abo selbst: das spaeteste Abo-Ereignis vor der Schliess-Zeit dieses
+// Ledgers. Einlaufzeit ist eingerechnet, weil die validated-Meldung nach der Netz-Schliessung
+// eintrifft (groester im Datensatz gemessener Abstand eines belegenden Abos zur Schliessung:
+// 17 s; die Kappe unten laesst 60 s zu und ist damit deutlich weiter als jede Messung).
+const ARM_SLACK_MS = 60000;
 let warmFlags = 0;
 let warmBacked = 0;
 let warmUncheckable = 0;
@@ -201,22 +212,31 @@ let prevOpens = [];
 let prevTruncated = false;
 let prevCarry = 0;
 let prevTrust = true;
-let prevFlagged = false;
+let prevArmAt = null;
 for (const d of days) {
   const rows = Array.isArray(d.ledgerStats) ? d.ledgerStats : [];
   const opens = (Array.isArray(d.captureEvents) ? d.captureEvents : []).filter((e) => e && e.e === "open");
   const truncated = d.captureEventsTruncated === true;
   const flaggedRows = rows.filter((r) => r && r.so === true);
   for (const row of rows) {
-    if (!row || row.so !== true) { prevFlagged = false; continue; }
-    if (prevFlagged) bad("H", `${d.date} #${row.l}`, "Warmlauf-Luecke direkt nach der vorherigen: der Abo-Status wurde nicht zurueckgesetzt");
-    prevFlagged = true;
+    if (!row || row.so !== true) { prevArmAt = null; continue; }
+    const at = `${d.date} #${row.l}`;
+    const closeMs = Number(row.t);
+    let armAt = null;
+    if (Number.isFinite(closeMs)) {
+      for (const e of [...prevOpens, ...opens]) {
+        const atMs = Number(e.atMs);
+        if (Number.isFinite(atMs) && atMs <= closeMs + ARM_SLACK_MS && (armAt === null || atMs > armAt)) armAt = atMs;
+      }
+    }
+    if (prevArmAt !== null && armAt !== null && armAt <= prevArmAt) {
+      bad("H", at, `Warmlauf-Luecke ohne eigenes Abo-Ereignis: das spaeteste Abo vor dieser Schliessung (${String(armAt)}) ist schon die Grundlage der vorherigen (${String(prevArmAt)})`);
+    }
+    prevArmAt = armAt;
     if (row.cl !== true) continue;
     warmFlags += 1;
-    const at = `${d.date} #${row.l}`;
     if (row.cg !== true) bad("H", at, `Warmlauf-Flag auf geschlossenem Ledger, aber die Schliess-Bilanz sagt cg=${String(row.cg)}`);
-    const backing = [...opens, ...prevOpens].find((e) => e.l === null || (Number.isFinite(e.l) && Number.isFinite(row.l) && e.l < row.l));
-    if (backing) warmBacked += 1;
+    if (armAt !== null) warmBacked += 1;
     else if (truncated || prevTruncated) warmUncheckable += 1;
     else bad("H", at, "Warmlauf-Luecke ohne Abo-Ereignis in dieser oder der vorangegangenen Tagesdatei");
   }
@@ -406,7 +426,7 @@ if (!QUIET) {
   console.log(`  Forensik-Zeilen: ${rowsChecked} | Ursachen-Zeilen: ${causeRowsChecked} | Retrace-Karten: ${retraceRowsChecked} | Zurechnungen: ${attributionChecked}`);
   console.log(`  Eindeutige Ledger: ${ledgers} | Erfassung gemessen Luecke ${gapsMeasured} | gemessen keine Luecke ${gapsRuledOut} | nicht erfasst ${gapsOpen}`);
 }
-if (!QUIET) console.log(`  Warmlauf-Luecken (stream-open): ${warmFlags} | mit Abo-Ereignis belegt ${warmBacked} | nicht pruefbar (Ereignisliste abgeschnitten) ${warmUncheckable}`);
+if (!QUIET) console.log(`  Warmlauf-Luecken (stream-open): ${warmFlags} | mit eigenem Abo-Ereignis belegt ${warmBacked} | nicht pruefbar (Ereignisliste abgeschnitten) ${warmUncheckable}`);
 if (!QUIET) console.log(`  Knoten-Urteil 'missed': mit Beleg ${missedProven} | ohne Beleg ${missedUnproven} | Tage mit Zaehler-Vergleich ${missedDaysChecked}, Abweichungen ${missedCounterBad}`);
 if (!QUIET) console.log(`  Raten-Zeilen: ${rateRowsChecked} Empfindlichkeit, ${cohortRowsChecked} Kohorte, ${riskRowsChecked} Risiko | ohne Rate zurueckgehalten ${rateRowsWithheld}`);
 if (!QUIET) console.log(`  Zaehler-Vokabel nachgefuehrt (no-quorum -> vote-not-observed, Ledger-Zahl): ${countersRenamed}`);

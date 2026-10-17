@@ -18,9 +18,12 @@ registerDict(VALIDATOR_DICT);
 
 const RANGES = ["1h", "24h", "7d", "30d", "all"];
 const BUCKETS = 24;
-const AXIS_TICKS = [0, 6, 12, 18];
-const PROFILE_TYPES = ["missed", "partial", "wrongHash", "noQuorum"];
-const TYPE_KEY = { missed: "missed", partial: "partial", "wrong-hash": "wrongHash", "no-quorum": "noQuorum", "vote-not-observed": "noQuorum" };
+// Der letzte benannte Tick muss das Ende des Fensters nennen: [0, 6, 12, 18] liess die
+// Achse bei Intervall 18 enden, obwohl 24 Saulen bis Intervall 23 reichen - die Achse
+// unterschrieb ein Ende funf Intervalle vor dem letzten Saulenrand.
+const AXIS_TICKS = [0, 6, 12, 18, 23];
+const PROFILE_TYPES = ["missed", "partial", "wrongHash", "voteNotObserved", "noQuorum"];
+const TYPE_KEY = { missed: "missed", partial: "partial", "wrong-hash": "wrongHash", "no-quorum": "noQuorum", "vote-not-observed": "voteNotObserved" };
 const SPAN_MS = { "1h": 3600000, "24h": 86400000, "7d": 7 * 86400000, "30d": 30 * 86400000, all: null };
 const RETRACE_SHOWN = 12;
 const RISK_ROWS = 12;
@@ -541,10 +544,10 @@ function attributionBlock(a) {
         + (w.observedDayOnly > 0 ? " · " + h.esc(h.t("vt.inWindowDayOnly", { ledgers: w.observedDayOnly, days: w.daysPartial ?? 0 })) : "") + "</small></p>"
       : '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small></p>";
     const attributionLine = attributionBlock(d.attribution);
-    const cards = [["ok", src.ok], ["partial", src.partial], ["missed", src.missed], ["no-quorum", src.noQuorum ?? 0], ["wrong-hash", src.wrongHash], ["observed", src.observed]]
-      .map(([k, v]) => '<div class="vt-card vt-' + k + '"><small>' + h.esc(h.t("vt.k." + k)) + "</small><b>" + h.esc(String(v)) + "</b></div>").join("");
+    const cards = [["ok", src.ok], ["partial", src.partial], ["missed", src.missed], ["no-quorum", src.noQuorum ?? 0, "noQuorumPool"], ["wrong-hash", src.wrongHash], ["observed", src.observed]]
+      .map(([k, v, label]) => '<div class="vt-card vt-' + k + '"><small>' + h.esc(h.t("vt.k." + (label ?? k))) + "</small><b>" + h.esc(String(v)) + "</b></div>").join("");
     const totalLine = w
-      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small> ok " + h.esc(String(d.summary.ok)) + " · " + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(d.summary.missed)) + " · " + h.esc(h.t("vt.k.no-quorum")) + " " + h.esc(String(d.summary.noQuorum ?? 0)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(d.summary.wrongHash)) + "</p>"
+      ? '<p class="vt-scope"><small>' + h.esc(h.t("vt.totals")) + "</small> ok " + h.esc(String(d.summary.ok)) + " · " + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(d.summary.missed)) + " · " + h.esc(h.t("vt.k.noQuorumPool")) + " " + h.esc(String(d.summary.noQuorum ?? 0)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(d.summary.wrongHash)) + "</p>"
       : "";
     const noData = !d.summary.observed && !(d.incidents || []).length
       ? '<p class="vt-empty">' + h.esc(h.t("vt.nodata")) + "</p>"
@@ -642,7 +645,7 @@ function attributionBlock(a) {
     const from = profile.from;
     const now = profile.to;
     const width = Math.max(1, now - from);
-    const legend = { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 };
+    const legend = { missed: 0, partial: 0, wrongHash: 0, voteNotObserved: 0, noQuorum: 0 };
     const states = { clean: 0, solo: 0, cohort: 0, network: 0, unknown: 0, none: 0 };
     const signs = { hit: 0, clear: 0, unknown: 0, none: 0 };
     for (const cell of cells) {
@@ -694,7 +697,7 @@ function attributionBlock(a) {
         .map(([tag, n]) => tl(tag) + " x" + n).join(" . ");
       const args = {
         label: bucketLabel(from, width, i, range), total: cell.total, missed: cell.missed, partial: cell.partial,
-        wrongHash: cell.wrongHash, noQuorum: cell.noQuorum, cohort: cohortText(cell.cohort),
+        wrongHash: cell.wrongHash, voteNotObserved: cell.voteNotObserved, noQuorum: cell.noQuorum, cohort: cohortText(cell.cohort),
         ledgers: num(cell.ledgers), signatures: num(cell.signatures),
       };
       const style = "--n:" + axisUnit(cell.total, peak).toFixed(3) + ";--i:" + i
@@ -724,7 +727,7 @@ function attributionBlock(a) {
     const ticks = AXIS_TICKS.map((i) => '<span style="left:calc((var(--col-w) + var(--gap)) * ' + i + ' + var(--col-w) / 2)">'
       + h.esc(bucketLabel(from, width, i, range)) + "</span>").join("");
     const legendHtml = PROFILE_TYPES.map((k) => '<li><span class="vt-swatch vt-c-' + k + '"></span>'
-      + h.esc(h.t("vt.k." + (k === "wrongHash" ? "wrong-hash" : k === "noQuorum" ? "no-quorum" : k))) + " " + h.esc(String(legend[k])) + "</li>").join("");
+      + h.esc(h.t("vt.k." + (k === "wrongHash" ? "wrong-hash" : k === "noQuorum" ? "no-quorum" : k === "voteNotObserved" ? "vote-not-observed" : k))) + " " + h.esc(String(legend[k])) + "</li>").join("");
     const stateLegend = STATES.map((k) => '<li><span class="vt-heat-key vt-state-' + k + '"></span>'
       + h.esc(h.t("vt.state." + k)) + " " + h.esc(String(states[k])) + "</li>").join("");
     const signLegend = SIGN_STATES.map((k) => '<li><span class="vt-sign-key vt-sign-' + k + '"></span>'
@@ -2032,7 +2035,8 @@ function attributionBlock(a) {
     overlay.querySelector("#vt-title").textContent = h.t("vt.crossTitle");
     const rec = (d.recurring || []).map((r) => '<li class="vt-rec"><b>' + h.esc(tl(r.tag)) + "</b> <small>× " + h.esc(String(r.count)) + " · " + h.esc(String(r.validators)) + " " + h.esc(h.t("vt.validators")) + " · " + h.esc(String(r.ledgers)) + " " + h.esc(h.t("vt.ledgers")) + "</small></li>").join("");
     const per = Object.entries(d.perValidator || {}).sort((a, b) => (b[1].missed + b[1].wrongHash) - (a[1].missed + a[1].wrongHash))
-      .map(([k, v]) => '<li class="vt-row"><span class="vt-key">' + h.esc(k.slice(0, 12)) + "…</span><span>" + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(v.missed)) + " · " + h.esc(h.t("vt.k.no-quorum")) + " " + h.esc(String(v.noQuorum ?? 0)) + " · " + h.esc(h.t("vt.k.partial")) + " " + h.esc(String(v.partial)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(v.wrongHash)) + "</span></li>").join("");
+      .map(([k, v]) => '<li class="vt-row"><span class="vt-key">' + h.esc(k.slice(0, 12)) + "…</span><span>" + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(v.missed)) + " · " + h.esc(h.t("vt.k.vote-not-observed")) + " " + h.esc(String(v.voteNotObserved ?? 0)) + " · " + h.esc(h.t("vt.k.partial")) + " " + h.esc(String(v.partial)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(v.wrongHash))
+        + ((v.noQuorum ?? 0) > 0 ? " · " + h.esc(h.t("vt.k.no-quorum")) + " " + h.esc(String(v.noQuorum)) : "") + "</span></li>").join("");
     body.innerHTML = '<p class="vt-h">' + h.esc(h.t("vt.incidentsTotal", { n: d.incidents })) + "</p>"
       + '<h3 class="vt-h">' + h.esc(h.t("vt.impactTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.impactNote")) + "</p>" + impactBlock(d.impact)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.recurring")) + "</h3>" + (rec ? '<ul class="vt-list">' + rec + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.noRecurring")) + "</p>")

@@ -245,8 +245,32 @@ test('Signaturen: Marker und Streifen haengen an derselben Messung - und an ders
   assert.match(src, /class="vt-col vt-state-' \+ state \+ \(cell\.total \? " vt-nonzero" : ""\) \+ '" tabindex="0" role="group" style="' \+ style/,
     'style mit --n/--i muss auf .vt-col stehen (und vt-nonzero nur bei Vorfaellen)');
   assert.doesNotMatch(src, /<div class="vt-bar" style="/, '.vt-bar darf den Style nicht mehr tragen');
-  assert.match(ruleBody('.vt-mark'), /bottom:\s*calc\(var\(--bh\)\s*\+\s*var\(--dzc\)\s*\+\s*1px\)/,
-    '.vt-mark sitzt nicht auf der Oberkante des Prismas (Tiefe --dzc, je Profil konstant)');
+  /* Marker und Wertemarke teilten sich bisher dieselbe Hoehe: die Marke sitzt am rechten
+     Zellenrand, die Zahl liegt zentriert ueber der ganzen Zelle. Gemessen 2026-10-17 live
+     im ausgelieferten 30-Tage-Profil (Spalte 20, Zahl 464): rechtes Glyph-Ende 25,33 px,
+     linker Rand der Marke 24,86 px - der Punkt lag auf der letzten Ziffer. Bei drei- bis
+     vierstelligen Zahlen ist das regelmaessig, nicht ausnahmsweise. Die Marke rueckt in
+     die Kappe (--dzc), ihre Oberkante bleibt auf der Prismenkante --bh + --dzc, und die
+     Zahl beginnt 2 px darueber. */
+  assert.match(ruleBody('.vt-mark'), /bottom:\s*calc\(var\(--bh\)\s*\+\s*var\(--dzc\)\s*-\s*6px\)/,
+    '.vt-mark steht nicht in der Kappe (Oberkante auf der Prismenkante --bh + --dzc)');
+  {
+    const mark = ruleBody('.vt-mark');
+    const value = ruleBody('.vt-value');
+    const markH = Number((mark.match(/height:\s*(\d+)px/) ?? [])[1]);
+    const off = /bottom:\s*calc\(var\(--bh\)\s*\+\s*var\(--dzc\)\s*([-+])\s*(\d+)px\)/;
+    const signed = (m) => (m && m[1] === "-" ? -Number(m[2]) : Number(m[2]));
+    const markOff = signed(mark.match(off));
+    const valueOff = signed(value.match(off));
+    // Die Marke steht bei --bh + --dzc - 6px und ist 6 px hoch, ihre Oberkante liegt also
+    // genau auf der Prismenkante. Die Zahl beginnt bei --bh + --dzc + 2px. Der freie
+    // Streifen zwischen beiden ist die Rechenprobe, nicht eine Annahme.
+    const markTop = markOff + markH;
+    const free = valueOff - markTop;
+    assert.ok(markH > 0 && free >= 2,
+      'Marke und Wertemarke teilen sich dieselbe Hoehe: Marke ' + markH + ' px bei ' + markOff
+      + ' (Oberkante ' + markTop + '), Zahl bei ' + valueOff + ' - frei bleiben ' + free + ' px, gefordert mindestens 2)');
+  }
   assert.match(src, /class="vt-value" aria-hidden="true">' \+ h\.esc\(String\(cell\.total\)\)/,
     'Wertemarke fehlt im Markup - die Zahl ist nur in aria-label und data-tip');
   assert.match(src, /\+ \(cell\.total \? '<span class="vt-value"/, 'Wertemarke wird auch fur leere Intervalle gebaut');
@@ -408,7 +432,7 @@ test('CSS: Hoeheneinheit --bh ist dieselbe fuer Balken und Marker, ohne Untergre
   assert.match(css, /\.vt-col\s*\{[^}]*--bh:\s*calc\(var\(--u\)\s*\*\s*var\(--n,\s*0\)\)/, '--bh Grundregel');
   assert.doesNotMatch(css, /--bh:\s*max\(/, 'eine Untergrenze auf --bh hebt wieder Balken ueber ihren Achsenwert');
   assert.match(css, /\.vt-bar\s*\{[^}]*height:\s*var\(--bh\)/, 'Balkenhoehe aus --bh');
-  assert.match(css, /\.vt-mark\s*\{[^}]*bottom:\s*calc\(var\(--bh\)\s*\+\s*var\(--dzc\)\s*\+\s*1px\)/, 'Markerhoehe aus --bh und --dzc');
+  assert.match(css, /\.vt-mark\s*\{[^}]*bottom:\s*calc\(var\(--bh\)\s*\+\s*var\(--dzc\)\s*-\s*6px\)/, 'Markerhoehe aus --bh und --dzc, in der Kappe unter der Wertemarke');
   assert.doesNotMatch(css, /\.vt-bar\s*\{[^}]*height:\s*calc\(var\(--u\)\s*\*\s*var\(--n/, 'Balken darf nicht mehr ein eigenes Mass haben');
   assert.match(src, /vt-state-'\s*\+\s*state\s*\+\s*\(cell\.total\s*\?\s*" vt-nonzero"\s*:\s*""\)/, 'vt-nonzero genau bei Vorfaellen');
 });
@@ -1630,4 +1654,65 @@ test("Beobachtungsliste: Lib-Urteil, UI-Menge, Endpunkt und Form haengen aneinan
   assert.match(src, /vt\.watch\.error/, "ein Abruf-Fehler loescht die Marke oder verschwindet still");
   // Der Vergleich wird erst nach dem Rendern markiert: sonst vergliche ich den Besuch mit sich selbst.
   assert.match(src, /watchMarkup\(row, data\.windowCap\)\);[\s\S]{0,120}watchMarkVisit\(master\)/, "die Marke geht dem Vergleich voraus");
+});
+
+/* --- Profil-Taxonomie (Akkuratz 2026-10-17) ----------------------------------
+ * 'no-quorum' verneint die Schliessung des Netzes, 'vote-not-observed' beschreibt
+ * diese Erfassung auf einem bewiesen geschlossenen Ledger. Nachgezaehlt ueber
+ * data/validator-trace waren am 2026-10-17 alle 1.313 als 'no-quorum' gespeicherten
+ * Vorfalle Ledger mit eigenem Schliess-Beweis (closureProofs, cl === true, Hash von
+ * xrpscan und xrplcluster bestaetigt) - die Behauptung war in jedem einzelnen Fall
+ * falsch, und das Profil stapelte sie in denselben Zaehler wie die Erfassungs-Luecke.
+ * Beide Arten bekommen eigenen Stapel, eigene Farbe, eigenes Wort. */
+test('Profil-Taxonomie: Erfassungs-Luecke und Quorum-Absage sind eigene Stapel', () => {
+  const lib = read("../lib/validator-trace-query.mjs");
+  const i18n = read("i18n-validator.mjs");
+  assert.match(src, /const PROFILE_TYPES = \[[^\]]*"voteNotObserved",\s*"noQuorum"\]/,
+    "die Profil-Stapel trennen die beiden Abwesenheits-Arten nicht");
+  assert.match(src, /"vote-not-observed": "voteNotObserved"/,
+    "vote-not-observed liegt im Overlay wieder auf dem Quorum-Schluessel");
+  assert.match(src, /k === "voteNotObserved" \? "vote-not-observed"/,
+    "die Legende benennt die Erfassungs-Art nicht beim Namen");
+  assert.match(lib, /i\.type === "no-quorum" \? "noQuorum" : i\.type === "vote-not-observed" \? "voteNotObserved"/,
+    "die Lib stapelt vote-not-observed wieder in den Quorum-Zaehler");
+  assert.match(lib, /perValidator\[i\.master\] \?\?= \{[^}]*voteNotObserved: 0/,
+    "je Knoten fehlt der eigene Zaehler der Erfassungs-Art");
+  assert.match(lib, /else if \(i\.type === "no-quorum"\) e\.noQuorum\+\+; else if \(i\.type === "vote-not-observed"\) e\.voteNotObserved\+\+/,
+    "die Zaehler je Knoten werden wieder zusammengeworfen");
+  for (const k of ["voteNotObserved", "noQuorum"]) {
+    assert.ok(cssRules.has(".vt-swatch.vt-c-" + k), "Legenden-Farbe fehlt: vt-c-" + k);
+    assert.match(styleCss, new RegExp("\\.vt-profile \\{[^}]*--vt-" + k + ":"), "--vt-" + k + " fehlt im Profil");
+  }
+  const hue = (sel) => (ruleBody(sel).match(/background:\s*var\((--[^)]+)\)/) ?? [])[1];
+  const hVno = hue(".vt-swatch.vt-c-voteNotObserved");
+  const hNq = hue(".vt-swatch.vt-c-noQuorum");
+  assert.ok(hVno && hNq && hVno !== hNq,
+    "Erfassungs-Luecke und Quorum-Absage haben dieselbe Farbe (" + hVno + " / " + hNq + ")");
+  for (const key of ["vt.k.vote-not-observed", "vt.k.noQuorumPool", "vt.k.no-quorum"]) {
+    assert.equal(i18n.split("'" + key + "'").length - 1, 2, key + " fehlt in einer Sprache");
+  }
+  assert.match(i18n, /'vt\.k\.no-quorum': '[^']*[Qq]uorum/, "vt.k.no-quorum benennt die Quorum-Absage nicht als solche");
+  assert.doesNotMatch(i18n, /'vt\.k\.noQuorumPool': '[^']*[Qq]uorum/, "vt.k.noQuorumPool spricht wieder ein Quorum ab");
+});
+
+/* --- Achsen-Ende (gemessen 2026-10-17) --------------------------------------
+ * Das Profil zeichnet 24 Intervalle, die Achse benannte Ticks auf 0, 6, 12, 18. Im
+ * ausgelieferten 30-Tage-Fenster endeten die Beschriftungen bei 10-15, das Fenster
+ * reichte bis 10-17: die Achse unterschrieb ein Ende funf Intervalle vor ihrer letzten
+ * Saule. Ein Leser vergleicht dann Saulen mit einer Beschriftung, die nicht zu ihnen
+ * gehoert. */
+test('Achse: der letzte benannte Tick steht auf der letzten Saule', () => {
+  const buckets = Number((src.match(/const BUCKETS = (\d+)/) ?? [])[1]);
+  assert.ok(Number.isFinite(buckets) && buckets > 0, "BUCKETS fehlt im Overlay");
+  const m = src.match(/const AXIS_TICKS = \[([0-9,\s]+)\]/);
+  assert.ok(m, "AXIS_TICKS fehlt");
+  const ticks = m[1].split(",").map((x) => Number(x.trim()));
+  assert.ok(ticks.length >= 4, "zu wenige benannte Ticks: " + ticks.join(","));
+  assert.ok(ticks.every((v, i) => Number.isFinite(v) && (i === 0 || v > ticks[i - 1])),
+    "die Ticks sind nicht steigend: " + ticks.join(","));
+  assert.equal(ticks[0], 0, "die Achse beginnt nicht beim ersten Intervall");
+  assert.equal(ticks[ticks.length - 1], buckets - 1,
+    "die Achse benennt das Ende des Fensters nicht (letzte Saule " + (buckets - 1) + ", letzter Tick " + ticks[ticks.length - 1] + ")");
+  const gap = ticks.slice(1).map((v, i) => v - ticks[i]);
+  assert.ok(Math.max(...gap) <= 6, "die Ticks stehen zu weit auseinander: " + gap.join(","));
 });
