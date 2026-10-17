@@ -183,6 +183,14 @@ scenario.votes.push({ index: idx2, key: "rNonMemberFixtureSignerNotInTheRegistry
 const idx3 = idx0 + 5, close3 = close2 + 30000;
 scenario.ledgers.push({ index: idx3, hash: hex64(idx3), closeMs: close3, txCount: 2 });
 for (const s of signable.slice(1, 3)) scenario.votes.push({ index: idx3, key: s.key, hash: hex64(idx3), atMs: close3 + 1000 });
+// L4: der live widerlegte Fall, Ledger #107699168 vom 2026-10-16. Die eigene Stimmenzahl
+// erreicht das Ziel (28 von 28), aber nur 28 von 35 Mitgliedern kommen ueberhaupt an. Die
+// Netz-Referenz (api.xrpscan.com agreement_24h) sagt fuer jeden der 7 fehlenden Knoten
+// 0 verpasste Ledger von 19.473. 'hasQuorum' ist die eigene Stimmenzahl, kein
+// Vollstaendigkeitsbeweis - kein dieser fehlenden Votes darf dem Knoten zugeschrieben werden.
+const idx4 = idx0 + 6, close4 = close3 + 5000;
+scenario.ledgers.push({ index: idx4, hash: hex64(idx4), closeMs: close4, txCount: 5 });
+for (const s of signable.slice(1, 29)) scenario.votes.push({ index: idx4, key: s.key, hash: hex64(idx4), atMs: close4 + 1000 });
 
 const dirA = path.join(ROOT, "logs", "trace-proof-A");
 const outA = await runMonitor(dirA, 30);
@@ -225,6 +233,23 @@ check("L2 hat vote-not-observed-Vorfalle bei geschlossenem Ledger (kein Netz-Urt
 check("L1 hat missed-Vorfall des fehlenden Knotens",
   (dayA.incidents ?? []).some((x) => x.l === idx1 && x.type === "missed" && x.m === missing.master),
   "Knoten " + (missing.domain || missing.master.slice(0, 10)));
+// Die Zuordnungsgrenze: 'missed' verlangt eine nachgewiesene Voll-Erfassung, nicht nur
+// eine eigene Stimmenzahl, die das Ziel erfuellt. L1 sieht 34 von 35 (Basis 35), L4 sieht
+// 28 von 35 - unter 35 * 0,9 = 31,5. L4 ist damit der Fall, in dem die Engine frueher 7
+// Knotenfehler behauptet haette, die die Netz-Referenz widerlegt.
+check("L1: aa = true bei 34 von 35 gesehenen Mitgliedern (Voll-Erfassung nachgewiesen)",
+  row(idx1)?.aa === true && row(idx1)?.ms === 34 && row(idx1)?.cb === 35,
+  row(idx1) ? `ms=${row(idx1).ms} cb=${row(idx1).cb} gm=${row(idx1).gm} aa=${row(idx1).aa}` : "-");
+check("L4: eigenes Ziel erreicht, aber 28 von 35 gesehen -> aa = false",
+  row(idx4)?.aa === false && row(idx4)?.ms === 28 && row(idx4)?.cb === 35 && row(idx4)?.gm === 7,
+  row(idx4) ? `top=${row(idx4).top} need=${row(idx4).need} ms=${row(idx4).ms} cb=${row(idx4).cb} gm=${row(idx4).gm} aa=${row(idx4).aa}` : "-");
+check("L4: kein einziger fehlender Vote wird dem Knoten zugeschrieben",
+  (dayA.incidents ?? []).filter((x) => x.l === idx4).length === 7
+  && (dayA.incidents ?? []).filter((x) => x.l === idx4).every((x) => x.type === "vote-not-observed"),
+  "Typen auf L4: " + [...new Set((dayA.incidents ?? []).filter((x) => x.l === idx4).map((x) => x.type))].join(", "));
+check("ms/cb/gm stehen in jeder Forensik-Zeile (keine Zuordnung ohne Zahl)",
+  rows.every((r) => Number.isFinite(r.ms) && Number.isFinite(r.cb) && Number.isFinite(r.gm)),
+  rows.map((r) => `#${r.l} ms=${r.ms} cb=${r.cb} gm=${r.gm} aa=${r.aa}`).join(" "));
 
 // Diagnose-Ebene liest genau diese Datei: dieselben Bytes, die der Rekorder geschrieben hat.
 const diag = quorumCriticality([dayA], missing.master, { range: "all" });
@@ -240,8 +265,8 @@ check("L3: geschlossen mit Erfassungs-Luecke -> closed-capture-gap",
 check("keine Zeile behauptet 'not-closed' ohne Beleg (kein Netz-Stockungs-Befund)",
   diag.rows.every((r) => r.verdict !== "not-closed") && diag.critical === 0,
   `critical=${diag.critical}`);
-check("Schliess-Bilanz: 3 geschlossen, 1 Erfassungs-Luecke, 0 offene Erfassungs-Fragen",
-  diag.closed === 3 && diag.captureGaps === 1 && diag.captureGapUnknown === 0,
+check("Schliess-Bilanz: 4 geschlossen, 1 Erfassungs-Luecke, 0 offene Erfassungs-Fragen",
+  diag.closed === 4 && diag.captureGaps === 1 && diag.captureGapUnknown === 0,
   `closed=${diag.closed} captureGaps=${diag.captureGaps} unknown=${diag.captureGapUnknown} unanswered=${diag.unanswered}`);
 check("Erfassungs-Belege sind benannt: L2 index-basiert frei, L3 index-basiert Luecke",
   byLedger.get(idx2)?.captureGapBasis === "ledger-index" && byLedger.get(idx2)?.captureGap === false
@@ -353,7 +378,7 @@ check("Phase E: vor dem Abbruch wird gespeichert", (dayE?.captureEvents ?? []).l
 console.log("");
 console.log("Phase A Forensik-Zeilen (aus der geschriebenen Tagesdatei):");
 for (const r of rows) {
-  console.log(`  #${r.l}  ${r.top}/${r.need} Marge ${r.mg}  closed=${r.cl} cg=${r.cg} pg=${r.pg} ov=${r.ov} mm=${r.mm}  Empfang ${r.ov}/${r.ovb} ot=${r.ot}  hash ${String(r.ch).slice(0, 16)}...`);
+  console.log(`  #${r.l}  ${r.top}/${r.need} Marge ${r.mg}  closed=${r.cl} cg=${r.cg} pg=${r.pg} ov=${r.ov} mm=${r.mm}  Empfang ${r.ov}/${r.ovb} ot=${r.ot}  Abdeckung ${r.ms}/${r.cb} gm=${r.gm} aa=${r.aa}  hash ${String(r.ch).slice(0, 16)}...`);
 }
 console.log("");
 for (const r of diag.rows) {

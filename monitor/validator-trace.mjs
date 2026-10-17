@@ -298,6 +298,15 @@ function recordResult(r, detailNote) {
       // bleibt die Zahl dieses Ledgers; ovb ist dieselbe Groesse, nur als Median.
       ovb: Number.isFinite(f.observedBaseline) ? f.observedBaseline : null,
       ot: f.receptionThin === true,
+      // Abdeckungs-Bilanz, damit 'missed' in dieser Datei eine nachrechenbare Zahl ist und keine
+      // Behauptung: ms = dUNL-Mitglieder mit angekommenem Vote, cb = das eigene Abdeckungs-Niveau
+      // (Median der letzten Ledger ohne eigene Erfassungs-Luecke), gm = wie viele Mitglieder laut
+      // Schliess-Beweis hoechstens echt fehlen koennen, aa = true nur wenn ein fehlender Vote in
+      // diesem Ledger als Knoten-Befund zaehlen darf. Fehlen diese Felder, ist die Zuordnung offen.
+      ms: Number.isFinite(f.membersSeen) ? f.membersSeen : null,
+      cb: Number.isFinite(f.coverageBaseline) ? f.coverageBaseline : null,
+      gm: Number.isFinite(f.genuineAbsentMaxLedger) ? f.genuineAbsentMaxLedger : null,
+      aa: f.attributableAbsence === true,
       tx: r.txCount ?? 0, med: r.medianTx ?? 0,
       c: f.counts ?? { missed: 0, partial: 0, wrongHash: 0, noQuorum: 0 },
       // Tx-Form und die Belege der Signaturen, die in diesem Ledger feuerten. Die Konto-Adresse

@@ -936,7 +936,16 @@ function attributionBlock(a) {
         ? " · " + h.esc(h.t("vt.cq.bound", {
           absent: num(b.absentCount), max: num(b.genuineAbsentMax), min: num(b.captureArtifactMin) }))
         : "";
-      return hash + source + verified + gap + own + neededNote + evt + neededCheck + bound;
+      // Der Beleg hinter einem 'missed': diese Erfassung hat in diesem Ledger so viele
+      // dUNL-Mitglieder gesehen wie in ihren eigenen Ledgern davor, und die Zahl der
+      // fehlenden bleibt im Rahmen des Schliess-Beweises. Ohne diesen Beleg (aeltere
+      // Zeilen) bleibt die Zuordnung offen - die Zeile behauptet dann keinen Knoten-Fehler.
+      const attrib = r.capture && r.capture.attributableAbsence === true
+        && Number.isFinite(r.capture.membersSeen) && Number.isFinite(r.capture.coverageBaseline)
+        ? " \u00b7 " + h.esc(h.t("vt.cq.attribution.missed", {
+          seen: num(r.capture.membersSeen), base: num(r.capture.coverageBaseline), absent: num(r.capture.absentCount) }))
+        : "";
+      return hash + source + verified + gap + own + neededNote + evt + neededCheck + attrib + bound;
     };
     // Betroffenheit als eigene Zeile unter dem Ledger, nicht als achte Spalte: die Namen sind
     // lang, die Tabelle ist es schon. Ohne affectedCount (aeltere Antwort) bleibt die Zeile weg -

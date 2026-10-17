@@ -1125,3 +1125,13 @@ test("Kritikalitaets-Zelle: Warm-Lauf-Basis und nachrechenbares Ziel sind lesbar
   assert.equal(i18n.split("'vt.cq.neededCheck'").length - 1, 2, "vt.cq.neededCheck fehlt in einer Sprache");
   assert.equal(i18n.split("'vt.cq.basis.stream-open'").length - 1, 2, "vt.cq.basis.stream-open fehlt in einer Sprache");
 });
+/* Zuordnungs-Beleg (2026-10-17): ein fehlender Vote auf einem geschlossenen Ledger ist nur
+ * dann ein Knoten-Befund, wenn die eigene dUNL-Abdeckung am eigenen Niveau lag. Die Zeile
+ * muss diesen Beleg zeigen, sonst steht dort ein Knoten-Vorwurf ohne Zahl. */
+test("Kritikalitaets-Zelle: ein Knoten-Befund zeigt seinen Vollstaendigkeitsbeleg", () => {
+  assert.match(src, /r\.capture\.attributableAbsence/, "die Oberflaeche liest die Zuordnungsgrenze nicht");
+  assert.match(src, /vt\.cq\.attribution\.missed/, "der Beleg hat keine Beschriftung");
+  assert.match(src, /own \+ neededNote \+ evt \+ neededCheck \+ attrib/, "der Beleg haengt nicht an der Zeile");
+  const i18n = read("i18n-validator.mjs");
+  assert.equal(i18n.split("'vt.cq.attribution.missed'").length - 1, 2, "vt.cq.attribution.missed fehlt in einer Sprache");
+});
