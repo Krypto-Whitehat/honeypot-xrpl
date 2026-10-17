@@ -986,11 +986,26 @@ test('Kritikalitaets-Zelle: Fremdquelle, Gegenpruefung und Kohorten-Namen sind b
   assert.match(src, /c\.verifiedBy/, 'die zweite Autoritaet wird nicht ausgewertet');
   assert.match(src, /vt\.cq\.closureVerified/, 'Gegenpruefung hat keine Beschriftung');
   assert.match(src, /peerChips\(others, r\.affectedTruth, r\.affectedNames\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht oder ohne Gegenurteil');
-  assert.match(src, /typeof n\.name === "string" && n\.name \? n\.name : nameOf\(m\)/, 'der Name aus der Lib wird nicht ausgewertet - die Kohorte haengt allein an der Browser-Liste');
+  assert.match(src, /typeof n\.name === "string" && n\.name \? n\.name : null/, 'der Name aus der Netz-Auskunft wird nicht ausgewertet');
+  assert.match(src, /e\.name \?\? nameOf\(m\)/, 'ohne Netz-Name faellt der Chip nicht auf die geladene dUNL-Liste zurueck');
   // Ein Name ohne Gegenurteil ist eine Beschuldigung. Die Lib liefert je Knoten das Urteil,
   // und die UI darf es nicht wegwerfen.
   assert.match(src, /vt\.cq\.truth\.summary/, 'die Kohorten-Bilanz fehlt im Overlay');
   assert.match(src, /vt-peer-\' \+ verdict/, 'der Chip tragt sein Gegenurteil nicht sichtbar');
+});
+
+/* Die Chip-Liste wird in zwei Stuecke geschnitten (shown / rest), und map liefert die Position
+ * innerhalb des Schnitts. Wer Namen und Gegenurteil ueber diese Position gegen die Gesamtliste
+ * indexiert, haengt ab dem 13. Knoten den Namen des ersten an. Live gemessen am 2026-10-17 auf
+ * #107694001: 34 benannte Knoten, die 22 verborgenen trugen die Namen 1-22, die Knoten 23-34
+ * blieben ganz ungenannt. */
+test('Kohorten-Chips: Name und Gegenurteil haengen am Knoten, nicht an seiner Position', () => {
+  assert.match(src, /const byMaster = new Map\(\)/, 'Name und Gegenurteil werden nicht je Master-Key abgelegt');
+  assert.match(src, /const chip = \(m\) =>/, 'der Chip wird ueber die Position im Schnitt aufgerufen - die Liste ist geschnitten, die Namen sind es nicht');
+  assert.match(src, /byMaster\.get\(m\)/, 'der Chip holt Name und Gegenurteil nicht ueber den Master-Key');
+  const body = src.slice(src.indexOf("const chip = (m) =>"), src.indexOf("const shown = list.slice(0, PEER_SHOWN)"));
+  assert.ok(body.length > 0, "der Chip ist nicht auffindbar - der Guard prueft ins Leere");
+  assert.doesNotMatch(body, /names\[i\]|truth\[i\]/, 'innerhalb des Chips wird gegen die Gesamtliste indexiert - ab dem 13. Knoten steht ein fremder Name da');
 });
 
 /* Die Grenze, die aus der Schliessung folgt, muss an drei Stellen lesbar sein: in der

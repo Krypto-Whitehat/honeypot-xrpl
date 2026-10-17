@@ -183,13 +183,26 @@ export function createValidatorTrace(h) {
     const list = Array.isArray(keys) ? keys : [];
     // names (indexgleich zu keys) kommt aus der Lib und damit aus der Netz-Auskunft: ein Knoten,
     // der die gerade geladene dUNL-Liste verlassen hat, ist dann trotzdem benannt.
-    const shownName = (m, i) => {
+    // Name und Gegenurteil werden ueber den Master-Key geholt, nicht ueber die Position.
+    // names und truth sind indexgleich zu keys. Die Darstellung schneidet keys aber in zwei
+    // Stuecke (shown / rest), und map liefert die Position innerhalb des Schnitts. Ueber die
+    // Position haette der zweite Schnitt die Namen und Urteile des ersten: ab dem 13. Knoten
+    // stuende ein Knoten mit dem Namen eines anderen da. Live nachgerechnet am 2026-10-17 auf
+    // #107694001: 34 benannte Knoten, die 22 verborgenen trugen die Namen 1-22, die Knoten
+    // 23-34 blieben ganz ungenannt.
+    const byMaster = new Map();
+    for (let i = 0; i < list.length; i++) {
       const n = Array.isArray(names) ? names[i] : null;
-      return n && typeof n.name === "string" && n.name ? n.name : nameOf(m);
-    };
-    const chip = (m, i) => {
-      const label = shownName(m, i);
       const t = Array.isArray(truth) ? truth[i] : null;
+      const entry = byMaster.get(list[i]) ?? {};
+      if (entry.name === undefined) entry.name = n && typeof n.name === "string" && n.name ? n.name : null;
+      if (entry.truth === undefined) entry.truth = t ?? null;
+      byMaster.set(list[i], entry);
+    }
+    const chip = (m) => {
+      const e = byMaster.get(m) ?? {};
+      const label = e.name ?? nameOf(m);
+      const t = e.truth;
       if (!t) return '<span class="vt-peer">' + h.esc(label) + "</span>";
       const verdict = TRUTH_STATES.has(t.verdict) ? t.verdict : "not-comparable";
       const tip = h.t("vt.cq.truth." + verdict, { claims: num(t.claims), ground: num(t.groundMissed),
