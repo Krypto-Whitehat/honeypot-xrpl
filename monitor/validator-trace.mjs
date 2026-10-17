@@ -182,6 +182,11 @@ function recordResult(r, detailNote) {
   if (TX_SHAPE && shapeSeenNow) d.shapeSeen += 1;
   else if (TX_SHAPE && r.txCount > 0) d.shapeMissing += 1;
   d.ledgers += 1;
+  // Der Lauf-Zaehler in der Protokollzeile ist dieselbe Aussage wie d.ledgers: gezaehlt
+  // wird der aufgezeichnete Ledger, nicht der Close-Rahmen. Ein Rahmen, dessen Gnaden-
+  // fenster beim Laufende noch offen war, oder eine Doppelmeldung desselben Index waere
+  // sonst eine Zahl, die in keiner aufgezeichneten Datei steckt.
+  stats.ledgers += 1;
   if (!r.hasQuorum) d.quorumFail += 1;
   // Feature-Ebene dieses Ledgers aus dem Transaktions-Strom. Sie gilt für JEDES Ledger, nicht nur
   // für die mit Ausfall - sonst gibt es keinen Vergleich. Die Tags bleiben aus den Incident-Gründen
@@ -688,9 +693,11 @@ function onMessage(ev) {
     });
   } else if (m.type === "ledgerClosed") {
     lastLedgerAt = Date.now();
-    // Gezaehlt wird nur, was wirklich ausgewertet wird. Ein Rahmen ohne gueltigen Hash
-    // bleibt als ledgerNoHash und als Erfassungs-Ereignis stehen, nicht als Ledger.
-    if (onLedgerClosed(m)) stats.ledgers++;
+    // Gezaehlt wird die Auswertung, nicht der Rahmen: recordResult erhoht stats.ledgers.
+    // Der Rueckgabewert ist die Guard-Aussage (verworfen oder nicht) und keine Zahl.
+    // Ein Rahmen ohne gueltigen Hash bleibt als ledgerNoHash und als Erfassungs-Ereignis
+    // stehen, nicht als Ledger.
+    onLedgerClosed(m);
   } else if (m.type === "transaction" && TX_SHAPE) {
     stats.txShape++;
     // Tx dem Ledger zuordnen, in dem sie validiert wurden. Fehlt die Indexangabe, gehört sie
