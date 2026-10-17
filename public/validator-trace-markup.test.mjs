@@ -683,8 +683,8 @@ test('Tiefe: profile3d begrenzt die Tiefe auf ein Drittel des kurzesten Korpers'
  * diese Ebene. Guard ist die Verdrahtung - Markup, alle vier Label-Präfixe und eine Badge-Farbe
  * je Urteil. Ein Urteil ohne Farbe ist eine Aussage, die der Leser nicht sieht. */
 test('Peer-Ebene: Block, Label-Präfixe und jede Urteil-Farbe sind verdrahtet', () => {
-  assert.match(src, /function peerBlock\(peer\)/, 'peerBlock fehlt im Overlay');
-  assert.match(src, /peerBlock\(d\.peer\)/, 'peerBlock hängt nicht an der Trace-Antwort');
+  assert.match(src, /function peerBlock\(peer, absence\)/, 'peerBlock fehlt im Overlay');
+  assert.match(src, /peerBlock\(d\.peer, d\.absence\)/, 'peerBlock hängt nicht an der Trace-Antwort samt Zuordnungs-Bilanz');
   assert.match(src, /h\.t\("vt\.peer\.verdict\." \+ peer\.verdict\)/, 'Urteil ohne Label-Präfix');
   assert.match(src, /h\.t\("vt\.peer\.reason\." \+ peer\.verdictReason\)/, 'Urteilsgrund ohne Label');
   assert.match(src, /h\.t\("vt\.peer\.authority\." \+ peer\.verdictAuthority\)/, 'Mess-Autorität ohne Label');
@@ -1149,4 +1149,16 @@ test("Kritikalitaets-Zelle: ein Knoten-Befund zeigt seinen Vollstaendigkeitsbele
   assert.match(src, /own \+ neededNote \+ evt \+ neededCheck \+ attrib/, "der Beleg haengt nicht an der Zeile");
   const i18n = read("i18n-validator.mjs");
   assert.equal(i18n.split("'vt.cq.attribution.missed'").length - 1, 2, "vt.cq.attribution.missed fehlt in einer Sprache");
+});
+
+/* Peer-Rate ohne Beleg (Akkuratz 2026-10-17): die Peer-Ebene zaehlt 'missed' aus Tages-
+ * und Stunden-Zaehlern, und die haben keine ledger-genaue Zuordnung. Die Zahl bleibt
+ * sichtbar, aber sie darf nicht mehr als Knotenausfall ausgesprochen werden. */
+test('Peer-Block nennt die Beleg-Deckung seiner Abwesenheits-Zahlen', () => {
+  assert.match(src, /peerBlock\(d\.peer, d\.absence\)/, 'der Peer-Block bekommt die Zuordnungs-Bilanz nicht');
+  assert.match(src, /vt\.peer\.attribution/, 'die Beleg-Deckung wird nicht gezeigt');
+  const i18n = read('i18n-validator.mjs');
+  assert.equal((i18n.match(/'vt\.peer\.attribution'/g) || []).length, 2, 'die Beleg-Deckung fehlt in einer Sprache');
+  assert.doesNotMatch(i18n, /'vt\.peer\.summary': '[^']*node failures/, 'die englische Peer-Zeile spricht weiterhin von Knotenausfaellen');
+  assert.doesNotMatch(i18n, /'vt\.peer\.summary': '[^']*Knotenausf/, 'die deutsche Peer-Zeile spricht weiterhin von Knotenausfaellen');
 });

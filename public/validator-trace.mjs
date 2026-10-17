@@ -390,7 +390,7 @@ function attributionBlock(a) {
       + surfaceBlock(d.surface)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.couplingTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.couplingNote")) + "</p>"
       + couplingBlock(d.coupling)      + '<h3 class="vt-h">' + h.esc(h.t("vt.peerTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.peerNote")) + "</p>"
-      + peerBlock(d.peer)
+      + peerBlock(d.peer, d.absence)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.latTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.latNote")) + "</p>"
       + latencyBlock(d.diagnosis && d.diagnosis.latency)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.divTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.divNote")) + "</p>"
@@ -1040,7 +1040,7 @@ function attributionBlock(a) {
   // sie gegen dieselbe Messung aller anderen dUNL-Knoten desselben Fensters. Getrennt nach
   // Zustaendigkeit: missed / partial / wrong-hash sind knotenzurechenbar, no-quorum ist
   // Netz-Aussetzung und laeuft ausserhalb der Rate, nach der das Urteil gefaellt wird.
-  function peerBlock(peer) {
+  function peerBlock(peer, absence) {
     if (!peer || !peer.sample) return '<p class="vt-empty">' + h.esc(h.t("vt.peer.none")) + "</p>";
     const s = peer.sample;
     const hourLabel = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString().slice(5, 16).replace("T", " ") : "–");
@@ -1081,7 +1081,15 @@ function attributionBlock(a) {
       observed: num(s.observed), own: num(peer.own.failures), ownRate: rate(peer.own.rate),
       peers: num(pr.count), median: rate(pr.medianRate), p90: rate(pr.p90Rate), pooled: rate(pr.pooledRate),
     })];
-    lines.push(h.t("vt.peer.rank", { percentile: pcn(cmp.percentile * 100), above: num(cmp.peersAbove) }));
+    // Die Rate dieses Fensters ist nur so viel wert wie ihr Beleg: ein 'missed' aus einer Zeile
+    // ohne Abdeckungs-Messung ist weder ein Knoten-Ausfall noch eine Entlastung. Die Zahl bleibt
+    // stehen, aber sie steht nicht mehr als Knoten-Aussage da.
+    if (absence && Number.isFinite(absence.claims) && absence.claims > 0) {
+      lines.push(h.t("vt.peer.attribution", {
+        proven: num(absence.proven), claims: num(absence.claims), fault: num(absence.fault),
+        capture: num(absence.capture), open: num(absence.open),
+      }));
+    }
     // Vor der Grundrate und ueber der Grundrate sind verschiedene Aussagen: ein negatives excess
     // als "ueber der Grundrate" zu lesen ist das Gegenteil von dem, was gemessen wurde.
     if (Number.isFinite(cmp.excessFailures)) lines.push(cmp.excessFailures < 0
