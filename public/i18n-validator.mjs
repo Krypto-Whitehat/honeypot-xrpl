@@ -758,6 +758,7 @@ export const VALIDATOR_DICT = {
     'vt.coupling.gap.sample-too-small': 'fewer ledger rows than the minimum sample',
     'vt.coupling.gap.cohort-membership-derived': 'cohort membership derived from counters, not listed',
     'vt.coupling.gap.cohort-masters-incomplete': 'deviating nodes counted without a named node',
+    'vt.coupling.gap.cohort-masters-truncated': 'named nodes cut by the answer cap on part of the mass ledgers',
     // Die Last-Dosis-Achse der Kopplungsebene: eine Rate je Ledger-Groessenband und ein Urteil
     // ueber die Achse hinweg. eigener Name, weil vt.load.* schon die Last-Kurve der Diagnose-
     // Ebene fuehrt - zwei Ebenen duerfen sich kein Label ueberschreiben.
@@ -1533,6 +1534,7 @@ export const VALIDATOR_DICT = {
     'vt.coupling.gap.sample-too-small': 'weniger Ledger-Zeilen als die Mindeststichprobe',
     'vt.coupling.gap.cohort-membership-derived': 'Kohorten-Zugehoerigkeit aus Zaehlern abgeleitet, nicht aufgelistet',
     'vt.coupling.gap.cohort-masters-incomplete': 'Abweichende Knoten gezaehlt, ohne benannten Knoten',
+    'vt.coupling.gap.cohort-masters-truncated': 'Abweichende Knoten gezaehlt, aber durch die Antwort-Obergrenze gekuerzt',
     // Die Last-Dosis-Achse der Kopplungsebene: eine Rate je Ledger-Groessenband und ein Urteil
     // ueber die Achse hinweg. eigener Name, weil vt.load.* schon die Last-Kurve der Diagnose-
     // Ebene fuehrt - zwei Ebenen duerfen sich kein Label ueberschreiben.
