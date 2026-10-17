@@ -89,10 +89,43 @@ wss.on("connection", (ws) => {
   });
 });
 
+// ---------- Ersatz-Endpunkt: offen UND mit Strom (Ziel des Notrufs) ----------
+// Derselbe Stoff auf einem zweiten Port: beweisbar, dass der Notruf nicht nur umschaltet,
+// sondern danach wirklich wieder Ledger ankommen. Eigener Zeitanker, weil dieser Block vor
+// dem Haupt-Szenario liegt.
+const FIX2 = { ledgers: [], votes: [] };
+const fix2Base = Date.now() - 60000;
+for (let i = 0; i < 4; i++) {
+  const index = 107699501 + i;
+  FIX2.ledgers.push({ index, hash: hex64(index), closeMs: fix2Base + i * 1000, txCount: 10 + i });
+  for (const v of signable.slice(0, quorum)) FIX2.votes.push({ index, hash: hex64(index), key: v.key, atMs: fix2Base + i * 1000 });
+}
+const http2 = createServer();
+const wss2 = new WebSocketServer({ server: http2 });
+http2.listen(PORT + 1, "127.0.0.1");
+const WSS2_URL = "ws://127.0.0.1:" + (PORT + 1);
+wss2.on("connection", (ws) => {
+  ws.on("message", (raw) => {
+    let m; try { m = JSON.parse(raw); } catch { return; }
+    if (m.command === "subscribe") { ws.send(JSON.stringify({ id: m.id, result: { status: "success" }, engine_result: "tesSUCCESS" })); setTimeout(() => emit(ws, FIX2), 200); return; }
+    if (m.command === "server_info") {
+      ws.send(JSON.stringify({ id: m.id, result: { info: { server_state: "full", build_version: "fixture-2.0",
+        complete_ledgers: "32570-107699600", validation_quorum: FIX_QUORUM, validated_ledger: { seq: 107699600 } } }, engine_result: "tesSUCCESS" }));
+      return;
+    }
+    if (m.command === "ledger") {
+      const idx = Number(m.ledger_index);
+      const l = FIX2.ledgers.find((x) => x.index === idx);
+      ws.send(JSON.stringify({ id: m.id, result: { ledger: { account_hash: hex64(9), hash: l?.hash ?? hex64(0),
+        ledger_index: idx, transactions: [] } }, engine_result: "tesSUCCESS" }));
+    }
+  });
+});
+
 const waitClose = (ws) => new Promise((r) => (ws.on("close", r)));
 
 // ---------- Rekorder-Kindprozess ----------
-function runMonitor(dataDir, runSeconds, env = {}) {
+function runMonitor(dataDir, runSeconds, env = {}, meta = {}) {
   return new Promise((resolve) => {
     fs.rmSync(dataDir, { recursive: true, force: true });
     fs.mkdirSync(dataDir, { recursive: true });
@@ -104,7 +137,9 @@ function runMonitor(dataDir, runSeconds, env = {}) {
     let out = "";
     child.stdout.on("data", (c) => { out += c; });
     child.stderr.on("data", (c) => { out += c; });
-    child.on("exit", () => resolve(out));
+    // Der Abbruch-Weg ist ein eigener Befund: ohne den Exit-Code waere ein toter Lauf nicht
+    // von einem erfolgreichen zu unterscheiden.
+    child.on("exit", (code) => { meta.code = code; resolve(out); });
   });
 }
 
@@ -273,6 +308,47 @@ check("Phase A/B: ohne Stille wird kein Stillstand behauptet",
   !(outA + outB).includes("Stream still") && !((readDay(dirA)?.captureEvents ?? []).some((e) => e.e === "stall")),
   "Phase A und B laufen mit der scharfen Grenze nicht in den Stillstand");
 
+// ---------- Phase D: Haupt-Endpunkt ohne Ledger -> Ersatz-Endpunkt liefert ----------
+// Betriebsbefund 2026-10-17: der Rekorder-Job lief, server_info antwortete (Netz-Quorum 28
+// wurde erfasst), aber ueber eine Stunde kam kein einziger validierter Ledger. Der
+// Ledger-Waechter muss auf den Ersatz umschalten und danach wieder Ledger aufzeichnen.
+scenario = null;
+const dirD = path.join(ROOT, "logs", "trace-proof-D");
+const metaD = {};
+const outD = await runMonitor(dirD, 20, { TRACE_STALL_MS: "60000", TRACE_STALL_CHECK_MS: "1000",
+  TRACE_QUORUM_WSS: "", TRACE_NO_LEDGER_MS: "6000", TRACE_NO_LEDGER_EXIT_MS: "120000", TRACE_STAT_MS: "5000",
+  TRACE_STREAM_FALLBACK_WSS: WSS2_URL }, metaD);
+const dayD = readDay(dirD);
+const evD = dayD?.captureEvents ?? [];
+check("Phase D: der Notruf auf den Ersatz-Endpunkt wird loggiert", /Ersatz-Endpunkt/.test(outD),
+  (outD.match(/Kein Ledger seit.*/m) ?? ["(kein Log)"])[0]);
+check("Phase D: nach dem Notruf werden wieder Ledger aufgezeichnet", (dayD?.ledgers ?? 0) >= 1,
+  `ledgers=${dayD?.ledgers ?? "keine"} lastLedger=${dayD?.lastLedger ?? "-"}`);
+check("Phase D: der Ersatz steht in der Statistik", /Ersatz=[1-9]/.test(outD),
+  (outD.match(/validations=.*Ersatz=\d+.*/m) ?? ["(kein Log)"])[0]);
+check("Phase D: die Umschaltung steht als Erfassungs-Ereignis in der Tagesdatei und der Ersatz-Port ist genannt",
+  evD.some((e) => e.e === "stall") && evD.some((e) => String(e.url ?? "").includes(String(PORT + 1))),
+  evD.map((e) => e.e + "@" + String(e.url ?? "").split("//")[1]).join(","));
+check("Phase D: der Lauf endet nicht als Abbruch, weil der Ersatz liefert", metaD.code === 0,
+  "exit=" + metaD.code);
+
+// ---------- Phase E: kein Endpunkt liefert -> der Lauf gibt die Warteschlange frei ----------
+// Ein Lauf, der nichts mehr hoert, darf die Cron-Warteschlange nicht bis zum Actions-Limit
+// blockieren: sonst steht das Overlay Stunden hinter der Chain. Er muss sich selbst abbrechen
+// - aber erst nach dem Speichern, damit kein aufgezeichneter Stand verloren geht.
+const dirE = path.join(ROOT, "logs", "trace-proof-E");
+const metaE = {};
+const outE = await runMonitor(dirE, 40, { TRACE_STALL_MS: "60000", TRACE_STALL_CHECK_MS: "1000",
+  TRACE_QUORUM_WSS: "", TRACE_NO_LEDGER_MS: "6000", TRACE_NO_LEDGER_EXIT_MS: "9000",
+  TRACE_STREAM_FALLBACK_WSS: WSS_URL }, metaE);
+const dayE = readDay(dirE);
+check("Phase E: ohne jeden Ledger wird der Lauf abgebrochen (kein Zombie in der Warteschlange)",
+  metaE.code === 2, "exit=" + metaE.code);
+check("Phase E: der Grund ist genannt, nicht verschluckt", /Abbruch: kein Ledger seit/.test(outE),
+  (outE.match(/Abbruch:.*/m) ?? ["(kein Log)"])[0]);
+check("Phase E: vor dem Abbruch wird gespeichert", (dayE?.captureEvents ?? []).length >= 1,
+  JSON.stringify((dayE?.captureEvents ?? []).slice(0, 2)));
+
 // ---------- Bericht ----------
 console.log("");
 console.log("Phase A Forensik-Zeilen (aus der geschriebenen Tagesdatei):");
@@ -287,4 +363,5 @@ const failed = checks.filter((c) => !c.ok);
 console.log("");
 console.log(failed.length ? `NACHWEIS FEHLERHAFT: ${failed.length} von ${checks.length}` : `NACHWEIS ERFUELLT: ${checks.length}/${checks.length}`);
 http.close();
+http2.close();
 process.exit(failed.length ? 1 : 0);

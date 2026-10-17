@@ -34,6 +34,17 @@ const RIPPLE_EPOCH = 946684800;
 // or business use" — ein Dauer-Stream ist genau das, daher xrplcluster (InFTF).
 // Env TRACE_WSS (Komma-Liste) erlaubt einen anderen xrpld-Endpunkt ohne Code-Änderung.
 const WSS = (process.env.TRACE_WSS || "wss://xrplcluster.com").split(",").map((s) => s.trim()).filter(Boolean);
+// Ersatz-Endpunkte fuer den Fall, dass der Haupt-Endpunkt nichts mehr liefert. s1/s2 sind
+// xrpld und damit validations-faehig, aber laut xrpl.org nicht fuer Dauerbetrieb - sie sind
+// kein gleichwertiger Stream, sondern ein Notruf, und jede Umschaltung steht als
+// Erfassungs-Ereignis in der Tagesdatei. Env TRACE_STREAM_FALLBACK_WSS=0 schaltet ihn ab.
+const STREAM_FALLBACK_WSS = (process.env.TRACE_STREAM_FALLBACK_WSS ?? "wss://s1.ripple.com,wss://s2.ripple.com")
+  .split(",").map((s) => s.trim()).filter((s) => s && s !== "0");
+// Kein Ledger ist ein harter Grund: ein Socket kann offen sein, auf server_info antworten
+// und trotzdem keine validierten Ledger liefern. Ein solcher Lauf darf nicht 5 h als Zombie
+// die Cron-Warteschlange blockieren - sonst faellt das Overlay hinter die Chain zurueck.
+const NO_LEDGER_MS = Math.max(5000, Number(process.env.TRACE_NO_LEDGER_MS) || 300000);
+const NO_LEDGER_EXIT_MS = Math.max(10000, Number(process.env.TRACE_NO_LEDGER_EXIT_MS) || 900000);
 const VL_URL = "https://vl.ripple.com";
 const REGISTRY_URL = "https://api.xrpscan.com/api/v1/validatorregistry";
 const DETAIL_QUEUE_MAX = 50;
@@ -75,6 +86,9 @@ const STALL_CHECK_MS = Math.max(1000, Number(process.env.TRACE_STALL_CHECK_MS) |
 // Nach dem eigenen Trennen wird nur so lange auf onclose gewartet, bevor der Naechstversuch
 // direkt gestartet wird - ein halb offener Socket antwortet unter Umstaenden gar nicht mehr.
 const STALL_RECONNECT_MS = 20000;
+// Betriebs-Bericht je STAT_MS (Env TRACE_STAT_MS): ohne ihn laeuft der Rekorder stumm, und
+// ein Ersatz-Endpunkt oder eine Messung blieben unsichtbar, obwohl sie in der Datei stehen.
+const STAT_MS = Math.max(5000, Number(process.env.TRACE_STAT_MS) || 60000);
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const toMs = (rippleSec) => (Number(rippleSec) + RIPPLE_EPOCH) * 1000;
@@ -381,6 +395,8 @@ function pruneLocal() {
 // ---------- WebSocket ----------
 let ws = null;
 let lastMessageAt = 0;   // letzte Stream-Nachricht; 0 heisst 'noch keine', nie 'kein Strom'
+let lastLedgerAt = 0;    // letzte validierte Ledger-Meldung; 0 heisst 'noch keine'
+let streamTier = 0;      // 0 = Haupt-Endpunkte, 1 = Ersatz-Endpunkte (Notruf)
 let currentUrl = null;   // Endpunkt der aktiven Verbindung (steht in den Erfassungs-Ereignissen)
 let currentUrlIdx = 0;   // Position in der Endpunkt-Liste (Rotation nach einem Stillstand)
 let connSeq = 0;         // Nummer der aktiven Verbindung; verhindert zwei Mithoerer nebeneinander
@@ -407,7 +423,7 @@ function featureEntry(idx) {
 // 64-stelliges Hex ist, wäre in der Divergenz-Auswertung eine Linie, die es nicht gibt.
 const HEX64 = /^[0-9A-Fa-f]{64}$/;
 const hexOrNull = (x) => (typeof x === "string" && HEX64.test(x) ? x.toUpperCase() : null);
-const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0 };
+const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0, streamFallbacks: 0 };
 // Anzeigetext fuer die Netz-Quorum-Achse: 'nicht erfasst' ist eine Aussage ueber den Rekorder,
 // 'kein Quorum' waere eine Aussage ueber das Netz und wird hier nie erzeugt.
 const quorumSampleState = () => {
@@ -597,6 +613,7 @@ function onMessage(ev) {
     });
   } else if (m.type === "ledgerClosed") {
     stats.ledgers++;
+    lastLedgerAt = Date.now();
     onLedgerClosed(m);
   } else if (m.type === "transaction" && TX_SHAPE) {
     stats.txShape++;
@@ -612,7 +629,8 @@ function onMessage(ev) {
 }
 
 function connect(urlIdx = 0, backoff = 1000) {
-  const url = WSS[urlIdx % WSS.length];
+  const list = streamTier === 1 && STREAM_FALLBACK_WSS.length ? STREAM_FALLBACK_WSS : WSS;
+  const url = list[urlIdx % list.length];
   connSeq++;
   const mySeq = connSeq;
   currentUrl = url;
@@ -635,8 +653,14 @@ function connect(urlIdx = 0, backoff = 1000) {
     // Eine ersetzte Verbindung (Notruf nach Stillstand) darf keinen zweiten Mithoerer starten.
     if (mySeq !== connSeq) return;
     recordCaptureEvent("close", url);
-    log("getrennt, neuer Versuch", WSS[(urlIdx + 1) % WSS.length]);
-    setTimeout(() => connect(urlIdx + 1, Math.min(backoff * 2, 60000)), backoff);
+    log("getrennt, neuer Versuch", list[(urlIdx + 1) % list.length]);
+    setTimeout(() => {
+      // Ein nachlaufender Nachzug einer ersetzten Verbindung darf keinen zweiten Mithoerer
+      // oeffnen: zwei Sockets auf denselben Streams wuerden jede Nachricht zweigwaehlt
+      // zaehlen. Nur die Verbindung, die noch die aktuelle ist, darf nachziehen.
+      if (mySeq !== connSeq) return;
+      connect(urlIdx + 1, Math.min(backoff * 2, 60000));
+    }, backoff);
   };
   // Ein Fehler war bisher verschluckt. Er ist keine Aussage ueber das Netz, aber er ist ein
   // Grund, warum nichts ankommt - deshalb wird er genannt, nicht ignoriert.
@@ -664,6 +688,41 @@ function watchStream() {
   }, STALL_RECONNECT_MS);
 }
 
+// Abbruch mit gespeichertem Stand: ein Lauf, der nichts mehr hoert, darf keine Daten
+// verlieren und darf die Cron-Warteschlange nicht als Zombie blockieren.
+let bailing = false;
+async function bail(code, reason) {
+  if (bailing) return;
+  bailing = true;
+  log("Abbruch:", reason);
+  try { await flush(); } catch {}
+  if (ws) { try { ws.close(); } catch {} }
+  process.exit(code);
+}
+
+// Ledger-Waechter: der Stillstands-Waechter hoert auf Nachrichten, dieser hoert auf Ledger.
+// Ein Endpunkt kann offen bleiben, auf server_info antworten und trotzdem keine validierten
+// Ledger liefern. Deshalb zuerst der Notruf auf die Ersatz-Endpunkte, dann der Abbruch.
+function watchLedger() {
+  const idleMs = Date.now() - lastLedgerAt;
+  if (idleMs < NO_LEDGER_MS) return;
+  if (streamTier === 0 && STREAM_FALLBACK_WSS.length) {
+    streamTier = 1;
+    stats.streamFallbacks++;
+    recordCaptureEvent("stall", currentUrl);
+    log("Kein Ledger seit", Math.round(idleMs / 1000), "s ueber", WSS.join(","),
+      "-> Ersatz-Endpunkt", STREAM_FALLBACK_WSS.join(","), "(xrpld, Notruf, kein Dauerbetrieb)");
+    if (ws) { try { ws.close(); } catch {} }
+    connect(0, 1000);
+    return;
+  }
+  if (idleMs >= NO_LEDGER_EXIT_MS) {
+    bail(2, "kein Ledger seit " + Math.round(idleMs / 1000) + " s weder ueber " + WSS.join(",")
+      + (STREAM_FALLBACK_WSS.length ? " noch ueber " + STREAM_FALLBACK_WSS.join(",") : "")
+      + " - der naechste Cron-Lauf beginnt neu");
+  }
+}
+
 // Remote-Start: heutiger und gestriger Tag werden geladen, damit Lücken-Erkennung und Zähler
 // über Neustarts hinweg stimmen. Ein Lesefehler stoppt den Start (keine stille Lücke).
 async function preloadRemote() {
@@ -683,12 +742,16 @@ async function preloadRemote() {
 async function main() {
   log(REMOTE ? "Speicher: GitHub (Daten-Repo), Flush alle 5 min" : "Speicher: lokal data/validator-trace, Flush alle 30 s");
   log("Stillstands-Waechter:", STALL_CHECK_MS / 1000, "s Prueftakt, Grenze", STALL_MS / 1000, "s ohne Stream-Nachricht");
+  log("Ledger-Waechter:", NO_LEDGER_MS / 1000, "s ohne Ledger -> Ersatz-Endpunkt",
+    STREAM_FALLBACK_WSS.length ? STREAM_FALLBACK_WSS.join(",") : "keiner konfiguriert", "|",
+    NO_LEDGER_EXIT_MS / 1000, "s ohne Ledger -> Abbruch dieses Laufs");
   const dunl = await loadMembers();
   log("dUNL", dunl.members.length, "von", dunl.listed, "zugeordnet, Sequenz", dunl.sequence, dunl.unmatched.length ? "unzugeordnet " + dunl.unmatched.join(",") : "");
   MEMBERS = dunl.members;
   tracker = createTracker({ members: dunl.members, ephemeralToMaster: dunl.ephemeralToMaster });
   if (REMOTE) await preloadRemote();
-  else pruneLocal();
+  else pruneLocal();  // Anlauf-Fenster: die Ledger-Grenze gilt ab Start, nicht ab "noch nie einen Ledger gesehen".
+  lastLedgerAt = Date.now();
   connect();
   const evalTimer = setInterval(() => {
     for (const r of tracker.evaluate(Date.now())) enqueue(r);
@@ -701,15 +764,16 @@ async function main() {
   const quorumTimer = setInterval(() => { sampleNetworkQuorum().catch(() => {}); }, 3600000);
   const dunlTimer = setInterval(() => { refreshMembers().catch(() => {}); }, DUNL_REFRESH_MS);
   const stallTimer = setInterval(() => { watchStream(); }, STALL_CHECK_MS);
+  const ledgerTimer = setInterval(() => { watchLedger(); }, STALL_CHECK_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} Stills=${stats.stalls} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
-  }, 60000);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
+  }, STAT_MS);
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer); clearInterval(dunlTimer); clearInterval(stallTimer);
+    clearInterval(evalTimer); clearInterval(flushTimer); clearInterval(statTimer); clearInterval(pruneTimer); clearInterval(quorumTimer); clearInterval(dunlTimer); clearInterval(stallTimer); clearInterval(ledgerTimer);
     await flush();
     if (ws) ws.close();
     log("beendet", dirty.size ? "(" + dirty.size + " Tage nicht gespeichert)" : ", gespeichert");
