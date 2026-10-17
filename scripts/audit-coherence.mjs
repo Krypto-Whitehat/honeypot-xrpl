@@ -36,6 +36,13 @@
 //     Zuordnungsgrenze ('aa === true' am Vorfall oder an der Forensik-Zeile desselben Ledgers).
 //     Ohne Beleg muss er als Erfassungs-Aussage stehen, und der Zaehler muss mitgewandert sein:
 //     die Vorfallsliste und die Zaehler je Knoten derselben Datei fuehren dieselbe 'missed'-Zahl.
+//  J) ZAHLER-DECKUNG  ein Vorfall, der eine Ledger-Signatur als Grund nennt, muss von dem
+//     Zaehler gedeckt sein, der die Ledger MIT dieser Signatur fuehrt ('anomaly' / 'anomalyFail').
+//     Deckt der Zaehler die Ausfall-Ledger nicht, ist die 2x2-Tafel keine Messung, und es darf
+//     nirgends eine Rate oder ein Lift aus ihr erscheinen: die Ebene haelt sie zurueck und
+//     benennt die Luecke ('count-mismatch' / 'tag-count-mismatch'). Erfassungs-Befunde
+//     ('no-quorum', 'vote-not-observed') duerfen in keiner Rate, keiner Kohorte und keinem
+//     Muster stehen - sie sind der Ausfall selbst, kein Merkmal des Ledgers.
 //
 // Lauf:  node scripts/audit-coherence.mjs                 (30 d, alle Knoten der Aufzeichnung)
 //        node scripts/audit-coherence.mjs --range=7d
@@ -43,8 +50,10 @@
 // Exit 0 = kein Widerspruch. Exit 1 = mindestens ein Widerspruch (Zeile ausgegeben).
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CAPTURE_GAP_BASES, CAPTURE_GAP_BASES_MEASURED, TRACE_DEFAULTS } from "../lib/validator-trace.mjs";
+import { CAPTURE_GAP_BASES, CAPTURE_GAP_BASES_MEASURED, TRACE_DEFAULTS, anomalyLayer, isAnomalyTag, isObservationTag } from "../lib/validator-trace.mjs";
 import { loadDays, traceForValidator } from "../lib/validator-trace-query.mjs";
+import { signatureSensitivity, signatureCohort } from "../lib/validator-sensitivity.mjs";
+import { riskProfile } from "../lib/validator-retrace.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = process.env.TRACE_DATA_DIR || path.join(ROOT, "data", "validator-trace");
@@ -54,7 +63,7 @@ const rangeArg = args.find((a) => a.startsWith("--range="));
 const RANGE = rangeArg ? rangeArg.split("=")[1] : "30d";
 // 'gemessen' ist keine zweite Liste mehr, sondern die der Bibliothek. Zwei Listen an zwei
 // Orten waren die Ursache dieses Befunds: die Bibliothek bekam eine neue Basis, das Audit
-// blieb bei der alten und erkl?rte eine belegte Messung fuer unzulaessig.
+// blieb bei der alten und erklaerte eine belegte Messung fuer unzulaessig.
 const GAP_BASES_MEASURED = CAPTURE_GAP_BASES_MEASURED;
 const CLOSED_VERDICTS = new Set(["closed-capture-gap", "closed-quorum-observed", "closed-reception-thin", "closed-observation-gap"]);
 
@@ -241,6 +250,68 @@ for (const d of days) {
     bad("I", `${d.date}`, `Zaehler 'missed' = ${counted}, Vorfallsliste = ${listed}: eine Zahl, die niemand nachzaehlen kann`);
   }
 }
+// ---------- J) ZAHLER-DECKUNG  Zaehler, Vorfaelle und die veroeffentlichten Raten ----------
+// Die Invariante wird an zwei Stellen geprueft: an den Tageszahlen selbst und an dem, was die
+// Ebenen tatsaechlich ausweisen. Eine Rate ueber 100 % (8 von 1 Ledern) ist keine duenne
+// Messung, sie ist ein Divisionsrest aus zwei Populationen - genau die Zeile, die ein Betreiber
+// zu Recht als Falschaussage zurueckwies.
+let rateRowsChecked = 0;
+let rateRowsWithheld = 0;
+let cohortRowsChecked = 0;
+let riskRowsChecked = 0;
+const countersRenamed = days.reduce((sum, d) => sum + (Number(d.countersRenamed) || 0), 0);
+const counterGaps = [];
+for (const d of days) {
+  const layer = anomalyLayer(d);
+  if (!layer) continue; // ein Tag ohne Signatur-Ebene wurde nie geprueft: keine Zusage, keine Luecke
+  const claimLedgers = new Map();
+  for (const inc of d.incidents ?? []) {
+    for (const t of inc.r ?? []) {
+      if (!isAnomalyTag(t) || isObservationTag(t)) continue;
+      if (!claimLedgers.has(t)) claimLedgers.set(t, new Set());
+      claimLedgers.get(t).add(inc.l);
+    }
+  }
+  for (const [tag, set] of claimLedgers) {
+    const c = Number(layer[tag]) || 0;
+    const cf = Number((d.anomalyFail ?? {})[tag]) || 0;
+    if (cf > c) bad("J", d.date + " " + tag, "anomalyFail " + cf + " > anomaly " + c + ": Ausfaelle, die ihr eigener Nenner nicht enthaelt");
+    if (set.size > c) counterGaps.push(d.date + " " + tag + ": " + set.size + " Ausfall-Ledern gegen " + c + " gezehlte");
+  }
+}
+for (const master of masters) {
+  // topTags ist eine Anzeige-Grenze, keine Messgrenze: das Audit muss jede Zeile sehen,
+  // die die Engine gerechnet hat. Sonst geht ein Zaehler-Widerspruch hinter der Kappe verloren.
+  const sens = signatureSensitivity(days, master, { range: RANGE, topTags: 1000 });
+  let withheldHere = 0;
+  for (const r of sens.rows) {
+    rateRowsChecked += 1;
+    const at = String(master).slice(0, 12) + " " + r.tag;
+    if (isObservationTag(r.tag)) bad("J", at, "Erfassungs-Befund steht als Signatur in der Empfindlichkeit");
+    if (r.rateWith !== null && r.rateWith > 1) bad("J", at, "Rate mit Signatur " + r.rateWith + " ueber 1: mehr Ausfaelle als der Zaehler Ledger nennt");
+    if (r.fails > r.exposureLedgers) {
+      withheldHere += 1;
+      if (r.rateWith !== null || r.lift !== null) bad("J", at, "Rate " + String(r.rateWith) + " / Lift " + String(r.lift) + " aus " + r.fails + " Ausfaellen gegen " + r.exposureLedgers + " gezehlte Ledger");
+      if (r.verdict !== "count-mismatch") bad("J", at, "Urteil '" + r.verdict + "' deckt den Zaehler-Widerspruch nicht");
+    }
+  }
+  if (withheldHere && !sens.gaps.includes("tag-count-mismatch")) bad("J", String(master).slice(0, 12), "Zaehler-Widerspruch ohne benannte Messluecke");
+  rateRowsWithheld += withheldHere;
+}
+for (const r of signatureCohort(days, { range: RANGE, topTags: 1000 }).rows) {
+  cohortRowsChecked += 1;
+  if (isObservationTag(r.tag)) bad("J", "cohort " + r.tag, "Erfassungs-Befund steht als Kohorten-Signatur");
+  if (r.coherent === false && (Number.isFinite(r.medianLift) || Number.isFinite(r.maxLift))) {
+    bad("J", "cohort " + r.tag, "Kohorten-Lift " + String(r.medianLift) + " / " + String(r.maxLift) + " aus ungedeckter Tafel");
+  }
+}
+for (const r of riskProfile(days).rows) {
+  riskRowsChecked += 1;
+  if (isObservationTag(r.tag)) bad("J", "risk " + r.tag, "Erfassungs-Befund steht als Signatur in der Risikotafel");
+  if (r.rateWith !== null && r.rateWith > 1) bad("J", "risk " + r.tag, "Ausfallwahrscheinlichkeit " + r.rateWith + " ueber 1");
+  if (r.anomalyFailLedgers > r.anomalyLedgers) bad("J", "risk " + r.tag, r.anomalyFailLedgers + " Ausfall-Ledger in " + r.anomalyLedgers + " gezehlten");
+}
+
 const ledgers = seenLedgers.size;
 const gapsMeasured = [...seenLedgers.values()].filter((f) => f.gap === true).length;
 const gapsOpen = [...seenLedgers.values()].filter((f) => f.gap === null).length;
@@ -252,6 +323,14 @@ if (!QUIET) {
 }
 if (!QUIET) console.log(`  Warmlauf-Luecken (stream-open): ${warmFlags} | mit Abo-Ereignis belegt ${warmBacked} | nicht pruefbar (Ereignisliste abgeschnitten) ${warmUncheckable}`);
 if (!QUIET) console.log(`  Knoten-Urteil 'missed': mit Beleg ${missedProven} | ohne Beleg ${missedUnproven} | Tage mit Zaehler-Vergleich ${missedDaysChecked}, Abweichungen ${missedCounterBad}`);
+if (!QUIET) console.log(`  Raten-Zeilen: ${rateRowsChecked} Empfindlichkeit, ${cohortRowsChecked} Kohorte, ${riskRowsChecked} Risiko | ohne Rate zurueckgehalten ${rateRowsWithheld}`);
+if (!QUIET) console.log(`  Zaehler-Vokabel nachgefuehrt (no-quorum -> vote-not-observed, Ledger-Zahl): ${countersRenamed}`);
+if (!QUIET) console.log(`  Zaehler-Deckung: ${counterGaps.length} Tag-Signaturen mit mehr Ausfall-Ledern als der Tages-Zaehler nennt` + (counterGaps.length ? " (Rate zurueckgehalten, nicht geschaetzt)" : ""));
+if (counterGaps.length) {
+  console.log("  BENANNTE ZAEHLER-LUECKEN:");
+  for (const g of counterGaps.slice(0, 20)) console.log("    " + g);
+  if (counterGaps.length > 20) console.log(`    ... ${counterGaps.length - 20} weitere`);
+}
 if (problems.length) {
   console.log(`\nWIDERSPRUECHE (${problems.length}):`);
   for (const p of problems.slice(0, 60)) console.log("  " + p);

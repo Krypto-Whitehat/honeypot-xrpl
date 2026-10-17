@@ -3308,6 +3308,9 @@ body[data-a6] {
 .vt-sensv-signature-blind { color: var(--a6-success); }
 .vt-sensv-no-link { color: var(--a6-muted); }
 .vt-sensv-thin-sample, .vt-sensv-no-exposure { color: var(--a6-muted); font-style: italic; }
+/* Zahl und Zaehler stammen aus verschiedenen Populationen: die Rate ist keine duenne Messung,
+   sie ist gar keine Messung. Das ist eine Warnung ueber die Engine, nicht ueber den Knoten. */
+.vt-sensv-count-mismatch { color: var(--a6-sev-malicious); font-weight: 600; }
 .vt-h4 { margin: 10px 0 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--a6-muted); font-weight: 650; }
 .vt-hyps, .vt-next { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .vt-hyp { display: grid; grid-template-columns: minmax(140px, 1fr) auto; gap: 4px 10px; align-items: baseline; border: 1px solid var(--a6-line); border-radius: var(--a6-r-sm); padding: 6px 8px; font-size: 12px; }
