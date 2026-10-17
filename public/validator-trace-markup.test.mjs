@@ -1112,3 +1112,16 @@ test('Quorum-Ziel: jede Zeile nennt die Herleitung ihres Ziels', () => {
   assert.equal((i18n.match(/vt\.cq\.neededBasis\./g) || []).length, 6,
     'die Herleitung muss in beiden Sprachen fuer alle drei Zustaende da sein');
 });
+/* Warm-Lauf und Ziel-Nachrechnung (2026-10-17): die Kritikalitaets-Zelle muss beide Belege
+ * zeigen - die Erfassungs-Basis des Warm-Laufs und die aus der dUNL-Groesse nachrechenbare
+ * Zielzahl. Beides sind Zahlen, die ein Betreiber selbst pruefen kann. */
+test("Kritikalitaets-Zelle: Warm-Lauf-Basis und nachrechenbares Ziel sind lesbar", () => {
+  assert.match(src, /CAPTURE_BASES = new Set\(\["ledger-index", "stream-gap", "stream-open"\]\)/,
+    "das Overlay kennt die Warm-Lauf-Basis nicht");
+  assert.match(src, /r\.capture\.neededMatches/, "die Oberflaeche liest die Ziel-Nachrechnung nicht");
+  assert.match(src, /vt\.cq\.neededCheck/, "die Nachrechnung hat keine Beschriftung");
+  assert.match(src, /own \+ neededNote \+ evt \+ neededCheck/, "die Nachrechnung haengt nicht an der Zeile");
+  const i18n = read("i18n-validator.mjs");
+  assert.equal(i18n.split("'vt.cq.neededCheck'").length - 1, 2, "vt.cq.neededCheck fehlt in einer Sprache");
+  assert.equal(i18n.split("'vt.cq.basis.stream-open'").length - 1, 2, "vt.cq.basis.stream-open fehlt in einer Sprache");
+});

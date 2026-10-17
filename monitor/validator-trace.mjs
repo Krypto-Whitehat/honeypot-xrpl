@@ -287,6 +287,9 @@ function recordResult(r, detailNote) {
       // genau dann, wenn pg !== l - 1. Ohne pg waere 'cg' ein Etikett ohne Zahl, und die
       // Leseschicht (ledgerClosure) koennte die Luecke nicht gegen die Index-Folge pruefen.
       pg: Number.isFinite(f.previousLedger) ? f.previousLedger : null,
+// so: dieser Ledger wurde als erster nach einem Abo ausgewertet - die Stimmen vor dem
+      // Abo fehlen in dieser Zeile, und die Zeile sagt es.
+      so: f.streamOpenCapture === true,
       ov: Number.isFinite(f.observedValidations) ? f.observedValidations : null,
       // Eigene Empfangs-Bilanz dieses Ledgers: ovb = Median der Validierungen, die dieser
       // Rekorder in seinen letzten Ledgern empfangen hat, ot = true wenn ov unter diesem
@@ -645,6 +648,9 @@ function connect(urlIdx = 0, backoff = 1000) {
     lastMessageAt = Date.now();
     const streams = ["validations", "ledger"];
     if (TX_SHAPE) streams.push("transactions");
+    // Der Abo-Zeitpunkt ist die Autoritaet fuer die Warm-Lauf-Luecke: nur was nach diesem
+    // Abo lief, kann in diesem Ledger angekommen sein.
+    if (tracker) tracker.markStreamOpen();
     ws.send(JSON.stringify({ id: 1, command: "subscribe", streams }));
     sampleNetworkQuorum();
   };
