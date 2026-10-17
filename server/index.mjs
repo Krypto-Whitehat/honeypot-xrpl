@@ -44,7 +44,7 @@ import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/vali
 import { groundOf, groundTruthMap } from "../lib/validator-ground.mjs";
 import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
-import { WATCH_DEFAULTS, watchDelta, watchEntriesFromQuery, watchRange } from "../lib/validator-watch.mjs";
+import { WATCH_DEFAULTS, watchDelta, watchEntriesFromQuery, watchRange, watchWindowCap } from "../lib/validator-watch.mjs";
 import {
   loadLocalHistory,
   saveLocalHistory,
@@ -224,8 +224,9 @@ app.get("/api/validator-watch", async (req, res) => {
   const source = remote ? "github-daten-repo" : "lokal";
   if (!days.length) return res.json({ available: false, source, note: "Kein Trace-Speicher – Recorder (monitor/validator-trace.mjs) starten." });
   res.json({ available: true, source, range, storedDays: days.length, rejected, truncated,
+    windowCap: watchWindowCap(entries, now),
     limits: { maxMasters: WATCH_DEFAULTS.maxMasters, requested: entries.length },
-    ...watchDelta(days, entries, { now }) });
+    ...watchDelta(days, entries, { now, groundPeers: await groundTruthMap() }) });
 });
 
 app.get("/api/validators", async (req, res) => {

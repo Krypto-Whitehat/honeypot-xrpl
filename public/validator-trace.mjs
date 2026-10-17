@@ -276,7 +276,7 @@ export function createValidatorTrace(h) {
   // bekannt ist, darf nicht still als "nichts Neues" erscheinen.
   const WATCH_VERDICTS = new Set(["new-incidents", "new-cohort", "quiet", "partial-coverage",
     "not-evaluated", "no-coverage", "bad-entry"]);
-  const WATCH_TYPES = ["missed", "partial", "wrong-hash", "no-quorum"];
+  const WATCH_TYPES = ["missed", "partial", "wrong-hash", "no-quorum", "vote-not-observed"];
 
   function watchStore() {
     try {
@@ -306,7 +306,7 @@ export function createValidatorTrace(h) {
   function watchStamp(ms) {
     return Number.isFinite(ms) ? new Date(ms).toISOString().slice(5, 16).replace("T", " ") : "-";
   }
-  function watchMarkup(row) {
+  function watchMarkup(row, cap) {
     const n = (x) => (Number.isFinite(Number(x)) ? String(Number(x)) : "-");
     const verdict = WATCH_VERDICTS.has(row.verdict) ? row.verdict : "bad-entry";
     const inc = row.incidents || {};
@@ -325,18 +325,26 @@ export function createValidatorTrace(h) {
     const ledgers = h.t("vt.watch.ledgers", {
       measured: n(row.ledgers && row.ledgers.measured), unknown: n(row.ledgers && row.ledgers.unknown),
       gaps: n(row.ledgers && row.ledgers.gapLedgers) });
+    // Die Kohorte wird benannt, wo die Auskunft einen Namen hergibt; sonst bleibt der
+    // Master-Anfang stehen. Ein Knoten ohne Namen ist dann als namenlos lesbar, nicht als
+    // fehlender Knoten.
+    const peerNames = (c) => (Array.isArray(c.othersNames) && c.othersNames.length
+      ? c.othersNames : (c.others || []).map((m) => ({ master: m, name: null })))
+      .map((p) => p.name || String(p.master || "").slice(0, 8) + "...").join(", ");
     const rows = (row.cohort || []).map((c) => {
       const kinds = (c.types || []).map((t) => h.t("vt.k." + t)).join(" / ");
       return "<li><span class=\"vt-watch-ledger\">" + h.esc(String(c.ledgerIndex)) + "</span> "
         + h.esc(watchStamp(c.timeMs)) + " UTC - " + h.esc(kinds) + " - "
-        + h.esc(h.t("vt.watch.others", { n: n(c.othersCount) })) + " (" + h.esc((c.others || [])
-          .map((m) => m.slice(0, 8) + "...").join(", ")) + ")</li>";
+        + h.esc(h.t("vt.watch.others", { n: n(c.othersCount) })) + " (" + h.esc(peerNames(c)) + ")</li>";
     }).join("");
-    return "<section class=\"vt-watch vt-watch-" + verdict + "\"><h3>" + h.esc(h.t("vt.watch.title")) + "</h3>"
+    const who = h.esc(row.name || String(row.master || "").slice(0, 8) + "...");
+    return "<section class=\"vt-watch vt-watch-" + verdict + "\"><h3>" + h.esc(h.t("vt.watch.title"))
+      + " <small>" + who + "</small></h3>"
       + "<p>" + h.esc(h.t("vt.watch.since", { seen: watchStamp(row.seenAtMs), window: watchWindowText(row.windowMs) }))
       + " - " + h.esc(h.t("vt.watch.verdict." + verdict)) + "</p>"
       + "<p>" + h.esc(lines) + "</p>"
       + "<p><small>" + h.esc(ledgers) + "</small></p>"
+      + (cap && cap.capped ? "<p><small>" + h.esc(h.t("vt.watch.capped", { days: cap.days })) + "</small></p>" : "")
       + (rows ? "<ul class=\"vt-watch-rows\">" + rows + "</ul>" : "")
       + (row.cohortTruncated ? "<p><small>" + h.esc(h.t("vt.watch.truncated")) + "</small></p>" : "")
       + "</section>";
@@ -372,7 +380,7 @@ export function createValidatorTrace(h) {
         + h.esc(h.t("vt.watch.title")) + "</small> " + h.esc(h.t("vt.watch.error")) + "</p>");
       return;
     }
-    body.insertAdjacentHTML("afterbegin", watchMarkup(row));
+    body.insertAdjacentHTML("afterbegin", watchMarkup(row, data.windowCap));
     watchMarkVisit(master);
   }
 

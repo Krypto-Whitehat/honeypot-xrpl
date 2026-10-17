@@ -7,6 +7,7 @@ import { loadDays, traceForValidator, crossValidatorPatterns } from "../lib/vali
 import { REPORT_RANGES, reportCsv, validatorReport } from "../lib/validator-report.mjs";
 import { loadDaysRemote, traceTokenConfigured } from "../lib/validator-trace-store.mjs";
 import { groundOf, groundTruthMap } from "../lib/validator-ground.mjs";
+import { WATCH_DEFAULTS, watchDelta, watchEntriesFromQuery, watchRange, watchWindowCap } from "../lib/validator-watch.mjs";
 import { readHistoryGitHub } from "../lib/history.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,6 +84,25 @@ export default async function handler(req, res) {
         range, clusters: attackClusters || [], ground: groundOf(groundMap, master), groundPeers: groundMap,
       });
       return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(attackClusters), ...body });
+    }
+    // Die Beobachtungsliste: was seit dem letzten Besuch dieses Betreibers wirklich lief. Dieselbe
+    // Lib und dieselbe Antwort wie lokal (server/index.mjs) - Produktions-Paritaet, nicht eine live
+    // abgespeckte Variante. Eigene Function? Nein: Hobby-Limit 12 Functions, deshalb Rewrite hierher.
+    if (req.query?.route === "watch") {
+      const { entries, rejected, truncated } = watchEntriesFromQuery(req.query);
+      if (!entries.length) {
+        return res.status(400).json({ error: "masters und seen fehlen: je Knoten die Besuchszeit in Millisekunden (seen=master:1792225450000).", rejected });
+      }
+      const now = Date.now();
+      const range = watchRange(entries, now);
+      const remote = traceTokenConfigured();
+      const days = remote ? await loadDaysRemote(range) : loadDays(TRACE_DIR);
+      const source = remote ? "github-daten-repo" : "lokal";
+      if (!days.length) return res.status(200).json({ available: false, source, note: remote ? "Noch keine Trace-Daten im Speicher – der Recorder (monitor/validator-trace.mjs) hat noch nicht geschrieben." : "Kein lokaler Trace-Speicher." });
+      return res.status(200).json({ available: true, source, range, storedDays: days.length, rejected, truncated,
+        windowCap: watchWindowCap(entries, now),
+        limits: { maxMasters: WATCH_DEFAULTS.maxMasters, requested: entries.length },
+        ...watchDelta(days, entries, { now, groundPeers: await groundTruthMap() }) });
     }
     res.status(200).json(await getStats());
   } catch (err) {

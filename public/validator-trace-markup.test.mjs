@@ -38,6 +38,7 @@ import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
 import { COUPLING_GAPS, COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from '../lib/validator-stress-coupling.mjs';
+import { WATCH_TYPES } from '../lib/validator-watch.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 import { CAPTURE_GAP_BASES_MEASURED } from '../lib/validator-trace.mjs';
 import { WATCH_VERDICTS } from '../lib/validator-watch.mjs';
@@ -1595,6 +1596,18 @@ test("Beobachtungsliste: Lib-Urteil, UI-Menge, Endpunkt und Form haengen aneinan
   assert.ok(lib.includes("export function watchDelta"), "watchDelta fehlt in der Lib");
   assert.ok(lib.includes("export const WATCH_VERDICTS"), "WATCH_VERDICTS fehlt in der Lib");
   assert.ok(lib.includes("estimated: 0"), "die Lib fuehrt ihre Schaetzungs-Grenze nicht in der Zeile");
+  // Laeuft die Typ-Vokabel auseinander, verschwindet ein Zaehler still aus der Zeile. Besonders
+  // gefaehrlich: vote-not-observed (Ledger geschlossen) unter no-quorum (Schliessung unbelegt).
+  const at = src.indexOf("const WATCH_TYPES = [");
+  assert.ok(at >= 0, "die UI listet ihre Typ-Vokabeln nicht explizit");
+  const uiTypes = src.slice(at + 21, src.indexOf("]", at)).split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+  assert.deepEqual(uiTypes, WATCH_TYPES, "Lib und UI zahlen verschiedene Typen");
+  for (const k of WATCH_TYPES) assert.equal(i18n.split("'vt.k." + k + "'").length - 1, 2, "vt.k." + k + " fehlt in einer Sprache");
+  // Retrace braucht Namen: eine Kohorte aus Master-Anfaengen ist fuer einen Betreiber nicht
+  // nachvollziehbar. Die UI muss die benannten Knoten nehmen und den Master nur als Rest zeigen.
+  assert.ok(src.includes("othersNames"), "die UI benennt die Kohorten-Knoten nicht aus der Auskunft");
+  assert.ok(src.includes("row.name"), "die UI zeigt den eigenen Knoten nicht mit seinem Namen");
+  assert.ok(server.includes("groundPeers: await groundTruthMap()"), "der Endpunkt holt die Namen nicht aus der Netz-Auskunft");
   assert.ok(server.includes("/api/validator-watch"), "der Endpunkt fehlt");
   assert.ok(server.includes("watchDelta("), "der Endpunkt ruft die Lib nicht");
   assert.ok(server.includes("watchEntriesFromQuery"), "die Abfrage-Form liegt nicht im Endpunkt");
@@ -1612,5 +1625,5 @@ test("Beobachtungsliste: Lib-Urteil, UI-Menge, Endpunkt und Form haengen aneinan
   assert.match(src, /vt\.watch\.first/, "der erste Besuch hat keinen Text");
   assert.match(src, /vt\.watch\.error/, "ein Abruf-Fehler loescht die Marke oder verschwindet still");
   // Der Vergleich wird erst nach dem Rendern markiert: sonst vergliche ich den Besuch mit sich selbst.
-  assert.match(src, /watchMarkup\(row\)\);[\s\S]{0,120}watchMarkVisit\(master\)/, "die Marke geht dem Vergleich voraus");
+  assert.match(src, /watchMarkup\(row, data\.windowCap\)\);[\s\S]{0,120}watchMarkVisit\(master\)/, "die Marke geht dem Vergleich voraus");
 });

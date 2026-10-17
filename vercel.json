@@ -111,6 +111,10 @@
     {
       "source": "/api/validator-trace",
       "destination": "/api/stats?route=trace"
+    },
+    {
+      "source": "/api/validator-watch",
+      "destination": "/api/stats?route=watch"
     }
   ],
   "functions": {
