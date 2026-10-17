@@ -1533,3 +1533,16 @@ test('Betroffenheits-Zeile: gleiche und andere Abweichung werden getrennt benann
   assert.match(src, /: peerChips\(allM, allT, allN\);/,
     'ohne Typ je Knoten wird eine Gruppierung erfunden, die die Daten nicht hergeben');
 });
+/* --- Kappenfarbe = groesster Stapel ----------------------------------------
+ * Die Kappe traegt die Signaturfarbe eines Vorfallstyps. Bis 2026-10-17 war das der in
+ * PROFILE_TYPES zuletzt gestapelte Typ, nicht der groessten: eine Saeule aus 20 missed und
+ * 1 noQuorum zeigte die noQuorum-Farbe, die Readout-Zahlen sagten das Gegenteil. In den
+ * ausgelieferten Fenstern (24 h / 7 d / 30 d) mischt keine Zelle Typen, der Fehler war also
+ * latent - er ist einer, sobald zwei Typen in einem Intervall vorkommen. */
+test('Kappenfarbe: die Kappe zeigt den groessten Stapel, nicht den zuletzt gestapelten', () => {
+  assert.match(src, /let capCount = 0;/, 'der Stapelzaehler der Kappe fehlt');
+  assert.match(src, /if \(cell\[k\] > capCount\) \{ capCount = cell\[k\]; cap = k; \}/,
+    'die Kappenfarbe folgt nicht dem groessten Stapel');
+  assert.doesNotMatch(src, /^\s*cap = k;$/m, 'der zuletzt gestapelte Typ bestimmt wieder die Kappe');
+  assert.match(src, /--vt-cap:var\(--vt-" \+ cap/, 'die Kappenfarbe verlaesst die Typsignatur');
+});

@@ -551,12 +551,18 @@ function attributionBlock(a) {
       const stops = [];
       let acc = 0;
       let cap = null;
+      let capCount = 0;
       for (const k of PROFILE_TYPES) {
         if (!cell[k]) continue;
         const a = (acc / cell.total) * 100;
         acc += cell[k];
         stops.push("var(--vt-" + k + ") " + a.toFixed(2) + "% " + ((acc / cell.total) * 100).toFixed(2) + "%");
-        cap = k;
+        // Die Kappenfarbe ist eine Datenablesung, keine Dekoration: sie muss den groessten
+        // Stapel dieser Saeule zeigen, nicht den in PROFILE_TYPES zuletzt gestapelten. Eine
+        // Saeule aus 20 missed und 1 noQuorum bekam bisher die noQuorum-Farbe - die Minderheit
+        // bestimmte den Eindruck, waehrend die Readout-Zahlen das Gegenteil sagen. Bei
+        // Gleichstand entscheidet PROFILE_TYPES, also dieselbe Reihenfolge wie der Stapel.
+        if (cell[k] > capCount) { capCount = cell[k]; cap = k; }
       }
       const topTags = Object.entries(cell.tags).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 3)
         .map(([tag, n]) => tl(tag) + " x" + n).join(" . ");
