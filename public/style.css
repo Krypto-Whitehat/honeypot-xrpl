@@ -3135,12 +3135,17 @@ body[data-a6] {
    (Abweichung, nach Zahl betroffener dUNL-Validatoren), unknown (Abweichung, Kohorte nicht
    erfasst), none (kein Ledger aufgezeichnet). Ein leeres Intervall bleibt als Platte stehen,
    damit die Zeitachse sich durchgehend liest. */
-.vt-base { position: absolute; left: 0; right: var(--dc); bottom: calc(-1 * var(--base-h)); height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line); }
-.vt-col.vt-state-clean .vt-base { background: var(--a6-success-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--a6-success) 70%, transparent); }
-.vt-col.vt-state-solo .vt-base { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 0 0 1px var(--a6-line-strong); }
-.vt-col.vt-state-cohort .vt-base { background: var(--a6-accent-soft); box-shadow: inset 0 0 0 1px var(--a6-accent); }
-.vt-col.vt-state-network .vt-base { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 0 0 1px var(--a6-accent); }
-.vt-col.vt-state-unknown .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 0 0 1px var(--a6-line); }
+/* Der Zustand ist ein durchgehendes Band, nicht 24 gefasste Platten. Je Saule ein eigener
+   Rundum-Rand bei 24,08 px Platte und 14,46 px Loch (Abstand 7,68 px + Tiefe 6,78 px) malt 24
+   Fliesen mit 23 Fugen unter eine durchgehende schere Deckflaeche - das liest sich als Kante
+   um jede Saule und unten als Zacken. Die Platte fuellt jetzt die ganze Zelle und traegt nur
+   eine Haarlinie oben; die Grundflaeche selbst ist der eine Koerper .vt-floor / .vt-floor-top. */
+.vt-base { position: absolute; left: 0; right: 0; bottom: calc(-1 * var(--base-h)); height: var(--base-h); background: color-mix(in srgb, var(--a6-graph-grid) 80%, transparent); box-shadow: inset 0 1px 0 var(--a6-line); }
+.vt-col.vt-state-clean .vt-base { background: var(--a6-success-soft); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--a6-success) 70%, transparent); }
+.vt-col.vt-state-solo .vt-base { background: color-mix(in srgb, var(--a6-ink) 12%, transparent); box-shadow: inset 0 1px 0 var(--a6-line-strong); }
+.vt-col.vt-state-cohort .vt-base { background: var(--a6-accent-soft); box-shadow: inset 0 1px 0 var(--a6-accent); }
+.vt-col.vt-state-network .vt-base { background: color-mix(in srgb, var(--a6-accent) 45%, transparent); box-shadow: inset 0 1px 0 var(--a6-accent); }
+.vt-col.vt-state-unknown .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-muted) 3px 4px); box-shadow: inset 0 1px 0 var(--a6-line); }
 .vt-col.vt-state-none .vt-base { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--a6-line) 3px 4px); box-shadow: none; opacity: 0.6; }
 /* Die Bodenplatte ist eine Ebene, kein Streifen: sie traegt dieselbe Deckflaeche wie die Prismen
    (Hoehe --dzc, geschert um --skew) und dieselbe Tiefe --dc. Ohne sie hat die Scherung keinen

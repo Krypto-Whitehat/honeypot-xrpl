@@ -600,6 +600,11 @@ function attributionBlock(a) {
     // Ledger auf Tages-Koernung. Diese Zahl gehoert unters Profil, nicht in eine Fussnote.
     const estNote = profile.estimatedLedgers > 0
       ? h.t("vt.profileLedgersEstimated", { n: num(profile.estimatedLedgers) }) : "";
+    // Der gewaehlte Bereich kann vor der Aufnahme beginnen. Dann darf kein Intervall einen
+    // Ausfall behaupten, der vor dieser Aufnahme liegt: die Achse ist geklemmt, und die
+    // Klemmung steht als Zahl am Profil, nicht als stillschweigende Aussparung.
+    const clampNote = profile.clamped === true && Number.isFinite(profile.windowFrom)
+      ? h.t("vt.profileWindowClamped", { window: spanLabel(profile.windowFrom), axis: spanLabel(from) }) : "";
     return '<div class="vt-profile" style="--peak:' + peak + ';--dmax:' + depthRatio.toFixed(4) + '">'
       + '<div class="vt-profile-top"><p class="vt-profile-meta">' + h.esc(meta) + "</p>"
       + '<p class="vt-readout" id="vt-readout" aria-live="polite">' + h.esc(h.t("vt.profileHint")) + "</p></div>"
@@ -613,6 +618,7 @@ function attributionBlock(a) {
       + '<ul class="vt-legend vt-sign-legend">' + signLegend + "</ul>"
       + '<p class="vt-note vt-sign-note">' + h.esc(shapeNote) + "</p>"
       + (estNote ? '<p class="vt-note vt-est-note">' + h.esc(estNote) + "</p>" : "")
+      + (clampNote ? '<p class="vt-note vt-clamp-note">' + h.esc(clampNote) + "</p>" : "")
       + "</div>";
   }
 

@@ -460,7 +460,8 @@ test('Bodenplatte: dieselbe Platte unter jeder Säule, Gitter und Balken sitzen 
   const base = ruleBody('.vt-base');
   assert.match(base, /height:\s*var\(--base-h\)/, '.vt-base Hoehe != --base-h');
   assert.match(base, /bottom:\s*calc\(-1 \* var\(--base-h\)\)/, '.vt-base ragt nicht in den Plattenstreifen unter der Null-Linie');
-  assert.match(base, /left:\s*0;\s*right:\s*var\(--dc\)/, '.vt-base kuerzt nicht um --dc - die Platte ist breiter als ihr Prisma');
+  assert.match(base, /left:\s*0;\s*right:\s*0;/, '.vt-base fuellt die Zelle nicht - der Zustand ist wieder 24 einzelne Platten');
+  assert.doesNotMatch(base, /box-shadow:\s*inset 0 0 0 1px/, '.vt-base hat wieder einen Rundum-Rand - 24 gefasste Fliesen unter einer durchgehenden Ebene');
   assert.match(ruleBody('.vt-grid'), /bottom:\s*var\(--base-h\)/, 'Gitter sitzt nicht auf der Plattenoberkante');
   assert.match(ruleBody('.vt-bars'), /bottom:\s*var\(--base-h\)/, 'Saeulen sitzen nicht auf der Plattenoberkante');
   assert.match(ruleBody('.vt-plot'), /height:\s*calc\(var\(--plot-h\) \+ var\(--dz\) \+ var\(--base-h\) \+ var\(--label-h\)\)/, '.vt-plot plant Platte und Wertemarke nicht ein');
@@ -968,8 +969,13 @@ test("Kritikalitaets-Tabelle: Betroffenheits-Zeile deckt genau die Spalten der K
  * elementFromPoint traf bei 6 von 8 nicht-leeren Saeulen die .vt-base der eigenen Saeule, und
  * 258 von 864 Pixeln in den Abstaenden nahe der Null-Linie waren bemalt (29,9 %). */
 test('Bodenplatte: Fuss und Prisma teilen dieselbe Grundflaeche, der Abstand bleibt frei', () => {
-  assert.match(ruleBody('.vt-base'), /left:\s*0;\s*right:\s*var\(--dc\)/,
-    '.vt-base kuerzt nicht um --dc - der Fuss ist breiter als sein Prisma');
+  // Die Kuerzung um --dc war noetig, solange je Saule eine eigene Scherflaeche hatte. Die hat
+  // die Platte nicht mehr (siehe Regel unten: keine .vt-base::after); die Grundflaeche ist der
+  // eine Koerper .vt-floor / .vt-floor-top. Vollbreite bemalt deshalb keinen Abstand: die Platte
+  // endet mit der Zelle, und der Abstand bleibt die Luecke, die zeigt, wie weit die Ebene reicht.
+  assert.match(ruleBody('.vt-base'), /left:\s*0;\s*right:\s*0;/,
+    '.vt-base fuellt die Zelle nicht - der Fuss ist wieder in 24 Stuecke zerschnitten');
+  assert.doesNotMatch(stripComments(styleCss), /\.vt-base::after/, 'die je-Saeulen-Scherplatte ist zurueck - Vollbreite wuerde sie in den Abstand legen');
   const c = cellAt(961);
   const reach = (c.col - c.d) + c.dzc;
   assert.ok(Math.abs(reach - c.col) < 1e-9,
@@ -1462,3 +1468,14 @@ test("Rekorder-Loecher: die unbeobachtete Spanne zwischen Tagesdateien ist lesba
   }
 });
 
+
+/* Eine geklemmte Achse ohne Auskunft ist eine Aussparung, die der Leser nicht sieht. Die
+ * Klemmung muss als Zahl am Profil stehen - Fensterbeginn und Achsenbeginn nebeneinander. */
+test("Profilachse: die Klemmung auf die Aufnahme ist ausgewiesen, nicht stillschweigend", () => {
+  assert.match(src, /profile\.clamped === true && Number\.isFinite\(profile\.windowFrom\)/,
+    "die Klemmung wird nicht an die gelieferte Fensterzahl der API gebunden");
+  assert.match(src, /vt\.profileWindowClamped/, "die Klemmung hat keine Beschriftung");
+  assert.match(src, /window: spanLabel\(profile\.windowFrom\), axis: spanLabel\(from\)/,
+    "Fensterbeginn und Achsenbeginn stehen nicht beide als Zeit da");
+  assert.match(src, /vt-clamp-note/, "die Klemmung wird nicht unter dem Profil gerendert");
+});
