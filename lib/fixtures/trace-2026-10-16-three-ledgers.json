@@ -1,0 +1,815 @@
+{
+  "note": "Wortwrtlich-Exzerpt aus dem ausgelieferten Bestand (Krypto-Whitehat/honeypot-xrpl-history, Tag 2026-10-16). Kein von der Lib erzeugtes Objekt: diese Bytes sind der Mithoerbefund, an dem die Nachrechnung festgemacht wird.",
+  "source": {
+    "dayFile": "2026-10-16.json",
+    "recorder": "monitor/validator-trace.mjs",
+    "readFrom": ".tmp-deployed (fetch-deployed-store.mjs)"
+  },
+  "networkQuorum": {
+    "quorum": 28,
+    "atMs": 1792185804628,
+    "endpoint": "wss://s1.ripple.com"
+  },
+  "networkQuorumSamples": 3,
+  "gaps": [
+    {
+      "from": 107693984,
+      "to": 107694000,
+      "t": 1792149950000,
+      "reason": "stream-gap"
+    }
+  ],
+  "ledgerStats": [
+    {
+      "l": 107695059,
+      "t": 1792154042000,
+      "v": 16,
+      "need": 28,
+      "top": 16,
+      "mg": -12,
+      "sp": 0,
+      "gap": 1000,
+      "gmed": 1000,
+      "tx": 52,
+      "med": 66.5,
+      "c": {
+        "missed": 0,
+        "partial": 0,
+        "wrongHash": 0,
+        "noQuorum": 19
+      },
+      "sh": {
+        "n": 52,
+        "s": 37,
+        "d": 14,
+        "fo": 14,
+        "fd": 2,
+        "fa": 2,
+        "fl": 5,
+        "ac": 0,
+        "oc": 24,
+        "nf": 4,
+        "bt": 0,
+        "bi": 0,
+        "fx": 0,
+        "fm": 6000,
+        "fs": 11
+      },
+      "sev": {},
+      "sweep": null,
+      "fv": null,
+      "lv": null,
+      "am": [],
+      "unl": false,
+      "ch": "986E8D51A78E8B2CB53B0FDBAE613692C7D33E3C82DCEE20A2C22D5496B34602",
+      "chSource": "xrpscan",
+      "chVerifiedBy": "xrplcluster.com",
+      "chAt": "2026-10-16T17:58:57.760Z",
+      "xc": {
+        "hashAgree": true,
+        "tx": true,
+        "t": true,
+        "sourcesAgree": true,
+        "txScan": 52,
+        "tScan": 1792154042000,
+        "tNet": 1792154042000
+      },
+      "cl": true
+    },
+    {
+      "l": 107694001,
+      "t": 1792149950000,
+      "v": 0,
+      "need": 28,
+      "top": 0,
+      "mg": -28,
+      "sp": 0,
+      "gap": 70000,
+      "gmed": 1000,
+      "tx": 93,
+      "med": 95.5,
+      "c": {
+        "missed": 0,
+        "partial": 0,
+        "wrongHash": 0,
+        "noQuorum": 35
+      },
+      "sh": {
+        "n": 93,
+        "s": 42,
+        "d": 13,
+        "fo": 25,
+        "fd": 1,
+        "fa": 1,
+        "fl": 4,
+        "ac": 0,
+        "oc": 63,
+        "nf": 2,
+        "bt": 1,
+        "bi": 2,
+        "fx": 0,
+        "fm": 3000,
+        "fs": 11
+      },
+      "sev": {},
+      "sweep": null,
+      "fv": null,
+      "lv": null,
+      "am": [],
+      "unl": false,
+      "ch": "20444972846C358C955033EBFDE16AC846EA28EBFCF7D6919D29F8232A158736",
+      "chSource": "xrpscan",
+      "chVerifiedBy": "xrplcluster.com",
+      "chAt": "2026-10-16T17:58:38.651Z",
+      "xc": {
+        "hashAgree": true,
+        "tx": true,
+        "t": true,
+        "sourcesAgree": true,
+        "txScan": 93,
+        "tScan": 1792149950000,
+        "tNet": 1792149950000
+      },
+      "cl": true
+    },
+    {
+      "l": 107690236,
+      "t": 1792135432000,
+      "v": 20,
+      "need": 28,
+      "top": 20,
+      "mg": -8,
+      "sp": 0,
+      "gap": 1000,
+      "gmed": 1000,
+      "tx": 27,
+      "med": 50.5,
+      "c": {
+        "missed": 0,
+        "partial": 0,
+        "wrongHash": 0,
+        "noQuorum": 15
+      },
+      "sh": {
+        "n": 27,
+        "s": 13,
+        "d": 2,
+        "fo": 9,
+        "fd": 1,
+        "fa": 7,
+        "fl": 0,
+        "ac": 0,
+        "oc": 15,
+        "nf": 7,
+        "bt": 0,
+        "bi": 0,
+        "fx": 0,
+        "fm": 6000,
+        "fs": 12
+      },
+      "sev": {},
+      "sweep": null,
+      "fv": null,
+      "lv": null,
+      "am": [],
+      "unl": false,
+      "ch": "FB3ABE4A1AD20B851C507D04375BDE442D8F47635E0CE0B3A48BCC6AFB705962",
+      "chSource": "xrpscan",
+      "chVerifiedBy": "xrplcluster.com",
+      "chAt": "2026-10-16T17:58:15.970Z",
+      "xc": {
+        "hashAgree": true,
+        "tx": true,
+        "t": true,
+        "sourcesAgree": true,
+        "txScan": 27,
+        "tScan": 1792135432000,
+        "tNet": 1792135432000
+      },
+      "cl": true
+    }
+  ],
+  "incidents": [
+    {
+      "l": 107690236,
+      "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHBidG3pZK11zQD6kpNDoAhDxH6WLGui6ZxSbUx7LSqLHsgzMPec",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHDB2PAPYqF86j9j3c6w1F1ZqwvQfiWcFShZ9Pokg9q4ohNDSkAz",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHDH7bQJpVfDhVSqdui3Z8GPvKEBQpo6AKHcnXe21zoD4nABA6xj",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUFCyRCrUjvtZmKiLeF8ReopzKuUoKeDeXo3wEUBVSaawzcSBpW",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUP4RcLQdPHh3kMtFm9NFGnjEYLGXiQAyyB7qFsjATHMw2YVxHi",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUY14bKLLm72ukzo2t6AVnQiu4bCd1jkimwWyJk3txvLeGhvro5",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUinfdpmtfXsMUnoSoBeZ93mTwDkPkA2gmCiQTyEi1c1Ybx6unE",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUryiyDqEtyWVtFG24AAhaYjMf9FRLietbGzviF3piJsMm9qyDR",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107690236,
+      "m": "nHUwGQrfZfieeLFeGRdGnAmGpHBCZq9wvm5c59wTc2JhJMjoXmd8",
+      "t": 1792135432000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHB8QMKGt9VB4Vg71VszjBVQnDW3v3QudM4DwFaJfy96bj4Pv9fA",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHBVACxZaNbUjZZkBfj7gRxF3xgG2vbcP4m48KzVwntdTogi5Tfs",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHBidG3pZK11zQD6kpNDoAhDxH6WLGui6ZxSbUx7LSqLHsgzMPec",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHDB2PAPYqF86j9j3c6w1F1ZqwvQfiWcFShZ9Pokg9q4ohNDSkAz",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHDH7bQJpVfDhVSqdui3Z8GPvKEBQpo6AKHcnXe21zoD4nABA6xj",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHDHzXZKtmMHCkTVgdWY4dqdigDrESiseUF8JkzE93DUtfbt6s3W",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHU2k8Po4dgygiQUG8wAADMk9RqkrActeKwsaC9MdtJ9KBvcpVji",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHU3AenyRuJ4Yei4YHkh6frZg8y2RwXznkMAomUE1ptV5Spvqsih",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUED59jjpQ5QbNhesXMhqii9gA8UfbBmv3i5StgyxG98qjsT4yn",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUFCyRCrUjvtZmKiLeF8ReopzKuUoKeDeXo3wEUBVSaawzcSBpW",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUHeq3QdVyLTUENPHAAJ1d5M1SbvY49rajs31mJS8CEfrvTfjn3",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHULqGBkJtWeNFjhTzYeAsHA3qKKS7HoBh8CV3BAGTGMZuepEhWC",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUP4RcLQdPHh3kMtFm9NFGnjEYLGXiQAyyB7qFsjATHMw2YVxHi",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUUgpUVNxXfxkkoyh2QDjfLfHapcut8gYwKeShnJYd3SdPui19A",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUVPzAmAmQ2QSc4oE1iLfsGi17qN2ado8PhxvgEkou76FLxAz7C",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUY14bKLLm72ukzo2t6AVnQiu4bCd1jkimwWyJk3txvLeGhvro5",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUbgDd63HiuP68VRWazKwZRzS61N37K3NbfQaZLhSQ24LGGmjtn",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUcNC5ni7XjVYfCMe38Rm3KQaq27jw7wJpcUYdo4miWwpNePRTw",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUfPizyJyhAJZzeq3duRVrZmsTZfcLn7yLF5s2adzHdcHMb9HmQ",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUfxETNHsA9reyYCVYwNztEbifMg6U9YUdcgVvzMwGNpphKSSf6",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUge3GFusbqmfYAJjxfKgm2j4JXGxrRsfYMcEViHrFSzQDdk5Hq",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUinfdpmtfXsMUnoSoBeZ93mTwDkPkA2gmCiQTyEi1c1Ybx6unE",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUrUNXCy4DgPPNABX9C6mUctpoq7CwgLKAUxjw6zYtTfiqsj1ew",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUryiyDqEtyWVtFG24AAhaYjMf9FRLietbGzviF3piJsMm9qyDR",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUvcCcmoH1FJMMC6NtF9KKA4LpCWhjsxk2reCQidsp5AHQ7QY9H",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUwGQrfZfieeLFeGRdGnAmGpHBCZq9wvm5c59wTc2JhJMjoXmd8",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107694001,
+      "m": "nHUxjxKPeErbN7pNk9UWA5Ee7ZPMtesSeRGJtmdqkTxe94tqM2YX",
+      "t": 1792149950000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHB8QMKGt9VB4Vg71VszjBVQnDW3v3QudM4DwFaJfy96bj4Pv9fA",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHBVACxZaNbUjZZkBfj7gRxF3xgG2vbcP4m48KzVwntdTogi5Tfs",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHBWa56Vr7csoFcCnEPzCCKVvnDQw3L28mATgHYQMGtbEfUjuYyB",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHBgyVGAEhgU6GoEqoriKmkNBjzhy6WJhX9Z7cZ71yJbv28dzvVN",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHBidG3pZK11zQD6kpNDoAhDxH6WLGui6ZxSbUx7LSqLHsgzMPec",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHU3AenyRuJ4Yei4YHkh6frZg8y2RwXznkMAomUE1ptV5Spvqsih",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHU4bLE3EmSqNwfL4AP1UZeTNPrSPPP6FXLKXo2uqfHuvBQxDVKd",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUDpRzvY8fSRfQkmJMqjmVSaFmMEVxBNn2tNQy5VAhFJ6is6GFk",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUFCyRCrUjvtZmKiLeF8ReopzKuUoKeDeXo3wEUBVSaawzcSBpW",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUKgFa4diHC9sN7YnVt4AUPGkaHtShrT76xJBUFdH2B5Tz5nwVQ",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHULqGBkJtWeNFjhTzYeAsHA3qKKS7HoBh8CV3BAGTGMZuepEhWC",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUXeusfwk61c4xJPneb9Lgy7Ga6DVaVLEyB29ftUdt9k2KxD6Hw",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUcNC5ni7XjVYfCMe38Rm3KQaq27jw7wJpcUYdo4miWwpNePRTw",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUdjQgg33FRu88GQDtzLWRw95xKnBurUZcqPpe3qC9XVeBNrHeJ",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUfPizyJyhAJZzeq3duRVrZmsTZfcLn7yLF5s2adzHdcHMb9HmQ",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUinfdpmtfXsMUnoSoBeZ93mTwDkPkA2gmCiQTyEi1c1Ybx6unE",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUr8EhgKeTc9ESNt4nMYzWC2Pu7GgRHMRTsNEyGBTCfnHPxmXcm",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUryiyDqEtyWVtFG24AAhaYjMf9FRLietbGzviF3piJsMm9qyDR",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    },
+    {
+      "l": 107695059,
+      "m": "nHUxjxKPeErbN7pNk9UWA5Ee7ZPMtesSeRGJtmdqkTxe94tqM2YX",
+      "t": 1792154042000,
+      "type": "no-quorum",
+      "r": [
+        "no-quorum"
+      ]
+    }
+  ]
+}
