@@ -37,7 +37,7 @@ import { LATENCY_VERDICTS } from '../lib/validator-vote-latency.mjs';
 import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
-import { COUPLING_VERDICTS } from '../lib/validator-stress-coupling.mjs';
+import { COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from '../lib/validator-stress-coupling.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 import { CAPTURE_GAP_BASES_MEASURED } from '../lib/validator-trace.mjs';
 
@@ -1189,4 +1189,50 @@ test('Grundebene: ein Koerper unter allen 24 Intervallen, keine je-Saeulen-Scher
     'die Ebene wird nicht vor dem Gitter gerendert - sie laege vor den Saulen');
   assert.match(css, /@container\s*\(max-width:\s*\d+px\)\s*\{[^@]{0,260}?\.vt-floor-top\s*\{\s*display:\s*none/,
     'Mobil: die Deckflaeche der Ebene bleibt stehen, obwohl die Scherflaechen fallen');
+});
+
+/* Die Last-Dosis-Achse der Kopplungsebene wird gerechnet (lib/validator-stress-coupling.mjs:
+ * loadAxis + loadTrend) und war zunachst nirgends sichtbar: couplingBlock renderte verdict,
+ * coverage, axes, findings, peaks, signatures, local, gaps - nur die Achse selbst fehlte.
+ * Ein gerechneter Wert, den niemand sieht, ist eine Zahl im JSON, keine Auskunft.
+ * Guard: die Kurve haengt an der Achse, ihr Urteil an den zwei Haelften, jedes der funf Urteile
+ * hat ein Label, und der Namensraum ist vt.dose.* - vt.load.* fuehrt schon die Last-Kurve der
+ * Diagnose-Ebene, und zwei Ebenen duerfen sich kein Label ueberschreiben. */
+test('Dosis-Kurve: die gerechnete Lastachse wird gerendert, nicht nur mitgeliefert', () => {
+  assert.match(src, /const loadBlock = \(\(\) => \{/, 'die Kurve hat kein eigenes Render-Stueck');
+  assert.match(src, /const la = c\.loadAxis;/, 'die Kurve liest nicht die Achse der Lib');
+  assert.match(src, /const tr = la\.trend \|\| \{\};/, 'das gerechnete Urteil der Lib wird nicht gelesen');
+  assert.match(src, /return verdictLine \+ covLine \+ axisLine \+ loadBlock \+ findingsBlock/,
+    'die Kurve haengt nicht in der Ausgabekette der Kopplungs-Ebene');
+  // Sieben Spalten: Band, Nenner, Zaehler, Rate, dieser Knoten, seine Rate, Nenner-Art. Ohne die
+  // letzte Spalte ist eine duenne Rate von einer vollen nicht zu unterscheiden.
+  assert.match(src, /\["vt\.dose\.hBand", "vt\.dose\.hLedgers", "vt\.dose\.hFails", "vt\.dose\.hRate",\s*"vt\.dose\.hOwn", "vt\.dose\.hOwnRate", "vt\.dose\.hSample"\]/,
+    'die Achse hat nicht ihre sieben Spalten - Nenner oder Nenner-Art fehlen');
+  assert.match(src, /h\.t\("vt\.dose\.sample\." \+ \(r\.sample === "measured" \? "measured" : "thin"\)\)/,
+    'die Nenner-Art je Band wird nicht uebersetzt');
+  assert.match(src, /h\.t\("vt\.dose\.verdict\." \+ verdict\)/, 'Urteil ohne Label');
+  // Ein Urteil, das dieser UI unbekannt ist, wird nicht still als "flach" gezeigt: offen bleibt offen.
+  assert.match(src, /LOAD_TREND_VERDICTS\.has\(tr\.verdict\) \? tr\.verdict : "insufficient-sample"/,
+    'ein unbekanntes Dosis-Urteil faellt nicht auf offen zurueck');
+  assert.match(src, /vt-badge vt-load-/, 'das Dosis-Urteil hat keine Badge-Klasse');
+  assert.match(src, /h\.t\(tr\.monotone === true \? "vt\.dose\.monotone\.yes" : "vt\.dose\.monotone\.no"/,
+    'die fallenden Schritte werden nicht gezeigt - eine Achse gilt sonst als streng monoton');
+  assert.match(src, /vt\.dose\.authority/, 'die Autoritaet der Achse fehlt - ohne sie wird Korrelation als Ursache gelesen');
+  const from = src.indexOf('const loadBlock');
+  const to = src.indexOf('return verdictLine + covLine + axisLine + loadBlock');
+  assert.ok(from > 0 && to > from, 'die Render-Stueck und ihre Ausgabekette stehen nicht in der Reihenfolge');
+  assert.doesNotMatch(src.slice(from, to), /vt\.load\./,
+    'die Kurve greift in den Namensraum der Diagnose-Ebene - ein Label wird ueberschrieben');
+  // UI-Menge und Lib-Menge sind dieselbe Menge: driftet eine, ist die andere unverprobt.
+  const uiSet = src.match(/const LOAD_TREND_VERDICTS = new Set\(\[([^\]]+)\]\)/);
+  assert.ok(uiSet, 'die UI deklariert ihre Dosis-Urteile nicht');
+  assert.deepEqual(uiSet[1].match(/"([^"]+)"/g).map((q) => q.slice(1, -1)).sort(),
+    [...LOAD_TREND_VERDICTS].sort(), 'UI und Lib haben verschiedene Dosis-Urteile');
+  // CSS: jedes Urteil der Lib hat eine Badge-Farbe, auch das offene.
+  const cssDose = stripComments(styleCss);
+  for (const v of LOAD_TREND_VERDICTS) {
+    // Ein Selector darf zwei Urteile teilen - dann steht hinter dem ersten ein Komma, nicht
+    // die Klammer. Beide Formen muessen gelten, sonst fehlt ein Badge, obwohl einer da ist.
+    assert.ok(new RegExp('\\.vt-badge\\.vt-load-' + v + '(,|\\s*\\{)').test(cssDose), 'kein Badge fuer Dosis-Urteil ' + v);
+  }
 });

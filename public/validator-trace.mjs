@@ -31,6 +31,9 @@ const CAUSE_ROWS = 12;
 // Nur diese beiden fuehren die Beschriftung des Belegs; 'not-recorded' bekommt keine Basis, weil es
 // keine gibt. Der UI-Name ist absichtlich identisch: dieselbe Vokabel in Analyse und Anzeige.
 const CAPTURE_BASES = new Set(["ledger-index", "stream-gap", "stream-open"]);
+// Die Dosis-Urteile, dieselbe Menge wie in der Lib (lib/validator-stress-coupling.mjs): ein
+// Urteil, das hier nicht bekannt ist, wird nicht still als "flach" gezeigt, sondern als offen.
+const LOAD_TREND_VERDICTS = new Set(["load-dose-rising", "load-dose-flat", "load-dose-falling", "not-comparable", "insufficient-sample"]);
 // Herleitung des Quorum-Ziels mit denselben Namen wie NEEDED_BASES in lib/validator-trace.mjs.
 // "not-recorded" hat ein Label, weil die Zeile trotzdem ein Ziel zeigt: ohne Beschriftung
 // waere "16 / 28" ein Ziel, dessen Herkunft niemand pruefen kann.
@@ -1513,7 +1516,56 @@ function attributionBlock(a) {
     const gapLine = (c.gaps || []).length
       ? '<p class="vt-note">' + h.esc(c.gaps.map((g) => h.t("vt.coupling.gap." + g)).join(" · ")) + "</p>"
       : "";
-    return verdictLine + covLine + axisLine + findingsBlock + peakTable + sigTable + localLine + gapLine;
+    // Die Dosis-Kurve: eine Rate je Ledger-Groessenband und ein Urteil ueber die Achse hinweg.
+    // Ohne sie ist die Lastachse eine Zahlensammlung; mit ihr ist die Richtung sichtbar -
+    // inklusive der Stufe, die nicht steigt. Eine Achse als 'streng monoton' zu melden, wo eine
+    // Stufe faellt, waere eine Schaetzung ueber die eigene Messung hinweg. Das Urteil zaehlt nur
+    // Baelnder mit vollem Nenner, und der Nenner steht in jeder Zeile der Tabelle.
+    const loadBlock = (() => {
+      const la = c.loadAxis;
+      if (!la || !Array.isArray(la.rows) || la.rows.length === 0)
+        return '<p class="vt-empty">' + h.esc(h.t("vt.dose.none")) + "</p>";
+      const tr = la.trend || {};
+      const lhead = ["vt.dose.hBand", "vt.dose.hLedgers", "vt.dose.hFails", "vt.dose.hRate",
+        "vt.dose.hOwn", "vt.dose.hOwnRate", "vt.dose.hSample"]
+        .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+      const lbody = la.rows.map((r) => "<tr>"
+        + '<th scope="row">' + h.esc(String(r.label ?? "–")) + "</th>"
+        + "<td>" + h.esc(num(r.ledgers)) + "</td>"
+        + "<td>" + h.esc(num(r.fails)) + "</td>"
+        + "<td>" + h.esc(pcn((r.networkRate ?? 0) * 100) + " %") + "</td>"
+        + "<td>" + h.esc(num(r.own)) + "</td>"
+        + "<td>" + h.esc(pcn((r.ownRate ?? 0) * 100) + " %") + "</td>"
+        + "<td>" + h.esc(h.t("vt.dose.sample." + (r.sample === "measured" ? "measured" : "thin"))) + "</td></tr>").join("");
+      const verdict = LOAD_TREND_VERDICTS.has(tr.verdict) ? tr.verdict : "insufficient-sample";
+      const head = '<p class="vt-scope"><span class="vt-badge vt-load-' + h.esc(verdict) + '">'
+        + h.esc(h.t("vt.dose.verdict." + verdict)) + "</span>"
+        + (Number.isFinite(tr.bandsMeasured) ? " · " + h.esc(h.t("vt.dose.sample." + (tr.bandsMeasured > 0 ? "measured" : "thin")))
+          + " " + num(tr.bandsMeasured) + " / " + num(la.rows.length) : "") + "</p>";
+      const trendLine = Number.isFinite(tr.lowerRate) && Number.isFinite(tr.upperRate)
+        ? '<p class="vt-note">' + h.esc(h.t("vt.dose.trendLine", {
+            bands: num(tr.bandsMeasured), ledgers: num(tr.ledgersMeasured),
+            lower: pcn(tr.lowerRate * 100), upper: pcn(tr.upperRate * 100),
+            ratio: Number.isFinite(tr.halfRatio) ? (Math.round(tr.halfRatio * 100) / 100).toFixed(2) : "–",
+            rising: num(tr.risingSteps), steps: num(tr.steps),
+            peak: String((tr.peakBand && tr.peakBand.label) ?? "–"),
+          }) + " · " + h.esc(h.t(tr.monotone === true ? "vt.dose.monotone.yes" : "vt.dose.monotone.no",
+            { falling: num(tr.fallingSteps) }))) + "</p>"
+        : "";
+      const ownLine = Number.isFinite(tr.rateMeasured)
+        ? '<p class="vt-note">' + h.esc(h.t("vt.dose.ownLine", {
+            own: num(tr.ownMeasured), ledgers: num(tr.ledgersMeasured),
+            ownRate: pcn((tr.ownRateMeasured ?? 0) * 100) + " %", rate: pcn(tr.rateMeasured * 100) + " %",
+          })) + "</p>" : "";
+      const axisGap = Number.isFinite(la.ledgersWithoutAxis) && la.ledgersWithoutAxis > 0
+        ? '<p class="vt-note">' + h.esc(h.t("vt.dose.withoutAxis", { n: num(la.ledgersWithoutAxis) })) + "</p>" : "";
+      return '<h4 class="vt-h4">' + h.esc(h.t("vt.dose.title")) + '</h4>' + head
+        + '<div class="vt-tablewrap"><table class="vt-table vt-load-axis"><thead><tr>' + lhead
+        + "</tr></thead><tbody>" + lbody + "</tbody></table></div>"
+        + trendLine + ownLine + axisGap
+        + '<p class="vt-note"><small>' + h.esc(h.t("vt.dose.authority")) + "</small></p>";
+    })();
+    return verdictLine + covLine + axisLine + loadBlock + findingsBlock + peakTable + sigTable + localLine + gapLine;
   }
 
   // Netz-Sicht: erst die Trennung Netzereignis / privat, dann Kandidaten fuer geteilte

@@ -32,7 +32,7 @@ import { CAUSE_CHECKS, CAUSE_CONFIDENCE, CAUSE_GAPS, CAUSE_KINDS, CAUSE_LAYERS, 
 import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from "../lib/validator-quorum-surface.mjs";
 import { SENSITIVITY_FAMILIES, SENSITIVITY_GAPS, SENSITIVITY_HEADLINES, SENSITIVITY_VERDICTS } from "../lib/validator-sensitivity.mjs";
 import { TRUTH_VERDICTS } from "../lib/validator-truth.mjs";
-import { COUPLING_AUTHORITIES, COUPLING_AXES, COUPLING_GAPS, COUPLING_VERDICTS } from "../lib/validator-stress-coupling.mjs";
+import { COUPLING_AUTHORITIES, COUPLING_AXES, COUPLING_GAPS, COUPLING_VERDICTS, LOAD_TREND_VERDICTS } from "../lib/validator-stress-coupling.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -63,6 +63,9 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.cq.basis.", "vt.cq.event.", "vt.cq.truth.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
     "vt.coupling.authority.", "vt.coupling.axis.", "vt.coupling.gap.", "vt.coupling.verdict.",
+    // Die Dosis-Achse hat einen eigenen Namen, weil vt.load.* schon die Last-Kurve der Diagnose-
+    // Ebene fuehrt. Beide muessen in der Liste stehen, sonst ist ein Praefix unverprobt.
+    "vt.dose.sample.", "vt.dose.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
   // nicht als h.t("Praefix" + ...) - sie gehoeren deshalb nicht in diese Liste.
@@ -112,7 +115,11 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     // Schluessel, mit dem falschen Label aber eine unbelegte Aussage.
     ["vt.cq.event.", [...CAPTURE_EVENT_KINDS, "near"]],
     ["vt.surface.axis.", SURFACE_AXES],
-    ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]]);
+    ["vt.surface.group.", ["quorumThin", "quorumComfort", "loadHigh", "loadNormal"]],
+    // Die Dosis-Urteile sind ein Urteil ueber die Lastachse, kein Schmuck der Tabelle: jedes der
+    // funf muss in beiden Sprachen lesbar sein, auch das offene.
+    ["vt.dose.verdict.", [...LOAD_TREND_VERDICTS]],
+    ["vt.dose.sample.", ["measured", "thin"]]);
   // Empfindlichkeit: das Urteil beantwortet, ob DICH diese Signatur ueberproportional trifft.
   // Ohne Label stünde der rohe Schluessel genau dort, wo Betreiber entscheiden.
   // Typ-Namen der Vorfaelle: die Ursache-Tabelle schreibt den Typ in eine vt.k.-Zelle. Ohne
