@@ -279,6 +279,27 @@ for (const d of days) {
     if (set.size > c) counterGaps.push(d.date + " " + tag + ": " + set.size + " Ausfall-Ledern gegen " + c + " gezehlte");
   }
 }
+// Der Tages-Zaehler 'incidentLedgers' wird dort erhoeht, wo derselbe Block auch die Forensik-Zeile
+// schreibt (monitor/validator-trace.mjs: if (r.incidents.length) { d.incidentLedgers += 1; ...
+// d.ledgerStats.push(...) }). Er ist also die Zahl der Ausfall-Ledger MIT Forensik, nicht die aller
+// Ausfall-Ledger. Wer ihn fuer die Grundgesamtheit haelt, vergleicht Zaehler und Nenner aus
+// verschiedenen Populationen - genau die Invariante, die lib/validator-divergence.mjs fuer ihren
+// Feature-Lift braucht. Altbestand ohne diesen Zaehler bleibt ungeprueft: keine Zusage, keine Luecke.
+const forensicsCoverage = [];
+for (const d of days) {
+  const claimed = Number(d.incidentLedgers);
+  if (!Number.isFinite(claimed)) continue;
+  const incidentSet = new Set((d.incidents ?? []).map((i) => i?.l));
+  const statsSet = new Set((d.ledgerStats ?? []).map((x) => x?.l));
+  if (claimed > incidentSet.size) {
+    bad("J", d.date, `incidentLedgers ${claimed} > ${incidentSet.size} Ausfall-Ledger, die diese Datei selbst nennt`);
+  }
+  if (!d.ledgerStatsTruncated && claimed !== statsSet.size) {
+    bad("J", d.date, `incidentLedgers ${claimed} != ${statsSet.size} Forensik-Zeilen - derselbe Schreibblock erzeugt beide`);
+  }
+  const without = [...incidentSet].filter((l) => !statsSet.has(l)).length;
+  if (without) forensicsCoverage.push(`${d.date}: ${without} von ${incidentSet.size} Ausfall-Ledern ohne Forensik-Zeile (incidentLedgers nennt ${claimed})`);
+}
 for (const master of masters) {
   // topTags ist eine Anzeige-Grenze, keine Messgrenze: das Audit muss jede Zeile sehen,
   // die die Engine gerechnet hat. Sonst geht ein Zaehler-Widerspruch hinter der Kappe verloren.
@@ -326,6 +347,12 @@ if (!QUIET) console.log(`  Knoten-Urteil 'missed': mit Beleg ${missedProven} | o
 if (!QUIET) console.log(`  Raten-Zeilen: ${rateRowsChecked} Empfindlichkeit, ${cohortRowsChecked} Kohorte, ${riskRowsChecked} Risiko | ohne Rate zurueckgehalten ${rateRowsWithheld}`);
 if (!QUIET) console.log(`  Zaehler-Vokabel nachgefuehrt (no-quorum -> vote-not-observed, Ledger-Zahl): ${countersRenamed}`);
 if (!QUIET) console.log(`  Zaehler-Deckung: ${counterGaps.length} Tag-Signaturen mit mehr Ausfall-Ledern als der Tages-Zaehler nennt` + (counterGaps.length ? " (Rate zurueckgehalten, nicht geschaetzt)" : ""));
+if (!QUIET) console.log(`  Forensik-Deckung der Ausfall-Ledger: ${forensicsCoverage.length} Tage mit Ausfall-Ledern ohne Forensik-Zeile` + (forensicsCoverage.length ? " (incidentLedgers zaehlt nur Ledger mit Forensik - kein Nenner fuer die Grundgesamtheit)" : ""));
+if (forensicsCoverage.length) {
+  console.log("  FORENSIK-DECKUNG (je Tag):");
+  for (const g of forensicsCoverage.slice(0, 20)) console.log("    " + g);
+  if (forensicsCoverage.length > 20) console.log(`    ... ${forensicsCoverage.length - 20} weitere`);
+}
 if (counterGaps.length) {
   console.log("  BENANNTE ZAEHLER-LUECKEN:");
   for (const g of counterGaps.slice(0, 20)) console.log("    " + g);

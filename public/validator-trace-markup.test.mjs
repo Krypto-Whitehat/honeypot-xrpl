@@ -1027,6 +1027,10 @@ test('null ist nicht 0: eine nicht erfasste Zahl darf nicht als Messwert erschei
   // Number(null) === 0. Ohne die null-Vorpruefung wird aus 'nicht erfasst' im Text eine 0.
   assert.match(src, /v === null \|\| v === undefined/, 'num() unterscheidet null nicht von 0');
   assert.doesNotMatch(src, /const num = \(v\) => \(Number\.isFinite\(Number\(v\)\)/, 'num() prueft zuerst die Zahl, nicht die Erfassung');
+  // Live am 2026-10-17 auf #107709532: ovb war im Rekorder null, die Zelle zeigte "eigener
+  // Empfang 38 von 0 Validierungen". Die Basis fehlt dort - sie ist nicht gemessen null.
+  assert.match(src, /Number\.isFinite\(r\.observedBaseline\)/, 'ohne eigene Empfangs-Basis wird der Satz nicht gerendert');
+  assert.match(src, /Number\.isFinite\(r\.capture\.coverageBaseline\)/, 'ohne Abdeckungs-Niveau wird die Zurechnung nicht gerendert');
 });
 
 test("Gegenprobe-Text: das Fenster wird benannt, nicht als 24 h gesetzt", () => {
@@ -1250,4 +1254,44 @@ test('Dosis-Kurve: die gerechnete Lastachse wird gerendert, nicht nur mitgeliefe
     // die Klammer. Beide Formen muessen gelten, sonst fehlt ein Badge, obwohl einer da ist.
     assert.ok(new RegExp('\\.vt-badge\\.vt-load-' + v + '(,|\\s*\\{)').test(cssDose), 'kein Badge fuer Dosis-Urteil ' + v);
   }
+});
+
+/* Erfassungs-Ereignis ohne Ledger-Koordinate (Genauigkeit 2026-10-17): die Produktion zeigte
+ * "stream rebuilt at ledger -, 5 s from this ledger". Ein Ereignis ohne Ledger-Koordinate hat
+ * keine Koordinate - die Zelle darf sie nicht durch einen Strich in der Ledger-Position ersetzen,
+ * weil genau dort der Leser eine Ledgerzahl erwartet. Guard: die Koordinate ist ein eigenes
+ * Textstueck, und ohne Koordinate steht kein Ledger-Platzhalter in der Zeile. */
+test('Erfassungs-Ereignis: eine fehlende Ledger-Koordinate wird nicht als Strich gezeichnet', () => {
+  assert.match(src, /at: Number\.isFinite\(r\.captureEvent\.ledger\)/, 'die Zelle prueft die Koordinate nicht');
+  assert.match(src, /h\.t\("vt\.cq\.event\.at"/, 'die Koordinate hat kein eigenes Textstueck');
+  assert.match(src, /h\.t\("vt\.cq\.event\.atUnknown"\)/, 'die koordinatenlose Variante fehlt');
+  // Die Koordinate darf nur im geprüften Zweig gelesen werden: im anderen Zweich steht die
+  // koordinatenlose Beschriftung, nicht ein Strich an der Stelle, wo der Leser eine Zahl erwartet.
+  assert.match(src, /at: Number\.isFinite\(r\.captureEvent\.ledger\)\s*\?\s*h\.t\("vt\.cq\.event\.at",\s*\{\s*l: num\(r\.captureEvent\.ledger\)\s*\}\s*\)\s*:\s*h\.t\("vt\.cq\.event\.atUnknown"\)/,
+    'die Koordinate wird nicht abgesichert gelesen - ohne Wert wird daraus ein Strich');
+  const i18n = read('i18n-validator.mjs');
+  assert.equal(i18n.split("'vt.cq.event.at'").length - 1, 2, 'vt.cq.event.at fehlt in einer Sprache');
+  assert.equal(i18n.split("'vt.cq.event.atUnknown'").length - 1, 2, 'vt.cq.event.atUnknown fehlt in einer Sprache');
+  // Die Ereignis-Texte selbst nennen keine Ledgerzahl mehr: sonst staende die Koordinate
+  // zweimal in der Zeile, einmal belegt und einmal als Strich.
+  for (const kind of ['open', 'close', 'stall', 'near']) {
+    assert.equal((i18n.match(new RegExp("'vt\\.cq\\.event\\." + kind + "': '[^']*\\{at\\}[^']*'", 'g')) || []).length, 2,
+      'vt.cq.event.' + kind + ' nutzt {at} nicht in beiden Sprachen');
+    assert.equal((i18n.match(new RegExp("'vt\\.cq\\.event\\." + kind + "': '[^']*\\{l\\}[^']*'", 'g')) || []).length, 0,
+      'vt.cq.event.' + kind + ' nennt weiterhin eine Ledgerzahl');
+  }
+});
+
+/* Warm-Lauf-Lesart (Genauigkeit 2026-10-17): die Zelle zeigte "own reception 38 of 0 validations".
+ * Gelesen wird das als Anteil mit Nenner Null - eine Bruchaussage, die die Lib nie trifft. Gemeint
+ * sind zwei Zahlen: der eigene Empfang auf diesem Ledger und der eigene Median der Erfassung. */
+test('Warm-Lauf-Zelle: eigener Empfang und eigener Median stehen als zwei Zahlen da', () => {
+  const i18n = read('i18n-validator.mjs');
+  assert.equal(i18n.split("'vt.cq.ownBaseline'").length - 1, 2, 'vt.cq.ownBaseline fehlt in einer Sprache');
+  assert.doesNotMatch(i18n, /'vt\.cq\.ownBaseline': '[^']*\{seen\} of \{base\}/,
+    'die englische Zeile liest sich weiterhin als Anteil');
+  assert.doesNotMatch(i18n, /'vt\.cq\.ownBaseline': '[^']*\{seen\} von \{base\}/,
+    'die deutsche Zeile liest sich weiterhin als Anteil');
+  assert.match(i18n, /'vt\.cq\.ownBaseline': '[^']*\{seen\}[^']*\{base\}[^']*'/,
+    'die Zelle nennt beide Zahlen nicht');
 });

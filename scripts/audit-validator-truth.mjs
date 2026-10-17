@@ -91,6 +91,16 @@ if (listRes.json && Array.isArray(listRes.json)) {
   for (const v of listRes.json) if (v?.master_key) names.set(v.master_key, v.domain || "");
 }
 
+// Der Name muss dem Overlay gleichen, sonst widersprechen sich zwei Ansichten desselben Knoten.
+// Das Overlay nimmt domain aus dem Einzel-Aufruf /api/v1/validator/<master>
+// (lib/validator-service.mjs). Die Liste /api/v1/validators fuehrt keinen domain fuer einen Teil
+// der dUNL-Knoten - nachgezaehlt am 2026-10-17 an nHBidG3pZK11... (bitso.com),
+// nHDH7bQJpVfDh... (ripplevalidator.uwaterloo.ca) und nHULqGBkJtWeNF...
+// (shadow.haas.berkeley.edu): im Audit standen sie namenlos da, im Overlay benannt. Die Liste
+// ist deshalb nur Ersatz, nie die massgebliche Quelle.
+const domainOf = (info) => (info && typeof info.domain === "string" && info.domain.trim() !== ""
+  ? info.domain.trim() : "");
+
 // --ledger=<index>: die Retrace-Ansicht eines einzelnen Ledgers. Die Fensterzahl der Referenz
 // begrenzt, WIE VIELE Behauptungen nicht stimmen koennen; diese Ansicht zeigt, WELCHE Knoten
 // diese Engine an diesem Ledger als Nicht-Signierer fuehrt, und was die Referenz zu jedem
@@ -137,10 +147,12 @@ async function ledgerProbe(index) {
   console.log("");
   console.log("  Von dieser Erfassung als Nicht-Signierer gefuehrte Knoten:", named.length);
   const hours = HOURS === 1 ? 1 : 24;
-  let refuted = 0, within = 0, open = 0;
+  let refuted = 0, within = 0, open = 0, unnamed = 0;
   for (const { master, hits } of named) {
     const all = absencesOf(claimsByMaster.get(master) ?? [], master);
     const res = await get("https://api.xrpscan.com/api/v1/validator/" + master);
+    const domain = domainOf(res.json) || names.get(master) || "";
+    if (!domain) unnamed += 1;
     const a = res.json ? ((hours === 1 ? res.json.agreement_1h : res.json.agreement_24h) ?? {}) : {};
     const scan = res.json ? {
       missed: a.missed ?? null, total: a.total ?? null, score: a.score ?? null,
@@ -153,7 +165,7 @@ async function ledgerProbe(index) {
     if (r.verdict === "contradicted") refuted += 1;
     else if (r.verdict === "consistent") within += 1;
     else open += 1;
-    console.log("  - " + String(names.get(master) || master.slice(0, 16)).padEnd(34)
+    console.log("  - " + String(domain || master.slice(0, 16)).padEnd(34)
       + " an diesem Ledger " + String(hits.length).padStart(2)
       + "  Fenster " + String(r.claims).padStart(4) + " eigene / Referenz "
       + String(r.groundMissed ?? "-").padStart(5) + "/" + String(r.groundTotal ?? "-").padStart(6)
@@ -164,8 +176,8 @@ async function ledgerProbe(index) {
   }
   console.log("");
   console.log("BEFUND LEDGER " + index);
-  console.log("  benannte Knoten:", named.length, "| widerlegt:", refuted,
-    "| innerhalb der Referenz:", within, "| ohne verwertbare Referenz:", open);
+  console.log("  benannte Knoten:", named.length - unnamed, "| ohne Namen in beiden Quellen:", unnamed,
+    "| widerlegt:", refuted, "| innerhalb der Referenz:", within, "| ohne verwertbare Referenz:", open);
   console.log("  Welcher der benannten Knoten an diesem Ledger echt fehlte, bleibt offen: die Referenz"
     + " ist eine Fensterzahl, keine Liste je Ledger.");
   console.log("  Nachlesbar: https://xrpscan.com/ledger/" + index + " und https://api.xrpscan.com/api/v1/validator/<master>");
@@ -220,7 +232,7 @@ for (const master of masters) {
     scan.incomplete = res.json.agreement_1h?.incomplete === true;
   }
   const r = compareAbsences({ master, claims: all, scan, rangeHours: hours, hours });
-  r.domain = names.get(master) || "";
+  r.domain = domainOf(res.json) || names.get(master) || "";
   results.push(r);
   const flag = r.verdict === "contradicted" ? "WIDERLEGT" : r.verdict === "consistent" ? "innerhalb" : "keine Referenz";
   console.log("  " + (r.domain || master.slice(0, 12)).padEnd(34)

@@ -945,7 +945,12 @@ function attributionBlock(a) {
         : "";
       const evt = r.captureEvent
         ? " · " + h.esc(h.t("vt.cq.event." + (CAPTURE_EVENT_KINDS.has(r.captureEvent.kind) ? r.captureEvent.kind : "near"), {
-          l: num(r.captureEvent.ledger), s: Math.round(num(r.captureEvent.deltaMs) / 1000) }))
+          // Ein Ereignis ohne Ledger-Koordinate darf nicht als "at ledger -" gelesen werden:
+          // der Abstand zum Ledger bleibt gemessen, die Koordinate des Ereignisses ist unbekannt.
+          at: Number.isFinite(r.captureEvent.ledger)
+            ? h.t("vt.cq.event.at", { l: num(r.captureEvent.ledger) })
+            : h.t("vt.cq.event.atUnknown"),
+          s: Math.round(num(r.captureEvent.deltaMs) / 1000) }))
         : "";
       // Die Grenze aus der Schliessung, nicht aus einer Schaetzung: auf einem geschlossenen
       // Ledger koennen hoechstens (dUNL - Ziel) der nicht erfassten Knoten echt gefehlt haben.
