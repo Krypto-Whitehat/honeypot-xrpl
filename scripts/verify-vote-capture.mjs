@@ -46,9 +46,11 @@ for (const hex of vl.keys) {
   meta.set(master, { domain: rec?.domain ?? "?", name: rec?.name ?? "?", ephemeral: rec?.ephemeral_key ?? null });
   if (rec?.ephemeral_key) ephemeralToMaster.set(rec.ephemeral_key, master);
 }
-const need = Math.ceil(members.length * TRACE_DEFAULTS.quorumFrac);
+const derivedNeed = Math.ceil(members.length * TRACE_DEFAULTS.quorumFrac);
+let need = derivedNeed;
+let needBasis = "derived";
 log("dUNL", vl.keys.length, "| Master gemaht", members.length, "| Ephemeral zuordenbar", ephemeralToMaster.size,
-  "| Quorum-Ziel ceil(" + members.length + " * 0.8) =", need);
+  "| Quorum-Ziel aus der dUNL-Liste gerechnet ceil(" + members.length + " * 0.8) =", need);
 
 // ---------- 3: eigener Mithoerlauf ----------
 const ledgers = new Map();   // index -> { hash, closeMs, tx, seenMs }
@@ -73,6 +75,18 @@ const info = await new Promise((res) => {
 });
 log("server_info:", info?.server_state, "| validation_quorum:", info?.validation_quorum,
   "| validierte Ledger:", info?.validated_ledgers ?? info?.complete_ledgers);
+// Das gemeldete Netz-Ziel gewinnt gegen die eigene Rechnung: ceil(dUNL * 0,8) ist eine
+// Herleitung, validation_quorum ist die Zahl, die das Netz selbst an diesem Endpunkt verlangt.
+const reported = Number(info?.validation_quorum);
+if (Number.isFinite(reported) && reported > 0) {
+  need = reported;
+  needBasis = "measured";
+  log("Quorum-Ziel gemessen am Endpunkt:", reported,
+    reported === derivedNeed ? "bestaetigt die Rechnung " + derivedNeed : "ersetzt die Rechnung " + derivedNeed);
+} else {
+  log("Quorum-Ziel am Endpunkt nicht meldbar (validation_quorum:", info?.validation_quorum ?? "fehlt",
+    ") - gehalten wird die gerechnete Zahl", need);
+}
 
 ws.on("message", (raw) => {
   let m; try { m = JSON.parse(raw); } catch { return; }
@@ -175,6 +189,9 @@ console.log("BEFUND");
 console.log("  Mithoer-Laeufe:", report.length,
   "| Ledger mit gesehenen Stimmen unter Ziel:", thin,
   "| davon mit Erfassungs-Luecke dieses Mithoerers:", captureGaps);
+console.log("  Ziel-Herleitung:", needBasis === "measured"
+  ? "gemessen am Endpunkt: das Netz verlangt " + need
+  : "aus der dUNL-Liste gerechnet: " + members.length + " Knoten, Ziel " + need + " (Endpunkt meldete keinen Wert)");
 console.log("  Medianer Close-Abstand im Live-Stream:", medianGap, "ms");
 console.log("  xrpscan-Deckung (Hash + Tx + Close identisch):", agree, "von", report.length);
 console.log("  Bedeutet: ein bewiesen geschlossener Ledger mit gesehenen Stimmen unter Ziel ist");

@@ -23,7 +23,7 @@ const DICT = {
  * Overlay registerDict ruft. Ein Key, der hier fehlt, steht roh in der Seite. */
 const CORE_AT_LOAD = { en: { ...CORE_DICT.en }, de: { ...CORE_DICT.de } };
 import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
-import { CAPTURE_GAP_BASES, CAPTURE_EVENT_KINDS } from "../lib/validator-trace.mjs";
+import { CAPTURE_GAP_BASES, CAPTURE_EVENT_KINDS, NEEDED_BASES } from "../lib/validator-trace.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
 import { PEER_AUTHORITIES, PEER_DIRECTIONS, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
 import { LATENCY_AUTHORITIES, LATENCY_CLASSES, LATENCY_PATTERNS, LATENCY_REASONS, LATENCY_VERDICTS } from "../lib/validator-vote-latency.mjs";
@@ -103,6 +103,9 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     // und 'gemessen am Luecken-Log' sind verschiedene Belege, und 'not-recorded' hat keinen Beleg -
     // deshalb bekommt dieser Wert bewusst kein Label.
     ["vt.cq.basis.", CAPTURE_GAP_BASES.filter((b) => b !== "not-recorded")],
+    // Das Quorum-Ziel wird an der Zeile gezeigt, also muss jede seiner Herleitungen lesbar sein -
+    // auch "not-recorded", weil die Zeile dort trotzdem ein Ziel nennt.
+    ["vt.cq.neededBasis.", [...NEEDED_BASES]],
     // Ein Erfassungs-Ereignis ist Teil des Urteils ueber diese Ledger-Zeile: 'Stream verloren',
     // 'Stream stumm' und 'Stream neu aufgebaut' sind verschiedene naechste Pruefungen. 'near'
     // faengt jeden Typ, der diesem Overlay unbekannt ist - ohne Label stünde dort der rohe

@@ -257,6 +257,11 @@ function recordResult(r, detailNote) {
       // mm: die dUNL-Groesse, aus der 'need' gerechnet wurde (need = ceil(mm * quorumFrac)).
       // Ohne sie ist 'need' eine Zahl ohne Herleitung und die Quorum-Reserve nicht nachrechenbar.
       mm: Number.isFinite(f.members) ? f.members : null,
+      // nb/nq: die Herleitung des Quorum-Ziels und der gemessene Netz-Wert dahinter. Ohne nb
+      // ist need in dieser Zeile eine Zahl ohne Herkunft, und die Leseschicht muss
+      // "not-recorded" sagen statt sie als Netz-Quorum zu lesen.
+      nb: typeof f.neededBasis === "string" ? f.neededBasis : null,
+      nq: Number.isFinite(f.networkQuorum) ? f.networkQuorum : null,
       sp: f.runnerVotes ?? 0, gap: r.closeGapMs ?? null, gmed: r.medianGap ?? null,
       // Schliess-Beweis dieses Ledgers: ch ist der Hash aus dem validierten Stream (die Autoritaet,
       // an der jede Zeile nachpruefbar ist), cl sagt, dass das Netz geschlossen hat, cg markiert die
@@ -408,7 +413,10 @@ const stats = { validations: 0, ledgers: 0, connects: 0, txShape: 0, stalls: 0 }
 const quorumSampleState = () => {
   const d = days.get(dayOf(Date.now()));
   const nq = d?.networkQuorum;
-  if (nq && Number.isFinite(nq.quorum)) return `${nq.quorum} (${nq.endpoint})`;
+  if (nq && Number.isFinite(nq.quorum)) {
+    const t = tracker ? tracker.quorum : null;
+    return `${nq.quorum} (${nq.endpoint}), Ziel dieser Bewertung: ${t} (${tracker?.quorumBasis ?? "nicht erfasst"})`;
+  }
   const a = d?.networkQuorumAttempts ?? 0;
   return a > 0 ? `nicht meldbar (${a} Versuche)` : "nicht erfasst";
 };
@@ -496,6 +504,9 @@ function probeQuorum(url, timeoutMs = 15000) {
 async function recordQuorumAttempt(q, endpoint) {
   const d = dayObj(dayOf(Date.now()));
   d.networkQuorumAttempts = (d.networkQuorumAttempts ?? 0) + 1;
+  // Der gemessene Wert geht sofort in die Bewertung ein. Ohne diesen Schritt bleibt die
+  // Messung in der Tagesdatei liegen, waehrend need weiter aus der dUNL-Groesse gerechnet wird.
+  if (tracker) tracker.setNetworkQuorum(q);
   if (q !== null) {
     d.networkQuorumSamples = (d.networkQuorumSamples ?? 0) + 1;
     if (!d.networkQuorum || d.networkQuorum.quorum !== q) {

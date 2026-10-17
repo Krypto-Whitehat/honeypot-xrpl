@@ -31,6 +31,10 @@ const CAUSE_ROWS = 12;
 // Nur diese beiden fuehren die Beschriftung des Belegs; 'not-recorded' bekommt keine Basis, weil es
 // keine gibt. Der UI-Name ist absichtlich identisch: dieselbe Vokabel in Analyse und Anzeige.
 const CAPTURE_BASES = new Set(["ledger-index", "stream-gap"]);
+// Herleitung des Quorum-Ziels mit denselben Namen wie NEEDED_BASES in lib/validator-trace.mjs.
+// "not-recorded" hat ein Label, weil die Zeile trotzdem ein Ziel zeigt: ohne Beschriftung
+// waere "16 / 28" ein Ziel, dessen Herkunft niemand pruefen kann.
+const NEEDED_BASES = new Set(["measured", "derived", "not-recorded"]);
 // Ereignis-Arten mit denselben Namen wie CAPTURE_EVENT_KINDS in lib/validator-trace.mjs und wie
 // sie der Rekorder schreibt. 'near' ist kein Ereignis-Typ, sondern die Beschriftung fuer einen
 // Typ, den dieses Overlay nicht kennt: ohne sie waere ein unbekanntes Ereignis als 'Stream neu
@@ -908,6 +912,10 @@ function attributionBlock(a) {
         : "";
       // Naechstes Erfassungs-Ereignis mit Abstand, nie ein Ereignis "irgendwann an dem Tag":
       // eine Zuordnung ohne Abstand ist eine Behauptung. Ohne Protokoll (Altbestand) steht nichts.
+      // Das Ziel selbst hat eine Herkunft: gemessen am Endpunkt oder aus der dUNL-Groesse
+      // gerechnet. Ohne diese Angabe ist "16 / 28" ein Ziel ohne Nachweis.
+      const nb = NEEDED_BASES.has(r.neededBasis) ? r.neededBasis : "not-recorded";
+      const neededNote = " \u00b7 " + h.esc(h.t("vt.cq.neededBasis." + nb));
       const evt = r.captureEvent
         ? " · " + h.esc(h.t("vt.cq.event." + (CAPTURE_EVENT_KINDS.has(r.captureEvent.kind) ? r.captureEvent.kind : "near"), {
           l: num(r.captureEvent.ledger), s: Math.round(num(r.captureEvent.deltaMs) / 1000) }))
@@ -921,7 +929,7 @@ function attributionBlock(a) {
         ? " · " + h.esc(h.t("vt.cq.bound", {
           absent: num(b.absentCount), max: num(b.genuineAbsentMax), min: num(b.captureArtifactMin) }))
         : "";
-      return hash + source + verified + gap + own + evt + bound;
+      return hash + source + verified + gap + own + neededNote + evt + bound;
     };
     // Betroffenheit als eigene Zeile unter dem Ledger, nicht als achte Spalte: die Namen sind
     // lang, die Tabelle ist es schon. Ohne affectedCount (aeltere Antwort) bleibt die Zeile weg -

@@ -1098,3 +1098,17 @@ test('Risikobasis: die Forensik-Deckung wird ausgesprochen, nicht nur gerechnet'
   assert.ok(src.includes('vt.riskForensics'), 'die Oberflaeche nennt die Forensik-Deckung nicht');
   assert.equal(i18n.split("'vt.riskForensics'").length - 1, 2, 'vt.riskForensics fehlt in einer Sprache');
 });
+
+/* 'erfasste Stimmen / Ziel' ist die einzige Zeile, die ein Betreiber als Quorum-Aussage liest.
+ * Das Ziel selbst war eine Rechnung, die nie als solche benannt war. Seit 2026-10-17 fuehrt jede
+ * Zeile ihre Herleitung: gemessen am Endpunkt, gerechnet aus der dUNL-Liste, oder nicht erfasst. */
+test('Quorum-Ziel: jede Zeile nennt die Herleitung ihres Ziels', () => {
+  assert.match(src, /NEEDED_BASES = new Set\(\["measured", "derived", "not-recorded"\]\)/,
+    'das Overlay kennt die Herleitungs-Menge der Lib nicht');
+  assert.match(src, /r\.neededBasis/, 'die Kritikalitaets-Zelle liest die Herleitung nicht');
+  assert.match(src, /vt\.cq\.neededBasis\./, 'die Herleitung hat keine Beschriftung');
+  assert.match(src, /own \+ neededNote \+ evt/, 'die Herleitung haengt nicht an der Zeile');
+  const i18n = read('i18n-validator.mjs');
+  assert.equal((i18n.match(/vt\.cq\.neededBasis\./g) || []).length, 6,
+    'die Herleitung muss in beiden Sprachen fuer alle drei Zustaende da sein');
+});
