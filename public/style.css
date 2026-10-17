@@ -3386,6 +3386,14 @@ body[data-a6] {
 .vt-badge.vt-surfv-load-bound { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
 .vt-badge.vt-surfv-both-bound { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
 .vt-badge.vt-surfv-mixed, .vt-badge.vt-surfv-unknown { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+/* Die Kopplungs-Ebene entscheidet, ob eine Netzaktion oder ein Knotenfehler vorliegt.
+   Die Badge-Farbe ist Teil dieser Aussage, nicht Dekoration. */
+.vt-badge.vt-coupl-stress-coupled { border-color: var(--a6-sev-malicious); color: var(--a6-sev-malicious); }
+.vt-badge.vt-coupl-stress-linked-weak { border-color: var(--a6-sev-suspect); color: var(--a6-sev-suspect); }
+.vt-badge.vt-coupl-node-local-under-stress { border-color: var(--a6-sev-info); color: var(--a6-sev-info); }
+.vt-badge.vt-coupl-no-coupling-measured { border-color: var(--a6-success); color: var(--a6-success); }
+.vt-badge.vt-coupl-insufficient-sample, .vt-badge.vt-coupl-not-recorded { border-color: var(--a6-sev-neutral); color: var(--a6-sev-neutral); }
+.vt-code { font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); }
 .vt-table tr.vt-hot th[scope="row"], .vt-table tr.vt-hot td { background: var(--a6-warn-soft); border-bottom-color: var(--a6-sev-suspect); }
 .vt-table tr.vt-thin th[scope="row"], .vt-table tr.vt-thin td { border-bottom-style: dashed; color: var(--a6-muted); }
 .vt-table td.vt-imp-rules { text-align: left; }

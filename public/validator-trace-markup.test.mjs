@@ -37,6 +37,7 @@ import { LATENCY_VERDICTS } from '../lib/validator-vote-latency.mjs';
 import { DIVERGENCE_VERDICTS } from '../lib/validator-divergence.mjs';
 import { CAUSE_KINDS } from '../lib/validator-cause.mjs';
 import { SURFACE_VERDICTS } from '../lib/validator-quorum-surface.mjs';
+import { COUPLING_VERDICTS } from '../lib/validator-stress-coupling.mjs';
 import { SENSITIVITY_VERDICTS } from '../lib/validator-sensitivity.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -789,6 +790,33 @@ test('Risikoflaeche: Block, heisse Bande, duenne Zeile und jede Achsen-Aussage i
 /* Empfindlichkeits-Ebene: die Kohorten-Gegenprobe erst trennt Knotenproblem von Netzstockung
  * und Last auf einer Transaktionsform. Guard ist die Verdrahtung - Block an der Trace-Antwort,
  * jedes Urteil in eigener Farbe, jede Messluecke als Text, duenne Zeile als eigener Zustand. */
+/* Kopplungs-Ebene: die Frage 'welche dUNL-Knoten auf genau diesem Ledger' wird nur beantwortet,
+ * wenn die benannten Knoten an der Ledger-Zeile haengen - nicht an einer Tageszahl. Guard ist
+ * die Verdrahtung: Block an der Trace-Antwort, Master-Liste an der Peak-Zeile, jede Achse mit
+ * eigenem Urteil, jede Luecke als Text, jedes Urteil in eigener Farbe. */
+test('Kopplungs-Ebene: benannte Knoten je Ledger, beide Achsen und jede Luecke ist verdrahtet', () => {
+  assert.match(src, /function couplingBlock\(c\)/, 'couplingBlock fehlt im Overlay');
+  assert.match(src, /couplingBlock\(d\.coupling\)/, 'couplingBlock haengt nicht an der Trace-Antwort');
+  assert.match(src, /peerChips\(named\)/, 'Peak-Zeile ohne benannte dUNL-Knoten');
+  assert.match(src, /p\.mastersTotal/, 'volle Zahl der abweichenden Knoten fehlt neben der benannten Kante');
+  assert.match(src, /vt\.coupling\.mastersMore/, 'Cap der benannten Knoten wird nicht ausgewiesen');
+  assert.match(src, /h\.t\("vt\.coupling\.verdict\." \+ c\.verdict\)/, 'Kopplungs-Urteil ohne Label');
+  assert.match(src, /h\.t\("vt\.coupling\.axis\." \+ c\.verdictAxis\)/, 'Urteils-Achse ohne Label');
+  assert.match(src, /h\.t\("vt\.coupling\.authority\." \+ c\.verdictAuthority\)/, 'Mess-Autoritaet ohne Label');
+  assert.match(src, /h\.t\("vt\.coupling\.gap\." \+ g\)/, 'Messluecke ohne Label');
+  assert.match(src, /String\(c\.verdictReason\)/, 'Urteilsgrund als Code fehlt - die Begruendung muss nachlesbar bleiben');
+  assert.match(src, /cov\.namedMastersIncompleteRows/, 'gezaehlte Abweichung ohne benannten Knoten wird nicht ausgewiesen');
+  assert.match(src, /s\.ownVerdict/, 'Knoten-Urteil fehlt neben dem Kohorten-Urteil');
+  assert.match(src, /p\.closureClosed/, 'Schliess-Beweis fehlt an der Peak-Zeile');
+  for (const v of COUPLING_VERDICTS) assert.ok(cssRules.has('.vt-badge.vt-coupl-' + v), 'Badge-Farbe fehlt: ' + v);
+  assert.notEqual(badgeToken('vt-coupl-stress-coupled'), badgeToken('vt-coupl-no-coupling-measured'),
+    'eine gemessene Kopplung und ein gemessenes Nicht-Vorhandensein sind dieselbe Farbe');
+  assert.notEqual(badgeToken('vt-coupl-stress-coupled'), badgeToken('vt-coupl-not-recorded'),
+    'eine Messung und keine Messung sind dieselbe Farbe');
+  assert.ok(cssRules.has('.vt-tablewrap'), 'Kopplungs-Tabellen ohne Ueberlauf');
+  assert.ok(cssRules.has('.vt-code'), 'Urteils-Code ohne Regel');
+});
+
 test('Empfindlichkeits-Ebene: Block, jede Urteil-Farbe und jede Messluecke ist verdrahtet', () => {
   assert.match(src, /function sensitivityBlock\(s\)/, 'sensitivityBlock fehlt im Overlay');
   assert.match(src, /sensitivityBlock\(d\.sensitivity\)/, 'sensitivityBlock haengt nicht an der Trace-Antwort');

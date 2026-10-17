@@ -32,6 +32,7 @@ import { CAUSE_CHECKS, CAUSE_CONFIDENCE, CAUSE_GAPS, CAUSE_KINDS, CAUSE_LAYERS, 
 import { SURFACE_AXES, SURFACE_GAPS, SURFACE_REASONS, SURFACE_VERDICTS } from "../lib/validator-quorum-surface.mjs";
 import { SENSITIVITY_FAMILIES, SENSITIVITY_GAPS, SENSITIVITY_HEADLINES, SENSITIVITY_VERDICTS } from "../lib/validator-sensitivity.mjs";
 import { TRUTH_VERDICTS } from "../lib/validator-truth.mjs";
+import { COUPLING_AUTHORITIES, COUPLING_AXES, COUPLING_GAPS, COUPLING_VERDICTS } from "../lib/validator-stress-coupling.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(path.join(here, "validator-trace.mjs"), "utf8");
@@ -61,6 +62,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
     "vt.cq.basis.", "vt.cq.event.", "vt.cq.truth.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
+    "vt.coupling.authority.", "vt.coupling.axis.", "vt.coupling.gap.", "vt.coupling.verdict.",
   ];
   // vt.metric.* und vt.tag.* tauchen im UI als vollständige Schluessel bzw. in tagLabel() auf,
   // nicht als h.t("Praefix" + ...) - sie gehoeren deshalb nicht in diese Liste.
@@ -115,6 +117,11 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
   groups.push(["vt.k.", ["ok", "partial", "missed", "no-quorum", "wrong-hash", "observed", "vote-not-observed"]]);
   groups.push(["vt.sens.verdict.", SENSITIVITY_VERDICTS], ["vt.sens.gap.", SENSITIVITY_GAPS],
     ["vt.sens.head.", SENSITIVITY_HEADLINES], ["vt.sens.family.", SENSITIVITY_FAMILIES]);
+  // Kopplungs-Ebene: das Urteil, die Achse, die Autoritaet und jede Luecke sind Aussagen, die
+  // ein Betreiber liest. Ohne Label stünde der rohe Schluessel in der Zeile, die ueber eine
+  // Netzaktion oder einen Knotenfehler entscheidet.
+  groups.push(["vt.coupling.verdict.", [...COUPLING_VERDICTS]], ["vt.coupling.axis.", [...COUPLING_AXES]],
+    ["vt.coupling.authority.", [...COUPLING_AUTHORITIES]], ["vt.coupling.gap.", [...COUPLING_GAPS]]);
   for (const [prefix, values] of groups) {
     assert.ok(Array.isArray(values) && values.length > 0, prefix + " ist leer");
     const missing = values.filter((v) => DICT.en[prefix + v] === undefined || DICT.de[prefix + v] === undefined);
@@ -134,6 +141,18 @@ test("Serien-Zeile: alle drei Erholungs-Ursachen haben einen Text in EN und DE",
     assert.notEqual(DICT.en["vt.series.cause." + cause], undefined);
     assert.notEqual(DICT.de["vt.series.cause." + cause], undefined);
   }
+});
+
+test("Kopplungstabelle: alle Spaltentitel und Urteilstexte haben EN und DE", () => {
+  const columns = ["vt.couplingTitle", "vt.couplingNote", "vt.coupling.empty", "vt.coupling.netTag",
+    "vt.coupling.coverageLine", "vt.coupling.axesLine", "vt.coupling.findTitle", "vt.coupling.findNone",
+    "vt.coupling.findingLine", "vt.coupling.peakTitle", "vt.coupling.peakNone", "vt.coupling.mastersMore",
+    "vt.coupling.closed", "vt.coupling.open", "vt.coupling.sigTitle", "vt.coupling.sigNone", "vt.coupling.localLine",
+    "vt.coupling.hLedger", "vt.coupling.hNodes", "vt.coupling.hTx", "vt.coupling.hBand", "vt.coupling.hSign",
+    "vt.coupling.hMargin", "vt.coupling.hClosure", "vt.coupling.hSignTag", "vt.coupling.hExposed",
+    "vt.coupling.hMass", "vt.coupling.hMassLift", "vt.coupling.hOwn", "vt.coupling.hOwnLift", "vt.coupling.hVerdict"];
+  const missing = columns.filter((k) => DICT.en[k] === undefined || DICT.de[k] === undefined);
+  assert.deepEqual(missing, [], "fehlende Kopplungs-Texte: " + missing.join(", "));
 });
 
 test("Empfindlichkeitstabelle: sieben Spaltentitel haben einen Text in EN und DE", () => {

@@ -309,13 +309,19 @@ function truthBlock(t) {
   // nur, dass in diesem Fenster nichts steht. Das muss dabeistehen.
   const outside = Number.isFinite(t.claimsOutside) && t.claimsOutside > 0
     ? " " + h.esc(h.t("vt.truth.outside", { outside: n(t.claimsOutside) })) : "";
+  // Die Deckung der Referenz ist Teil des Urteils: eine 24-h-Referenz beantwortet von einer
+  // 30-Tage-Frage 24 h und laesst 696 h offen. Ohne diesen Satz wuerde die Teildeckung als
+  // Antwort auf die ganze Spanne gelesen.
+  const cover = t.coverage === "partial"
+    ? " " + h.esc(h.t("vt.truth.partial", { covered: n(t.coveredHours) + " h", open: n(t.openHours) + " h" }))
+    : t.coverage === "unusable" ? " " + h.esc(h.t("vt.truth.unusable")) : "";
   const body = state === "contradicted"
     ? h.t("vt.truth.contradicted", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal), min: n(t.falsePositiveMin), window })
     : state === "consistent"
       ? h.t("vt.truth.consistent", { claims: n(t.claims), ground: n(t.groundMissed), total: n(t.groundTotal) })
       : h.t("vt.truth.none");
   return '<p class="vt-truth vt-truth-' + state + '"><small>' + h.esc(h.t("vt.truth.title")) + "</small> "
-    + h.esc(body) + outside + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
+    + h.esc(body) + outside + cover + " " + h.esc(h.t("vt.truth.ledgerIdentity")) + "</p>";
 }
 
   function renderValidator(body, d) {
@@ -358,7 +364,8 @@ function truthBlock(t) {
       + causeBlock(d.cause)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.surfaceTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.surfaceNote")) + "</p>"
       + surfaceBlock(d.surface)
-      + '<h3 class="vt-h">' + h.esc(h.t("vt.peerTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.peerNote")) + "</p>"
+      + '<h3 class="vt-h">' + h.esc(h.t("vt.couplingTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.couplingNote")) + "</p>"
+      + couplingBlock(d.coupling)      + '<h3 class="vt-h">' + h.esc(h.t("vt.peerTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.peerNote")) + "</p>"
       + peerBlock(d.peer)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.latTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.latNote")) + "</p>"
       + latencyBlock(d.diagnosis && d.diagnosis.latency)
@@ -927,7 +934,11 @@ function truthBlock(t) {
           consistent: num(cq.affectedTruth.consistent), open: num(cq.affectedTruth.notComparable),
           min: num(cq.affectedTruth.falsePositiveMin),
           window: truthWindowLabel(cq.affectedTruth.windowHours),
-        })) + "</small></p>"
+        })) + (cq.affectedTruth.partialWindows > 0
+          ? " " + h.esc(h.t("vt.cq.truth.partial", {
+            partial: num(cq.affectedTruth.partialWindows),
+            window: truthWindowLabel(cq.affectedTruth.windowHours),
+          })) : "") + "</small></p>"
       : "";
     return '<table class="vt-table"><thead><tr>' + head + "</tr></thead><tbody>" + rows + "</tbody></table>"
       + '<p class="vt-note">' + h.esc(summary) + "</p>" + peerTruth;
@@ -1345,6 +1356,100 @@ function truthBlock(t) {
       ? '<p class="vt-note">' + h.esc(s.gaps.map((g) => h.t("vt.surface.gap." + g)).join(" · ")) + "</p>"
       : "";
     return verdictLine + covLine + sharesLine + groupLine + table + hotBlock + interBlock + gapLine;
+  }
+
+  // Kopplungs-Ebene: die Antwort auf die Frage, die eine Zahl nicht beantwortet - WELCHE
+  // dUNL-Knoten auf GENAU diesem Ledger abwichen, und ob dieselbe Ledger-Form diesen Knoten
+  // oefter traf als die Kohorten-Knoten unter derselben Last ohne diese Form. Jede Rate hat
+  // ihren Nenner, jeder Ledger seine benannten Knoten, jede Luecke ihren Namen.
+  function couplingBlock(c) {
+    if (!c || !c.verdict) return '<p class="vt-empty">' + h.esc(h.t("vt.coupling.empty")) + "</p>";
+    const cov = c.coverage || {};
+    const th = c.thresholds || {};
+    const ax = c.axes || {};
+    const mass = c.simultaneity || {};
+    const local = c.nodeLocal || {};
+    // Prozentpunkte mit Vorzeichen: ein Lift ohne Richtung ist keine Auskunft, weil der Leser
+    // die Richtung erst raten muesste.
+    const pp = (v) => (Number.isFinite(v) ? (v >= 0 ? "+" : "") + (Math.round(v * 1000) / 10).toFixed(1) : "–");
+    const verdictLine = '<p class="vt-scope"><span class="vt-badge vt-coupl-' + h.esc(c.verdict) + '">'
+      + h.esc(h.t("vt.coupling.verdict." + c.verdict)) + "</span> · "
+      + h.esc(h.t("vt.coupling.axis." + c.verdictAxis)) + " · "
+      + h.esc(h.t("vt.coupling.authority." + c.verdictAuthority))
+      + ' <code class="vt-code">' + h.esc(String(c.verdictReason)) + "</code></p>";
+    const covLine = '<p class="vt-note">' + h.esc(h.t("vt.coupling.coverageLine", {
+      rows: num(cov.forensicsRows), samples: num(cov.samples), dev: num(cov.deviatingLedgers),
+      withRow: num(cov.deviatingLedgersWithRow), noRow: num(cov.deviatingLedgersWithoutRow),
+      cohort: num(cov.cohortRows), unnamed: num(cov.namedMastersIncompleteRows),
+      shape: num(cov.shapeRows), latency: num(cov.latencyRows), cadence: num(cov.cadenceRows),
+    })) + "</p>";
+    const axisLine = '<p class="vt-note">' + h.esc(h.t("vt.coupling.axesLine", {
+      node: h.t("vt.coupling.verdict." + ax.node), mass: h.t("vt.coupling.verdict." + ax.mass),
+      network: h.t("vt.coupling.verdict." + ax.network), netLift: pp(ax.networkLift),
+      massNodes: num(th.simultaneityNodes), highNodes: num(th.massNodes), minSample: num(th.minSample),
+    })) + "</p>";
+    const findings = (c.findings || []).map((f) => "<li>" + h.esc(h.t("vt.coupling.axis." + f.axis)) + " · "
+      + h.esc(f.tag === "signature-share-mass-vs-solo" ? h.t("vt.coupling.netTag") : tl(f.tag)) + " · "
+      + h.esc(h.t("vt.coupling.verdict." + f.strength)) + " · "
+      + h.esc(h.t("vt.coupling.findingLine", {
+        lift: pp(f.lift), exposed: num(f.exposedLedgers), control: num(f.controlLedgers),
+        failures: num(f.failures),
+      })) + "</li>").join("");
+    const findingsBlock = findings
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.coupling.findTitle")) + '</h4><ul class="vt-list">' + findings + "</ul>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.coupling.findNone")) + "</p>";
+    // Peaks: die Ledger mit Massen-Abweichung und die Knoten, die dort abwichen - beim Namen.
+    // Die Gegenprobe der Lib (affectedTruth) haengt an denselben Knoten, deshalb wird sie hier
+    // nicht nochmal erfunden, sondern aus derselben Zeile gelesen.
+    const phead = ["vt.coupling.hLedger", "vt.coupling.hNodes", "vt.coupling.hTx", "vt.coupling.hBand",
+      "vt.coupling.hSign", "vt.coupling.hMargin", "vt.coupling.hClosure"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const pbody = (mass.peaks || []).map((p) => {
+      const named = Array.isArray(p.masters) ? p.masters : [];
+      const total = Number.isFinite(p.mastersTotal) ? p.mastersTotal : null;
+      const rest = total !== null && total > named.length
+        ? '<small class="vt-note">' + h.esc(h.t("vt.coupling.mastersMore", { n: total - named.length })) + "</small>"
+        : "";
+      return "<tr>"
+        + '<th scope="row">#' + h.esc(num(p.ledgerIndex)) + " · " + h.esc(num(p.deviatingNodes)) + "</th>"
+        + "<td>" + peerChips(named) + rest + "</td>"
+        + "<td>" + h.esc(num(p.txCount)) + "</td>"
+        + "<td>" + h.esc(p.loadLabel ?? "–") + "</td>"
+        + "<td>" + h.esc((p.signatures || []).map((s) => tl(s)).join(", ") || "–") + "</td>"
+        + "<td>" + h.esc(num(p.margin)) + " / " + h.esc(num(p.needed)) + "</td>"
+        + "<td>" + h.esc(h.t(p.closureClosed === true ? "vt.coupling.closed" : "vt.coupling.open")) + "</td></tr>";
+    }).join("");
+    const peakTable = pbody
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.coupling.peakTitle")) + '</h4><div class="vt-tablewrap"><table class="vt-table vt-coupling-peaks"><thead><tr>'
+        + phead + "</tr></thead><tbody>" + pbody + "</tbody></table></div>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.coupling.peakNone")) + "</p>";
+    const shead = ["vt.coupling.hSignTag", "vt.coupling.hExposed", "vt.coupling.hMass", "vt.coupling.hMassLift",
+      "vt.coupling.hOwn", "vt.coupling.hOwnLift", "vt.coupling.hVerdict"]
+      .map((k, i) => '<th scope="col"' + (i === 0 ? ' class="vt-th-l"' : "") + ">" + h.esc(h.t(k)) + "</th>").join("");
+    const sbody = (c.signatures || []).map((s) => "<tr>"
+      + '<th scope="row">' + h.esc(tl(s.tag)) + "</th>"
+      + "<td>" + h.esc(num(s.ledgersTotal)) + " / " + h.esc(num(s.controlTotal)) + "</td>"
+      + "<td>" + h.esc(num(s.massDeviationExposed)) + " / " + h.esc(num(s.massDeviationControl))
+      + " · " + h.esc(pcn((s.rateExposed ?? 0) * 100)) + " % / " + h.esc(pcn((s.rateControl ?? 0) * 100)) + " %</td>"
+      + "<td>" + h.esc(pp(s.lift)) + "</td>"
+      + "<td>" + h.esc(num(s.ownFailures)) + " / " + h.esc(num(s.ownFailureLedgers ? s.ownFailureLedgers.length : 0))
+      + " · " + h.esc(pcn((s.ownRateExposed ?? 0) * 100)) + " % / " + h.esc(pcn((s.ownRateControl ?? 0) * 100)) + " %</td>"
+      + "<td>" + h.esc(pp(s.ownLift)) + "</td>"
+      + "<td>" + h.esc(h.t("vt.coupling.verdict." + s.verdict)) + " / "
+      + h.esc(h.t("vt.coupling.verdict." + s.ownVerdict)) + "</td></tr>").join("");
+    const sigTable = sbody
+      ? '<h4 class="vt-h4">' + h.esc(h.t("vt.coupling.sigTitle")) + '</h4><div class="vt-tablewrap"><table class="vt-table vt-coupling-sig"><thead><tr>'
+        + shead + "</tr></thead><tbody>" + sbody + "</tbody></table></div>"
+      : '<p class="vt-empty">' + h.esc(h.t("vt.coupling.sigNone")) + "</p>";
+    const localLine = '<p class="vt-note">' + h.esc(h.t("vt.coupling.localLine", {
+      own: num(local.ownFailureLedgers), stressed: num(local.ownFailureLedgersWithStress),
+      quiet: num(local.ownFailureLedgersWithoutStress), solo: num(local.soloUnderStress),
+      share: Number.isFinite(local.stressShare) ? pcn(local.stressShare * 100) + " %" : "–",
+    })) + "</p>";
+    const gapLine = (c.gaps || []).length
+      ? '<p class="vt-note">' + h.esc(c.gaps.map((g) => h.t("vt.coupling.gap." + g)).join(" · ")) + "</p>"
+      : "";
+    return verdictLine + covLine + axisLine + findingsBlock + peakTable + sigTable + localLine + gapLine;
   }
 
   // Netz-Sicht: erst die Trennung Netzereignis / privat, dann Kandidaten fuer geteilte
