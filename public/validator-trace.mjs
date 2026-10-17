@@ -1762,7 +1762,7 @@ function attributionBlock(a) {
     overlay.querySelector("#vt-title").textContent = h.t("vt.crossTitle");
     const rec = (d.recurring || []).map((r) => '<li class="vt-rec"><b>' + h.esc(tl(r.tag)) + "</b> <small>× " + h.esc(String(r.count)) + " · " + h.esc(String(r.validators)) + " " + h.esc(h.t("vt.validators")) + " · " + h.esc(String(r.ledgers)) + " " + h.esc(h.t("vt.ledgers")) + "</small></li>").join("");
     const per = Object.entries(d.perValidator || {}).sort((a, b) => (b[1].missed + b[1].wrongHash) - (a[1].missed + a[1].wrongHash))
-      .map(([k, v]) => '<li class="vt-row"><span class="vt-key">' + h.esc(k.slice(0, 12)) + "…</span><span>missed " + h.esc(String(v.missed)) + " · no-quorum " + h.esc(String(v.noQuorum ?? 0)) + " · partial " + h.esc(String(v.partial)) + " · wrong-hash " + h.esc(String(v.wrongHash)) + "</span></li>").join("");
+      .map(([k, v]) => '<li class="vt-row"><span class="vt-key">' + h.esc(k.slice(0, 12)) + "…</span><span>" + h.esc(h.t("vt.k.missed")) + " " + h.esc(String(v.missed)) + " · " + h.esc(h.t("vt.k.no-quorum")) + " " + h.esc(String(v.noQuorum ?? 0)) + " · " + h.esc(h.t("vt.k.partial")) + " " + h.esc(String(v.partial)) + " · " + h.esc(h.t("vt.k.wrong-hash")) + " " + h.esc(String(v.wrongHash)) + "</span></li>").join("");
     body.innerHTML = '<p class="vt-h">' + h.esc(h.t("vt.incidentsTotal", { n: d.incidents })) + "</p>"
       + '<h3 class="vt-h">' + h.esc(h.t("vt.impactTitle")) + '</h3><p class="vt-sub">' + h.esc(h.t("vt.impactNote")) + "</p>" + impactBlock(d.impact)
       + '<h3 class="vt-h">' + h.esc(h.t("vt.recurring")) + "</h3>" + (rec ? '<ul class="vt-list">' + rec + "</ul>" : '<p class="vt-empty">' + h.esc(h.t("vt.noRecurring")) + "</p>")

@@ -73,6 +73,18 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
   assert.deepEqual(found, EXPECTED_PREFIXES.slice().sort());
 });
 
+/* Die Je-Validator-Zeile nannte die Abweichungsarten als hartcodierte englische Woerter, waehrend
+ * dieselben Zaehler im Rest des Overlays ueber vt.k.* laufen. Ein Zaehler, der woanders
+ * "not observed" heisst und hier "no-quorum", liest sich wie die alte Signatur "kein Quorum
+ * auf diesem Ledger" - dieselbe Zahl mit zwei verschiedenen Namen. */
+test("Overlay: dieselben Abweichungs-Zaehler haben ueberall dasselbe Label", () => {
+  assert.match(src, /h\.t\("vt\.k\.missed"\)/, "der missed-Zaehler hat kein Label");
+  assert.match(src, /h\.t\("vt\.k\.no-quorum"\)/, "der noQuorum-Zaehler hat kein Label");
+  assert.match(src, /h\.t\("vt\.k\.partial"\)/, "der partial-Zaehler hat kein Label");
+  assert.match(src, /h\.t\("vt\.k\.wrong-hash"\)/, "der wrongHash-Zaehler hat kein Label");
+  const raw = /\"(?:missed |no-quorum |partial |wrong-hash )\"/g;
+  assert.deepEqual(src.match(raw) || [], [], "ein Abweichungs-Label steht hartcodiert im Text");
+});
 test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
   const groups = [["vt.verdict.", SERIES_VERDICTS], ["vt.fpverdict.", FINGERPRINT_VERDICTS], ["vt.win.class.", WINDOW_CLASSES], ["vt.load.verdict.", LOAD_VERDICTS], ["vt.impact.verdict.", IMPACT_VERDICTS],
   ["vt.impact.authority.", IMPACT_AUTHORITIES], ["vt.impact.reason.", IMPACT_REASONS],
