@@ -862,7 +862,7 @@ function attributionBlock(a) {
         ? '<span class="vt-atk-split-open">' + h.esc(h.t("vt.attackSplitOpen", { n: num(s.unattributedValidators) })) + "</span>" : "")
       + '<span class="vt-reasons">' + (s.anomalies || []).map((tag) => '<span class="vt-chip">' + h.esc(tl(tag)) + "</span>").join("") + "</span>"
       + (Array.isArray(s.masters) && s.masters.length
-        ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters) + "</span>" : "")
+        ? '<span class="vt-atk-peers"><small>' + h.esc(h.t("vt.attackPeers", { n: s.masters.length })) + "</small> " + peerChips(s.masters, s.peerTruth, s.peerNames) + "</span>" : "")
       + (s.capture && Number.isFinite(s.capture.genuineAbsentMax) && Number.isFinite(s.capture.captureArtifactMin)
         ? '<span class="vt-atk-bound">' + h.esc(h.t("vt.atkBound", {
           absent: num(s.capture.absentCount), max: num(s.capture.genuineAbsentMax), min: num(s.capture.captureArtifactMin) })) + "</span>"
@@ -1565,7 +1565,7 @@ function attributionBlock(a) {
         : "";
       return "<tr>"
         + '<th scope="row">#' + h.esc(num(p.ledgerIndex)) + " · " + h.esc(num(p.deviatingNodes)) + "</th>"
-        + "<td>" + peerChips(named) + rest + "</td>"
+        + "<td>" + peerChips(named, p.peerTruth, p.peerNames) + rest + "</td>"
         + "<td>" + h.esc(num(p.txCount)) + "</td>"
         + "<td>" + h.esc(p.loadLabel ?? "–") + "</td>"
         + "<td>" + h.esc((p.signatures || []).map((s) => tl(s)).join(", ") || "–") + "</td>"

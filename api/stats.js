@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       if (!days.length) return res.status(200).json({ available: false, source, note: remote ? "Noch keine Trace-Daten im Speicher – der Recorder (monitor/validator-trace.mjs) hat noch nicht geschrieben." : "Kein lokaler Trace-Speicher." });
       if (req.query.patterns) {
         const clusters = await impactClusters(Date.now());
-        return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(clusters), ...crossValidatorPatterns(days, { range, clusters: clusters || [] }) });
+        return res.status(200).json({ available: true, source, days: days.length, historyError: historyErrorOf(clusters), ...crossValidatorPatterns(days, { range, clusters: clusters || [], groundPeers: await groundTruthMap() }) });
       }
       const master = String(req.query.master || "");
       const format = String(req.query.format || "");

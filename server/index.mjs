@@ -181,7 +181,7 @@ app.get("/api/validator-trace", async (req, res) => {
     // Angriffsseite der Zeit-Ebene: die Cluster der Betrugs-Historie. Ohne sie ist attackImpact
     // blind, mit ihnen wird jede Sichtung zu einer belegten Angriffsstunde.
     const side = await localHistorySide();
-    return res.json({ available: true, source, days: days.length, historyError: side.historyError, ...crossValidatorPatterns(days, { range, clusters: side.clusters }) });
+    return res.json({ available: true, source, days: days.length, historyError: side.historyError, ...crossValidatorPatterns(days, { range, clusters: side.clusters, groundPeers: await groundTruthMap() }) });
   }
   const master = String(req.query.master || "");
   const format = String(req.query.format || "");

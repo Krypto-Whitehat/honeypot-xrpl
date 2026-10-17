@@ -808,7 +808,7 @@ test('Risikoflaeche: Block, heisse Bande, duenne Zeile und jede Achsen-Aussage i
 test('Kopplungs-Ebene: benannte Knoten je Ledger, beide Achsen und jede Luecke ist verdrahtet', () => {
   assert.match(src, /function couplingBlock\(c\)/, 'couplingBlock fehlt im Overlay');
   assert.match(src, /couplingBlock\(d\.coupling\)/, 'couplingBlock haengt nicht an der Trace-Antwort');
-  assert.match(src, /peerChips\(named\)/, 'Peak-Zeile ohne benannte dUNL-Knoten');
+  assert.match(src, /peerChips\(named, p\.peerTruth, p\.peerNames\)/, 'Peak-Zeile ohne benannte dUNL-Knoten oder ohne Gegenurteil');
   assert.match(src, /p\.mastersTotal/, 'volle Zahl der abweichenden Knoten fehlt neben der benannten Kante');
   assert.match(src, /vt\.coupling\.mastersMore/, 'Cap der benannten Knoten wird nicht ausgewiesen');
   assert.match(src, /h\.t\("vt\.coupling\.verdict\." \+ c\.verdict\)/, 'Kopplungs-Urteil ohne Label');
@@ -860,7 +860,7 @@ test('Empfindlichkeits-Ebene: Block, jede Urteil-Farbe und jede Messluecke ist v
 test('Kohorten-Namen: Retrace und Sammelblock nennen die betroffenen dUNL-Knoten', () => {
   assert.match(src, /const peerChips = \(/, 'peerChips fehlt - Peer-Namen haben keinen gemeinsamen Aufbau');
   assert.match(src, /peerChips\(peers, truthOf\(peers\), namesOf\(peers\)\)/, 'Retrace-Zeile zeigt die Peers nicht oder ohne Gegenurteil');
-  assert.match(src, /peerChips\(s\.masters\)/, 'Sammelblock zeigt die Peers nicht');
+  assert.match(src, /peerChips\(s\.masters, s\.peerTruth, s\.peerNames\)/, 'Sammelblock zeigt die Peers nicht oder ohne Gegenurteil');
   assert.match(src, /vt\.peersLine/, 'Retrace-Zeile ohne Aussage, wie viele Knoten mitfielen');
   assert.match(src, /vt\.attackPeers/, 'Sammelblock ohne Aussage ueber die betroffenen Knoten');
   assert.match(src, /vt\.peersMore/, 'abgeschnittene Peer-Liste bleibt ohne Hinweis');
