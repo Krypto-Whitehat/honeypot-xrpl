@@ -853,7 +853,7 @@ async function main() {
   const ledgerTimer = setInterval(() => { watchLedger(); }, STALL_CHECK_MS);
   const statTimer = setInterval(() => {
     const s = tracker.stats();
-    log(`validations=${stats.validations} ledgers=${stats.ledgers} OhneHash=${stats.ledgerNoHash} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} Netz-Quorum=${quorumSampleState()}`);
+    log(`validations=${stats.validations} ledgers=${stats.ledgers} OhneHash=${stats.ledgerNoHash} Stills=${stats.stalls} Ersatz=${stats.streamFallbacks} Nicht-dUNL-Signaturen=${s.nonMemberSigners} offen=${s.pendingLedgers} bewertet=${s.lastEvaluated} Spaetvotes=${s.pendingLateVotes} verworfen=${s.lateVotesDropped} ausserRing=${s.lateVotesOutsideRing} Netz-Quorum=${quorumSampleState()}`);
   }, STAT_MS);
   let stopping = false;
   const stop = async () => {

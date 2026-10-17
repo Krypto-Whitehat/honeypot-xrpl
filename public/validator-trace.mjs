@@ -492,8 +492,8 @@ function attributionBlock(a) {
   const rate = (v) => (Number.isFinite(v) ? (Math.round(v * 1000) / 10).toFixed(1) : "–");
   const state = a.state === "bounded" ? (a.artifactMin > 0 ? "contradicted" : "covered") : "open";
   const body = a.state === "bounded"
-    ? h.t("vt.attr.bounded", { claims: n(a.absenceClaims), attributable: n(a.attributableMax), artifact: n(a.artifactMin), open: n(a.openClaims), ground: n(a.groundMissed), rate: rate(a.rateMax) })
-    : h.t("vt.attr.open", { claims: n(a.absenceClaims) });
+    ? h.t("vt.attr.bounded", { claims: n(a.absenceClaims), node: n(a.nodeClaims), capture: n(a.captureStatements), late: n(a.lateClaims), attributable: n(a.attributableMax), artifact: n(a.artifactMin), open: n(a.openClaims), ground: n(a.groundMissed), rate: rate(a.rateMax) })
+    : h.t("vt.attr.open", { claims: n(a.absenceClaims), node: n(a.nodeClaims), capture: n(a.captureStatements), late: n(a.lateClaims) });
   const cover = a.coverage === "partial"
     ? " " + h.t("vt.attr.partial", { covered: n(a.coveredHours) + " h", open: n(a.openHours) + " h" })
     : a.coverage === "unusable" ? " " + h.t("vt.attr.unusable") : "";

@@ -76,7 +76,16 @@ for (const f of files) {
   for (const i of list) {
     if (!i || !i.m) continue;
     const list2 = claimsByMaster.get(i.m) ?? [];
-    list2.push({ master: i.m, ledgerIndex: i.l, timeMs: i.t, type: i.type });
+    // Der Zuordnungsbeleg dieses Vorfalls ('aa' = die fuenf Bedingungen der Engine waren erfuellt)
+    // muss bis zur Gegenprobe durchhalten, sonst steht ein belegtes Knoten-Urteil dasselbe da wie
+    // eine Meldung aus dem Altbestand ohne jeden Beleg.
+    const claim = { master: i.m, ledgerIndex: i.l, timeMs: i.t, type: i.type };
+    if (i.aa === true || i.aa === false) claim.aa = i.aa;
+    // Derselbe Rekorder hat diesem Vorfall doch noch einen Vote nachgetragen ('vd' / 'vote-late'):
+    // dann ist die Meldung keine Abwesenheit dieses Knoten, sondern eine Latenz-Beobachtung.
+    if (Number.isFinite(i.vd)) claim.vd = i.vd;
+    if (Array.isArray(i.r)) claim.r = i.r;
+    list2.push(claim);
     claimsByMaster.set(i.m, list2);
   }
   for (const s of doc.ledgerStats ?? []) {
@@ -124,7 +133,9 @@ async function ledgerProbe(index) {
   }
   named.sort((a, b) => b.hits.length - a.hits.length || String(a.master).localeCompare(String(b.master)));
   const c = stats?.c ?? {};
-  const absentCount = (c.missed ?? 0) + (c.noQuorum ?? 0);
+  const nodeAbsent = c.missed ?? 0;
+  const captureAbsent = c.noQuorum ?? 0;
+  const absentCount = nodeAbsent + captureAbsent;
   const need = Number(stats?.need) || 0;
   const members = Number.isFinite(stats?.mm) && stats.mm > 0 ? stats.mm
     : (need ? Math.ceil(need / TRACE_DEFAULTS.quorumFrac) : null);
@@ -138,10 +149,15 @@ async function ledgerProbe(index) {
     console.log("  dUNL-Knoten:", members ?? "-", "| Quorum-Ziel:", need || "-",
       "| erfasste Stimmen:", stats.v ?? "-", "| bestes Ergebnis:", stats.top ?? "-",
       "| Abstand:", stats.mg ?? "-");
+    console.log("  Zaehler dieser Zeile: Knoten-Urteile (missed) " + nodeAbsent
+      + " | Erfassungs-Aussagen (no-quorum: hier wurde kein Vote dieses Knoten gesehen) " + captureAbsent
+      + " | zusammen " + absentCount);
     console.log("  Schliess-Grenze:", bound
-      ? "hoechstens " + bound.genuineAbsentMax + " von " + absentCount
-        + " als Nicht-Signierer gefuehrten Knoten koennen echt fehlen -> mindestens "
-        + Math.max(0, absentCount - bound.genuineAbsentMax) + " sind Luecken dieser Erfassung"
+      ? "von " + members + " erfassten Knoten hoechstens " + bound.genuineAbsentMax + " echt fehlend"
+        + " -> Knoten-Urteile " + nodeAbsent + " (mehr als diese Grenze waere ein Selbst-Widerspruch dieser Zeile;"
+        + " mindestens " + Math.max(0, nodeAbsent - bound.genuineAbsentMax) + " sind hier widerlegbar)"
+        + " | Erfassungs-Aussagen " + captureAbsent + " an derselben Grenze: mindestens "
+        + Math.max(0, captureAbsent - bound.genuineAbsentMax) + " davon gehen auf diese Erfassung zurueck"
       : "nicht bestimmbar (dUNL-Groesse oder Quorum-Ziel fehlt in dieser Erfassung)");
   }
   console.log("");
@@ -167,7 +183,9 @@ async function ledgerProbe(index) {
     else open += 1;
     console.log("  - " + String(domain || master.slice(0, 16)).padEnd(34)
       + " an diesem Ledger " + String(hits.length).padStart(2)
-      + "  Fenster " + String(r.claims).padStart(4) + " eigene / Referenz "
+      + "  Fenster " + String(r.claims).padStart(4) + " eigene (Knoten-Urteil "
+      + String(r.nodeClaims ?? 0).padStart(3) + ", Spaet-Vote "
+      + String(r.lateVotes ?? 0).padStart(2) + ") / Referenz "
       + String(r.groundMissed ?? "-").padStart(5) + "/" + String(r.groundTotal ?? "-").padStart(6)
       + "  mindestens eigene " + String(r.falsePositiveMin ?? "-").padStart(4)
       + "  " + (r.verdict === "contradicted" ? "WIDERLEGT" : r.verdict === "consistent" ? "innerhalb" : "keine Referenz")
@@ -186,9 +204,14 @@ async function ledgerProbe(index) {
 }
 
 // Grenze B zuerst, ganz ohne Netz: die Schliessung selbst begrenzt, wie viele Knoten echt
-// gefehlt haben koennen. Eine Zeile, die mehr Nicht-Signierer zaehlt als diese Grenze zulaesst,
-// widerlegt sich selbst.
-let boundRows = 0, boundBroken = 0, boundArtifactMin = 0;
+// gefehlt haben koennen. Nur das Knoten-Urteil ('missed') darf diese Grenze ueberschreiten -
+// dann widerlegt sich die Zeile selbst. 'no-quorum' in der Zeile ist die Erfassungs-Aussage
+// dieses Recorders: er sah in dieser Zeile keinen Vote dieses Knoten. Auf einem geschlossenen
+// Ledger ueberschreitet sie die Grenze regelmaessig, ohne ein Widerspruch zu sein, weil das Netz
+// sein Quorum auf einem Pfad erreicht haben kann, den diese eine Verbindung nie sah. Gemessen
+// wird sie an derselben Grenze, aber als eigene Groesse: das ist die nachrechenbare
+// Erfassungs-Luecke dieser Zeile, kein Vorwurf an einen Knoten.
+let boundRows = 0, boundBroken = 0, boundArtifactMin = 0, boundCaptureRows = 0, boundCaptureMin = 0;
 for (const [index, s] of ledgerRows) {
   const closed = s.cl === true || (typeof s.ch === "string" && s.cl !== false);
   if (!closed) continue;
@@ -197,11 +220,18 @@ for (const [index, s] of ledgerRows) {
   const b = closureBound({ members, needed: s.need });
   if (!b) continue;
   const c = s.c ?? {};
-  const absent = (c.missed ?? 0) + (c.noQuorum ?? 0);
-  if (absent === 0) continue;
+  const nodeAbsent = c.missed ?? 0;
+  const captureAbsent = c.noQuorum ?? 0;
+  if (nodeAbsent === 0 && captureAbsent === 0) continue;
   boundRows += 1;
-  boundArtifactMin += Math.max(0, absent - b.genuineAbsentMax);
-  if (absent > b.genuineAbsentMax) boundBroken += 1;
+  if (nodeAbsent > b.genuineAbsentMax) {
+    boundBroken += 1;
+    boundArtifactMin += nodeAbsent - b.genuineAbsentMax;
+  }
+  if (captureAbsent > b.genuineAbsentMax) {
+    boundCaptureRows += 1;
+    boundCaptureMin += captureAbsent - b.genuineAbsentMax;
+  }
 }
 
 const results = [];
@@ -237,7 +267,12 @@ for (const master of masters) {
   const flag = r.verdict === "contradicted" ? "WIDERLEGT" : r.verdict === "consistent" ? "innerhalb" : "keine Referenz";
   console.log("  " + (r.domain || master.slice(0, 12)).padEnd(34)
     + " eigene " + String(r.claims).padStart(5)
+    + "  Knoten-Urteil " + String(r.nodeClaims ?? 0).padStart(3)
+    + "  Erfassung " + String(r.captureStatements ?? 0).padStart(4)
     + "  Referenz " + String(r.groundMissed ?? "-").padStart(5) + "/" + String(r.groundTotal ?? "-").padStart(6)
+    + "  Spaet-Vote " + String(r.lateVotes ?? 0).padStart(3)
+    + "  Beleg " + String(r.nodeClaimsAttributed ?? 0).padStart(3) + "/"
+    + String(r.nodeClaimsUnattributed ?? 0).padStart(3)
     + "  mindestens eigene " + String(r.falsePositiveMin ?? "-").padStart(5)
     + "  " + flag);
   await sleep(DELAY);
@@ -248,10 +283,15 @@ console.log("");
 console.log("BEFUND");
 console.log("  Knoten geprueft:", s.nodes, "| widerlegt:", s.contradictedNodes,
   "| innerhalb der Referenz:", s.consistentNodes, "| ohne verwertbare Referenz:", s.notComparableNodes);
-console.log("  Eigene Abwesenheiten im Fenster:", s.claims, "| davon nachweisbar eigene Erfassung:", s.falsePositiveMin);
+console.log("  Eigene Abwesenheiten im Fenster:", s.claims, "| davon Knoten-Urteile:", s.nodeClaims,
+  "(mit eigenem Zuordnungsbeleg:", s.nodeClaimsAttributed, "| ohne Beleg:", s.nodeClaimsUnattributed + ")",
+  "| Erfassungs-Aussagen:", s.captureStatements, "| Spaet-Votes (Latenz, keine Abwesenheit):", s.lateVotes,
+  "| davon nachweisbar eigene Erfassung:", s.falsePositiveMin);
 console.log("  Referenz sagt fuer dieselbe Menge:", s.groundMissed, "von", s.groundTotal, "Knoten-Ledern");
 console.log("  Schliess-Grenze (ohne externe Quelle):", boundRows, "Zeilen mit Nicht-Signierern,",
-  boundBroken, "widerlegen sich selbst, nachrechenbare Erfassungs-Luecke:", boundArtifactMin, "Knoten-Ledger");
+  boundBroken, "widerlegen sich selbst (Knoten-Urteil ueber der Grenze):", boundArtifactMin,
+  "Knoten-Ledger;", boundCaptureRows, "Zeilen, deren Erfassungs-Aussage ueber der Grenze liegt:",
+  boundCaptureMin, "Knoten-Ledger gemessene Erfassungs-Luecke, kein Widerspruch");
 console.log("  Identitaet je Ledger bleibt offen: die Referenz ist eine Fensterzahl, keine Liste.");
 
 const problems = results.filter((r) => r.verdict === "contradicted");
@@ -259,11 +299,15 @@ if (problems.length) {
   console.log("");
   console.log("ABWEICHUNGEN (die Erfassung behauptet mehr Abwesenheiten als die Referenz zulaesst):");
   for (const r of problems.slice(0, 25)) {
-    console.log("  - " + (r.domain || r.master) + ": eigene " + r.claims + ", Referenz " + r.groundMissed
-      + "/" + r.groundTotal + " -> mindestens " + r.falsePositiveMin + " gehen auf diese Erfassung zurueck (" + r.reason + ")");
+    console.log("  - " + (r.domain || r.master) + ": Knoten-Urteile " + r.nodeClaims
+      + " (davon mit eigenem Beleg " + r.nodeClaimsAttributed + ", ohne Beleg " + r.nodeClaimsUnattributed
+      + "; Spaet-Votes dieses Knoten, die hier nicht als Abwesenheit zaehlen: " + (r.lateVotes ?? 0)
+      + "), Referenz " + r.groundMissed + "/" + r.groundTotal
+      + " -> mindestens " + r.falsePositiveMin + " dieser Urteile gehen auf diese Erfassung zurueck (" + r.reason + ")");
   }
   if (problems.length > 25) console.log("  - ... weitere " + (problems.length - 25) + " Knoten");
-  if (boundBroken) console.log("  - " + boundBroken + " Forensik-Zeilen zaehlen mehr Nicht-Signierer als ihre eigene Schliessung zulaesst");
+  if (boundBroken) console.log("  - " + boundBroken + " Forensik-Zeilen zaehlen mehr Knoten-Urteile, als ihre eigene Schliessung zulaesst");
+  if (boundCaptureRows) console.log("  - " + boundCaptureRows + " Forensik-Zeilen zaehlen mehr Erfassungs-Aussagen, als ihre Schliessung zulaesst: das ist die Luecke dieses Recorders, kein Widerspruch");
   process.exit(1);
 }
 if (unreachable || s.notComparableNodes) {

@@ -24,7 +24,8 @@
 //     closed Ledger nur mit einem closed-* verdict; cause-check-network-stall nur mit Beleg
 //     (verneinte Schliessung oder gemessen durchgehende Index-Folge an einem Close-Abstand).
 //  F) BETROFFENHEIT  affectedCount == affectedMasters.length + 1 (der eigene Knoten zaehlt mit).
-//  G) ZURECHNUNG  attributableMax + artifactMin + openClaims == absenceClaims, die Obergrenze
+//  G) ZURECHNUNG  attributableMax + artifactMin + openClaims + captureStatements + lateClaims
+//     == absenceClaims, die Obergrenze
 //     bleibt in der Referenz, und die Karten des Endpunkts fuehren dieselben vier Zahlen wie die
 //     Zurechnung. Eine Abweichungszahl ohne diese Nachrechnung ist eine Behauptung ueber den
 //     Knoten, die aus einer Erfassungsbeobachtung kommt.
@@ -174,8 +175,9 @@ for (const master of masters) {
   if (!a || !Number.isFinite(a.absenceClaims)) {
     bad("G", at, "keine Zurechnung fuer die Abwesenheits-Zaehler");
   } else {
-    const parts = (a.attributableMax ?? 0) + (a.artifactMin ?? 0) + (a.openClaims ?? 0);
-    if (parts !== a.absenceClaims) bad("G", at, `${a.attributableMax} + ${a.artifactMin} + ${a.openClaims} = ${parts} != Behauptungen ${a.absenceClaims}`);
+    const parts = (a.attributableMax ?? 0) + (a.artifactMin ?? 0) + (a.openClaims ?? 0)
+      + (a.captureStatements ?? 0) + (a.lateClaims ?? 0);
+    if (parts !== a.absenceClaims) bad("G", at, `${a.attributableMax} + ${a.artifactMin} + ${a.openClaims} + ${a.captureStatements} + ${a.lateClaims} = ${parts} != Behauptungen ${a.absenceClaims}`);
     if (a.state === "bounded") {
       if (!(a.attributableMax <= a.groundMissed)) bad("G", at, `Obergrenze ${a.attributableMax} uebersteigt die Referenz ${a.groundMissed}`);
       if (a.artifactMin !== a.claimsInside - a.attributableMax) bad("G", at, `artifactMin ${a.artifactMin} != claimsInside ${a.claimsInside} - attributableMax ${a.attributableMax}`);
