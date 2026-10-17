@@ -332,6 +332,7 @@ export const VALIDATOR_DICT = {
      'vt.cq.basis.stream-open': 'from this recorder starting its own subscription',
      'vt.cq.neededCheck': 'target reproduces from the dUNL size: ceil({members} * 0.8) = {needed}',
      'vt.cq.attribution.missed': 'own coverage in this ledger was complete: {seen} of its usual {base} dUNL members arrived, so the {absent} missing votes count as findings of those nodes',
+     'vt.cq.attribution.notAttributable': 'this recorder saw {seen} member votes here against {base} in its own {samples} clean ledgers of the same day, so the {absent} absences of this ledger are not findings of those nodes',
      // Die Ledger-Koordinate ist ein eigenes Faktum, nicht Teil des Ereignisnamens: ein
      // Abo-Aufbau passiert zu einem Zeitpunkt, aber nicht bei einem Ledger. 'at ledger –' waere
      // eine Ledger-Angabe ohne Ledger. Deshalb zwei Bausteine, und die zweite Haelfe sagt offen,
@@ -1124,6 +1125,7 @@ export const VALIDATOR_DICT = {
      'vt.cq.basis.stream-open': 'aus dem Abo-Zeitpunkt dieses Recorders',
      'vt.cq.neededCheck': 'Ziel nachrechenbar aus der dUNL-Grösse: ceil({members} * 0,8) = {needed}',
      'vt.cq.attribution.missed': 'eigene Erfassung hier vollständig: {seen} von seinen üblichen {base} dUNL-Mitgliedern sind angekommen, daher zählen die {absent} fehlenden Votes als Befunde dieser Knoten',
+     'vt.cq.attribution.notAttributable': 'dieser Rekorder sah hier {seen} Mitglieder-Stimmen gegen {base} in seinen eigenen {samples} sauberen Ledgern desselben Tages, daher sind die {absent} Abwesenheiten dieses Ledgers keine Befunde dieser Knoten',
      'vt.cq.event.at': 'bei Ledger {l}',
      'vt.cq.event.atUnknown': 'an einem Punkt ohne Ledger-Koordinate in dieser Erfassung',
      'vt.cq.event.open': 'Stream neu aufgebaut {at}, {s} s von diesem Ledger entfernt',

@@ -1546,3 +1546,16 @@ test('Kappenfarbe: die Kappe zeigt den groessten Stapel, nicht den zuletzt gesta
   assert.doesNotMatch(src, /^\s*cap = k;$/m, 'der zuletzt gestapelte Typ bestimmt wieder die Kappe');
   assert.match(src, /--vt-cap:var\(--vt-" \+ cap/, 'die Kappenfarbe verlaesst die Typsignatur');
 });
+
+/* Nachgerechnete Entlastung (Akkuratz 2026-10-17): wo die Zeile kein eigenes Abdeckungs-Niveau
+ * traegt, wird es aus derselben Tagesdatei gerechnet. Die Oberflaeche muss dann die Zahl UND ihre
+ * Herkunfft zeigen - sonst steht in der Zeile eine Entlastung ohne Nachrechnen zu koennen. */
+test("Kritikalitaets-Zelle: die nachgerechnete Entlastung steht mit ihren Zahlen da", () => {
+  assert.match(src, /c2\.coverageBasis === "day-recomputed"/, "die Oberflaeche unterscheidet nicht zwischen aufgezeichnetem und gerechnetem Niveau");
+  assert.match(src, /Number\.isFinite\(c2\.coverageLevel\)/, "das gerechnete Niveau wird nicht auf eine Zahl geprueft");
+  assert.match(src, /Number\.isFinite\(c2\.coverageSamples\)/, "die Samplezahl der Nachrechnung wird nicht geprueft");
+  assert.match(src, /vt\.cq\.attribution\.notAttributable/, "die Entlastung hat keine Beschriftung");
+  assert.match(src, /attrib \+ notAttrib \+ bound/, "die Entlastung haengt nicht an der Zeile");
+  const i18n = read("i18n-validator.mjs");
+  assert.equal(i18n.split("'vt.cq.attribution.notAttributable'").length - 1, 2, "vt.cq.attribution.notAttributable fehlt in einer Sprache");
+});

@@ -1053,7 +1053,18 @@ function attributionBlock(a) {
         ? " \u00b7 " + h.esc(h.t("vt.cq.attribution.missed", {
           seen: num(r.capture.membersSeen), base: num(r.capture.coverageBaseline), absent: num(r.capture.absentCount) }))
         : "";
-      return hash + source + verified + gap + own + neededNote + evt + neededCheck + attrib + bound;
+      // Die Entlastung, wo sie nachgerechnet ist: eigenes Niveau aus derselben Tagesdatei,
+      // Abdeckung deutlich darunter. Dann sind die Abwesenheiten dieses Ledgers keine Befunde
+      // der benannten Knoten - die Zeile sagt das mit den Zahlen, aus denen sie folgt.
+      const c2 = r.capture;
+      const notAttrib = c2 && c2.attributableAbsence === false && c2.coverageBasis === "day-recomputed"
+        && Number.isFinite(c2.coverageLevel) && Number.isFinite(c2.seenVotes)
+        && Number.isFinite(c2.absentCount) && Number.isFinite(c2.coverageSamples)
+        ? " \u00b7 " + h.esc(h.t("vt.cq.attribution.notAttributable", {
+          seen: num(c2.seenVotes), base: num(c2.coverageLevel),
+          absent: num(c2.absentCount), samples: num(c2.coverageSamples) }))
+        : "";
+      return hash + source + verified + gap + own + neededNote + evt + neededCheck + attrib + notAttrib + bound;
     };
     // Betroffenheit als eigene Zeile unter dem Ledger, nicht als achte Spalte: die Namen sind
     // lang, die Tabelle ist es schon. Ohne affectedCount (aeltere Antwort) bleibt die Zeile weg -
