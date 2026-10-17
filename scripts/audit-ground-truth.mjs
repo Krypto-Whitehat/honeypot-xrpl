@@ -93,6 +93,14 @@ const problems = [];
 const say = (...a) => { if (!QUIET) console.log(...a); };
 let rows = 0, claims = 0, checked = 0, unreachable = 0;
 let invNeed = 0, invMargin = 0, invLoop = 0, invTop = 0, invHash = 0, staleXc = 0;
+// Signer-Beleg und Schliess-Linie (2026-10-17): zwei neue Ebenen, zwei eigene Zaehler. Eine
+// Zeile, die 'ms' sagt und ein Bitfeld mit anderer Stellenzahl traegt, widerspricht sich selbst;
+// eine Zeile mit gesehener Mehrheit != Netz-Linie, die nicht als cc steht, beschreibt einen
+// Widerspruch, den sie nicht kennzeichnet.
+let signRows = 0, invSigners = 0, lineRows = 0, lineConflicts = 0, invLine = 0;
+// Das Bitfeld wird arithmetisch gezaehlt: JavaScript-Bitoperatoren enden bei 32 Stellen, die
+// dUNL hat 35 Mitglieder.
+const popcount = (x) => { let n = 0, q = Math.floor(x); while (q > 0) { n += q % 2; q = Math.floor(q / 2); } return n; };
 let agree = 0, disagree = 0, openRows = 0, artifactMinSum = 0, incomplete = 0, openNotes = 0;
 let unchecked = 0, singleSource = 0;
 // SCHLIES-BEWEIS JE BEHAUPTUNG. Eine Incident-Zeile ohne Forensik-Zeile war bisher eine offene
@@ -151,6 +159,35 @@ for (const file of files) {
     if (top > v) { invTop += 1; problems.push(file + " #" + l + ": top " + top + " > gesehene Mitglieder-Stimmen " + v); }
     if (st.cl === true && !(typeof st.ch === "string" && HEX64.test(st.ch.toUpperCase()))) {
       invHash += 1; problems.push(file + " #" + l + ": cl=true ohne 64-Hex-Hash");
+    }
+    const sgn = num(st.sgn);
+    if (sgn !== null) {
+      signRows += 1;
+      const ms = num(st.ms);
+      if (ms !== null && sgn !== ms) {
+        invSigners += 1;
+        problems.push(file + " #" + l + ": Signierer " + sgn + " != gesehene dUNL-Mitglieder " + ms);
+      }
+      if (Number.isFinite(st.sgm) && popcount(st.sgm) !== sgn) {
+        invSigners += 1;
+        problems.push(file + " #" + l + ": Bitfeld " + popcount(st.sgm) + " Stellen != behauptete Signierer " + sgn);
+      }
+      if (Array.isArray(st.sg) && st.sg.length !== sgn) {
+        invSigners += 1;
+        problems.push(file + " #" + l + ": ausgeschriebene Signierliste " + st.sg.length + " != behauptete Signierer " + sgn);
+      }
+    }
+    const th = typeof st.th === "string" ? st.th.toUpperCase() : null;
+    const ah = typeof st.ah === "string" ? st.ah.toUpperCase() : null;
+    if (th !== null && ah !== null) {
+      lineRows += 1;
+      if (th !== ah) {
+        lineConflicts += 1;
+        if (st.cc !== true) {
+          invLine += 1;
+          problems.push(file + " #" + l + ": gesehene Mehrheit " + th.slice(0, 12) + " != Netz-Linie " + ah.slice(0, 12) + ", aber cc nicht gesetzt");
+        }
+      }
     }
     const b = captureBound(st);
     if (b && b.closed && Number.isFinite(b.captureArtifactMin)) {
@@ -249,6 +286,10 @@ console.log("  Quorum-Behauptungen ohne Forensik-Zeile:", openLedgers, "| davon 
   "| ohne Schliess-Beweis:", openLedgers - openProven);
 console.log("  Nachrechenbare Erfassungs-Luecke ueber alle geschlossenen Zeilen:", artifactMinSum, "Knoten-Ledger");
 console.log("  Zeilen mit gesehenen Stimmen unter Ziel:", incomplete);
+console.log("  Signer-Beleg:", signRows, "Zeilen mit benannten Signierern | Invariantzen dieser Ebene:", invSigners);
+console.log("  Schliess-Linien (th gegen ah):", lineRows, "Zeilen geprueft | Widersprueche:", lineConflicts,
+  "| nicht als cc markiert:", invLine);
+console.log("  Signer-Beleg noch nicht erhoben (Altbestand):", rows - signRows, "Zeilen");
 if (problems.length) {
   console.log("");
   console.log("ABWEICHUNGEN:");

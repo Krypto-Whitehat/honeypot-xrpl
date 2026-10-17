@@ -1103,10 +1103,23 @@ function attributionBlock(a) {
           : sameM.length
             ? group("vt.peersLineSame", sameM, sameT, sameN)
             : peerChips(allM, allT, allN);
+      // Die Entlastungsseite derselben Beobachtung: die Knoten, die auf diesem Ledger abgestimmt
+      // haben. Wer hier sauber signiert hat, zeigt, dass das Netz in diesem Ledger fuer andere
+      // Knoten erreichbar war - die staerkste Entlastung, die diese Aufzeichnung einem einzelnen
+      // Knoten geben kann. Ohne Beleg steht die Herkunft der Luecke da, nie eine leere Liste
+      // (eine leere Liste waere die Aussage 'niemand hat abgestimmt').
+      const voters = Array.isArray(r.voters) ? r.voters : null;
+      const voterPart = voters === null
+        ? '<span class="vt-peer-group vt-cq-voters-none"><small>'
+          + h.esc(h.t("vt.cq.voters." + (typeof r.voterBasis === "string" ? r.voterBasis : "not-collected")))
+          + "</small></span>"
+        : '<span class="vt-peer-group vt-cq-voters"><small>'
+          + h.esc(h.t("vt.cq.votersLine", { n: num(voters.length) })) + "</small> "
+          + peerChips(voters, [], Array.isArray(r.voterNames) ? r.voterNames : []) + "</span>";
       return '<tr class="vt-cq-affected"><td colspan="7">'
         + '<span class="vt-cq-affected-label">'
         + h.esc(h.t("vt.cq.affected", { n: num(r.affectedCount), others: num(others.length) }))
-        + "</span>" + body + "</td></tr>";
+        + "</span>" + body + voterPart + "</td></tr>";
     };
     const rows = cq.rows.map((r) => "<tr>"
       + '<th scope="row">#' + h.esc(num(r.ledgerIndex)) + "</th>"

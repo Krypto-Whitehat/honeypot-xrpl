@@ -323,6 +323,13 @@ export const VALIDATOR_DICT = {
      'vt.cq.verdict.closed-quorum-observed': 'closed · quorum seen here',
      'vt.cq.verdict.closed-observation-gap': 'closed · votes not seen here',
      'vt.cq.verdict.closed-reception-thin': 'closed · this recorder received fewer validations than in its own recent ledgers',
+     'vt.cq.verdict.closed-line-conflict': 'closed · the votes seen here signed a line the network did not accept',
+     // Die Entlastungsseite der Betroffenheits-Zeile: wer auf diesem Ledger abgestimmt hat.
+     'vt.cq.votersLine': 'signed on this ledger: {n}',
+     'vt.cq.voters.bitfield': 'signers of this ledger were recorded, but the member list behind the bit field is missing - the names cannot be read back',
+     'vt.cq.voters.recorded-keys': 'signers of this ledger were recorded, but their list is unreadable in this row',
+     'vt.cq.voters.not-recorded': 'who signed on this ledger is not recorded for this row',
+     'vt.cq.voters.not-collected': 'who signed on this ledger was not collected on this day',
      'vt.cq.bound': 'closed ledger: of the {absent} dUNL nodes with no seen vote at most {max} can be genuine, so at least {min} are gaps of this recorder',
      // '{seen} of {base}' liest sich wie ein Anteil. Die beiden Zahlen sind aber zwei Messungen:
      // was in diesem Ledger ankam, und was dieser Rekorder sonst sieht. '38 of 0' ware als
@@ -1120,6 +1127,12 @@ export const VALIDATOR_DICT = {
      'vt.cq.verdict.closed-quorum-observed': 'geschlossen · Quorum hier gesehen',
      'vt.cq.verdict.closed-observation-gap': 'geschlossen · Stimmen hier nicht gesehen',
      'vt.cq.verdict.closed-reception-thin': 'geschlossen · dieser Rekorder empfing weniger Validierungen als in seinen eigenen letzten Ledgern',
+     'vt.cq.verdict.closed-line-conflict': 'geschlossen · die hier gesehenen Stimmen signierten eine Linie, die das Netz nicht gewählt hat',
+     'vt.cq.votersLine': 'hier abgestimmt: {n}',
+     'vt.cq.voters.bitfield': 'die Signierer dieses Ledgers sind erfasst, aber die Mitgliederliste hinter dem Bitfeld fehlt - die Namen sind nicht zurücklesbar',
+     'vt.cq.voters.recorded-keys': 'die Signierer dieses Ledgers sind erfasst, aber ihre Liste ist in dieser Zeile nicht lesbar',
+     'vt.cq.voters.not-recorded': 'wer auf diesem Ledger abgestimmt hat, ist für diese Zeile nicht erfasst',
+     'vt.cq.voters.not-collected': 'wer auf diesem Ledger abgestimmt hat, wurde an diesem Tag nicht erfasst',
      'vt.cq.bound': 'geschlossener Ledger: von den {absent} dUNL-Knoten ohne erfassten Vote können höchstens {max} echt sein, mindestens {min} sind Erfassungs-Lücken dieses Recorders',
      'vt.cq.ownBaseline': 'eigener Empfang {seen} Validierungen in diesem Ledger, eigener Median {base}',
      'vt.cq.basis.stream-open': 'aus dem Abo-Zeitpunkt dieses Recorders',

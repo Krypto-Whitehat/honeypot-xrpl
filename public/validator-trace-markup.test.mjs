@@ -1019,6 +1019,14 @@ test('Kohorten-Chips: Name und Gegenurteil haengen am Knoten, nicht an seiner Po
   assert.doesNotMatch(body, /names\[i\]|truth\[i\]/, 'innerhalb des Chips wird gegen die Gesamtliste indexiert - ab dem 13. Knoten steht ein fremder Name da');
 });
 
+/* Die Gegenliste steht in derselben Zelle wie die angeklagten Knoten. Ohne eigenes Etikett
+ * liese sie sich als weitere Vorwurfsliste lesen. */
+test('Gegenliste: die Abgestimmten haben ein eigenes Etikett, nicht das der Angeklagten', () => {
+  assert.match(ruleBody(".vt-cq-voters > small"), /var\(--a6-success\)/, "die Abgestimmten stehen in derselben Farbe wie die Vorwuerfe");
+  assert.match(ruleBody(".vt-cq-voters-none > small"), /var\(--a6-muted\)/, "keine Signierung gesehen zu haben ist ein Messstatus, kein Vorwurf");
+  assert.doesNotMatch(ruleBody(".vt-cq-voters > small"), /--a6-error|--a6-sev-suspect/, "die Gegenliste steht in Vorwurfsfarbe");
+});
+
 /* Die Grenze, die aus der Schliessung folgt, muss an drei Stellen lesbar sein: in der
  * Kritikalitaets-Zelle, in der Messung 'vote-coverage-thin' und im Sammelereignis. Fehlt sie,
  * steht '19 Validatoren ohne Vote' als Netz-Urteil da, obwohl der Schliess-Beweis in derselben
@@ -1532,6 +1540,21 @@ test('Betroffenheits-Zeile: gleiche und andere Abweichung werden getrennt benann
     'Name und Gegenurteil verlassen die indexgleiche Spur zum Master-Key');
   assert.match(src, /: peerChips\(allM, allT, allN\);/,
     'ohne Typ je Knoten wird eine Gruppierung erfunden, die die Daten nicht hergeben');
+});
+
+/* Signer-Beleg (2026-10-17): die Betroffenheits-Zeile nannte nur die scheinbar Fehlenden. Die
+ * Gegenseite - wer auf demselben Ledger abgestimmt hat - ist die Entlastungsseite derselben
+ * Beobachtung und muss an derselben Zeile stehen. Ohne Beleg darf keine leere Liste stehen:
+ * eine leere Liste ist die Aussage 'niemand hat abgestimmt', und die ist nie gemessen. */
+test('Betroffenheits-Zeile: die Abgestimmten stehen daneben, sonst die Herkunft der Luecke', () => {
+  assert.match(src, /const voters = Array\.isArray\(r\.voters\) \? r\.voters : null;/,
+    'der Signer-Beleg wird nicht in vorhanden und fehlend getrennt');
+  assert.match(src, /peerChips\(voters, \[\], Array\.isArray\(r\.voterNames\) \? r\.voterNames : \[\]\)/,
+    'die Abgestimmten werden nicht aus derselben Auskunft benannt');
+  assert.match(src, /body \+ voterPart/,
+    'die Abgestimmten stehen nicht in derselben Zeile wie die Fehlenden');
+  assert.match(src, /h\.t\("vt\.cq\.voters\." \+/,
+    'ohne Beleg steht eine leere Liste statt der Herkunft der Luecke');
 });
 /* --- Kappenfarbe = groesster Stapel ----------------------------------------
  * Die Kappe traegt die Signaturfarbe eines Vorfallstyps. Bis 2026-10-17 war das der in

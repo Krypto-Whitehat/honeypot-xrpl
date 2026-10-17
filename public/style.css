@@ -3314,6 +3314,10 @@ body[data-a6] {
 .vt-peer-more { display: inline-block; border: 1px dashed var(--a6-line); border-radius: var(--a6-r-sm); background: none; padding: 2px 6px; margin: 3px 0 0 0; font-family: var(--a6-mono); font-size: 10px; color: var(--a6-muted); cursor: pointer; }
 .vt-peer-more:hover, .vt-peer-more:focus-visible { color: var(--a6-ink); border-color: var(--a6-ink); outline: none; }
 .vt-peer-none { color: var(--a6-muted); border-style: dashed; }
+/* Die Gegenliste der Abgestimmten: eine Beobachtung, kein Vorwurf. Ihr Etikett bekommt
+   eine eigene Farbe, damit es in derselben Zelle nicht wie die angeklagten Knoten aussieht. */
+.vt-cq-voters > small { color: var(--a6-success); }
+.vt-cq-voters-none > small { color: var(--a6-muted); }
 /* Kohorten-Chips mit Gegenurteil: ein widerlegter Knoten darf nicht wie ein betroffener
    aussehen. Der Titel tragt die Zahl, die das Urteil belegt. */
 .vt-peer-contradicted { border-color: var(--a6-error); color: var(--a6-error); background: var(--a6-error-soft); }

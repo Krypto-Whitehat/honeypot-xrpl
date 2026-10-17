@@ -22,7 +22,7 @@ const DICT = {
 /* Kern-Woerterbuch im Zustand VOR jeder Anmeldung: statisches HTML wird uebersetzt, bevor das
  * Overlay registerDict ruft. Ein Key, der hier fehlt, steht roh in der Seite. */
 const CORE_AT_LOAD = { en: { ...CORE_DICT.en }, de: { ...CORE_DICT.de } };
-import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS } from "../lib/validator-diagnose.mjs";
+import { SERIES_VERDICTS, CQ_VERDICTS, FINGERPRINT_VERDICTS, WINDOW_CLASSES, LOAD_VERDICTS, VOTER_BASES } from "../lib/validator-diagnose.mjs";
 import { CAPTURE_GAP_BASES, CAPTURE_EVENT_KINDS, NEEDED_BASES } from "../lib/validator-trace.mjs";
 import { IMPACT_AUTHORITIES, IMPACT_REASONS, IMPACT_VERDICTS } from "../lib/attack-impact.mjs";
 import { PEER_AUTHORITIES, PEER_DIRECTIONS, PEER_REASONS, PEER_TYPES, PEER_VERDICTS } from "../lib/validator-peer-benchmark.mjs";
@@ -60,7 +60,7 @@ test("UI: dynamische Schluessel-Praefixe sind bekannt und vollstaendig uebersetz
     "vt.div.authority.", "vt.div.gap.", "vt.div.lineage.", "vt.div.reason.", "vt.div.verdict.",
     "vt.cause.", "vt.cause.confidence.", "vt.cause.gap.", "vt.cause.layer.", "vt.cq.verdict.",
     "vt.surface.axis.", "vt.surface.authority.", "vt.surface.gap.", "vt.surface.group.", "vt.surface.reason.", "vt.surface.verdict.",
-    "vt.cq.basis.", "vt.cq.event.", "vt.cq.truth.",
+    "vt.cq.basis.", "vt.cq.event.", "vt.cq.truth.", "vt.cq.voters.",
     "vt.sens.family.", "vt.sens.gap.", "vt.sens.head.", "vt.sens.verdict.",
     "vt.coupling.authority.", "vt.coupling.axis.", "vt.coupling.gap.", "vt.coupling.verdict.",
     // Die Dosis-Achse hat einen eigenen Namen, weil vt.load.* schon die Last-Kurve der Diagnose-
@@ -111,6 +111,10 @@ test("Urteils-Mengen der Diagnose-Engine haben ein Label in EN und DE", () => {
     ["vt.surface.verdict.", SURFACE_VERDICTS], ["vt.surface.reason.", SURFACE_REASONS],
     ["vt.surface.gap.", SURFACE_GAPS], ["vt.surface.authority.", ["measured", "insufficient"]],
     ["vt.cq.verdict.", CQ_VERDICTS],
+    // Der Signer-Beleg hat vier Herkunfte, und zwei davon sind Luecken dieser Aufzeichnung.
+    // Ohne Label stünde der rohe Schluessel dort, wo ein Betreiber entscheidet, ob die
+    // Abwesenheit eines Knoten ein Befund ist oder eine Luecke des Recorders.
+    ["vt.cq.voters.", VOTER_BASES],
     // Die Gegenprobe je Kohorten-Knoten ist ein Urteil, kein Schmuck der Namenliste: jedes
     // der drei Urteile der Lib muss in beiden Sprachen lesbar sein.
     ["vt.cq.truth.", [...TRUTH_VERDICTS]],

@@ -123,6 +123,10 @@ function emptyDay(date) {
     // Forensik + Anomalie-Zähler: die Grundlage jeder Retrace. Ohne sie ist die Frage
     // 'warum verpasst?' aus der Aufzeichnung nicht beantwortbar.
     ledgerStats: [], ledgerStatsTruncated: false, incidentLedgers: 0, anomaly: {}, anomalyFail: {},
+    // memberSets: die dUNL-Listen, gegen die diese Datei Ledger bewertet hat, in der Reihenfolge
+    // der Bewertung. noetig, weil 'sgm' (Signer-Bitfeld je Ledger) ein Bit auf ein Mitglied
+    // dieser Liste bezieht; ohne die Liste waere das Bitfeld eine Zahl ohne Zuordnung.
+    memberSets: [],
     // Marker, nicht Zaehler: dieser Tag fuehrt die Signatur-Ebene. Ein Tag ohne diesen Marker
     // (Altbestand) wurde nie auf Anomalien geprueft - das ist etwas anderes als 'geprueft und
     // keine gefunden'. Die Risikuebene braucht die Unterscheidung fuer ihre Vergleichsgruppe.
@@ -272,6 +276,26 @@ function recordResult(r, detailNote) {
     d.incidentLedgers += 1;
     if (d.ledgerStats.length >= LEDGER_STATS_CAP) { d.ledgerStats.shift(); d.ledgerStatsTruncated = true; }
     const f = r.forensics ?? {};
+    // Signer-Beleg als Bitfeld (2026-10-17): ein Bit je Mitglied der Liste, gegen die dieser
+    // Ledger bewertet wurde. Die Liste selbst liegt einmal pro Tag in 'memberSets' (dedupliziert),
+    // das Bitfeld pro Ledger. Ein Master-Key je Mitglied waere 55 Zeichen mal 35 Mitglieder je
+    // Ledger - ueber 400 Aufbewahrungstage untragbar. Das Bitfeld ist dieselbe Aussage in wenigen
+    // Bytes und laesst sich gegen die gespeicherte Liste exakt zuruecklesen.
+    const memberOrder = Array.isArray(f.membersList) ? f.membersList : [];
+    const signerList = Array.isArray(f.signerMasters) ? f.signerMasters : null;
+    let signerSnapshot = null, signerMask = null, signerKeys = null;
+    if (signerList !== null && memberOrder.length > 0 && memberOrder.length <= 50) {
+      const same = (s) => Array.isArray(s.m) && s.m.length === memberOrder.length
+        && s.m.every((x, i) => x === memberOrder[i]);
+      let si = d.memberSets.findIndex(same);
+      if (si < 0) { d.memberSets.push({ m: [...memberOrder] }); si = d.memberSets.length - 1; }
+      const seenSigners = new Set(signerList);
+      let mask = 0;
+      memberOrder.forEach((m, i) => { if (seenSigners.has(m)) mask += 2 ** i; });
+      signerSnapshot = si; signerMask = mask;
+    } else if (signerList !== null) {
+      signerKeys = [...signerList];
+    }
     d.ledgerStats.push({
       l: r.ledgerIndex, t: r.closeMs,
       v: f.votes ?? 0, need: f.needed ?? 0, top: f.topVotes ?? 0, mg: f.margin ?? 0,
@@ -327,6 +351,22 @@ function recordResult(r, detailNote) {
       // ah/rh: die Netzmehrheit und die Runner-Up-Linie dieses Ledgers. Zusammen mit dem Vote-Hash
       // der Incidents ergibt sich die Divergenz-Klasse jedes Vorfalls.
       ah: hexOrNull(f.acceptedHash), rh: hexOrNull(f.runnerHash),
+      // th: die von diesem Rekorder gesehene Stimmenmehrheit. Zusammen mit 'ah' (die Linie, die
+      // das Netz waehlte) ist damit jede Zeile gegen den Widerspruch 'th != ah' pruefbar; bisher
+      // war 'top' nur im Speicher und nach dem Schreiben unwiederbringlich.
+      th: hexOrNull(f.topHash),
+      // cc: dieser Widerspruch ist eingetreten. true heisst: die eigene Sicht dieses Ledgers ist
+      // mit dem Schliess-Beweis unvereinbar, und kein Knoten-Urteil dieser Zeile darf als
+      // Knoten-Befund gelesen werden - weder 'diese haben abgestimmt' noch 'jener hat gefehlt'.
+      cc: f.closureConflict === true,
+      // sgn/sgm/sgs/sg: wer auf diesem Ledger abgestimmt hat, als Beobachtung und nicht als
+      // Restmenge aus den Fehlenden. sgn = Zahl der gesehenen Signierer (muss gleich 'ms' sein),
+      // sgm = Bitfeld ueber 'sgs' (der gespeicherten Mitgliederliste), sg = Notsignal fuer
+      // Mitgliederlisten ueber 50, wo das Bitfeld nicht mehr exakt darstellbar ist.
+      sgn: Number.isFinite(f.signerMasters?.length) ? f.signerMasters.length : null,
+      sgm: Number.isFinite(signerMask) ? signerMask : null,
+      sgs: Number.isFinite(signerSnapshot) ? signerSnapshot : null,
+      sg: signerKeys,
       // am/unl: die Feature-Fakten DIESSES Ledgers, aus dem Transaktions-Strom; falls dort nichts
       // ankam, die nachträglich abgerufenen Amendment-IDs der Detail-Abfrage.
       am: feats && feats.amendments.size ? [...feats.amendments].map((x) => x.toUpperCase())
