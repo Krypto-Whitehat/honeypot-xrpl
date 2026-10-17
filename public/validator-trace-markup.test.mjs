@@ -265,7 +265,7 @@ test('Kontrastfarben: Streifen und Marker behalten ihre Flaeche, nicht nur die P
  * und ihre Silhouette war 30,88 px breit gegen 15,58 px hoch. Das Profil las sich als schraeger
  * Kamm, nicht als Saeulenfeld. Die Achse ist jetzt logarithmisch, und die Kappe ist an ein
  * festes Verhaeltnis zum kurzesten Koerper gebunden (CAP_RATIO). */
-const { axisScale, axisUnit, axisTicks, CAP_RATIO, DEPTH_SKEW_K } = await import('./validator-trace.mjs');
+const { axisScale, axisUnit, axisTicks, AXIS_MIN_PEAK, CAP_RATIO, DEPTH_SKEW_K } = await import('./validator-trace.mjs');
 assert.ok(Math.abs(DEPTH_SKEW_K - DZ_K) < 1e-5,
   'JS DEPTH_SKEW_K ' + DEPTH_SKEW_K + ' gegen CSS tan(--skew) ' + DZ_K.toFixed(6));
 /* Die Achsen-Grenze fuer ein Achsenmaximum: der kurzeste moegliche Koerper, umgerechnet in die
@@ -996,7 +996,7 @@ test('Kritikalitaets-Zelle: Fremdquelle, Gegenpruefung und Kohorten-Namen sind b
   assert.match(src, /vt\.cq\.closureSource/, 'Quelle des nachgetragenen Hashes hat keine Beschriftung');
   assert.match(src, /c\.verifiedBy/, 'die zweite Autoritaet wird nicht ausgewertet');
   assert.match(src, /vt\.cq\.closureVerified/, 'Gegenpruefung hat keine Beschriftung');
-  assert.match(src, /peerChips\(others, r\.affectedTruth, r\.affectedNames\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht oder ohne Gegenurteil');
+  assert.match(src, /peerChips\(allM, allT, allN\)/, 'die Betroffenheits-Zeile nennt die Knoten nicht oder ohne Gegenurteil');
   assert.match(src, /typeof n\.name === "string" && n\.name \? n\.name : null/, 'der Name aus der Netz-Auskunft wird nicht ausgewertet');
   assert.match(src, /e\.name \?\? nameOf\(m\)/, 'ohne Netz-Name faellt der Chip nicht auf die geladene dUNL-Liste zurueck');
   // Ein Name ohne Gegenurteil ist eine Beschuldigung. Die Lib liefert je Knoten das Urteil,
@@ -1478,4 +1478,58 @@ test("Profilachse: die Klemmung auf die Aufnahme ist ausgewiesen, nicht stillsch
   assert.match(src, /window: spanLabel\(profile\.windowFrom\), axis: spanLabel\(from\)/,
     "Fensterbeginn und Achsenbeginn stehen nicht beide als Zeit da");
   assert.match(src, /vt-clamp-note/, "die Klemmung wird nicht unter dem Profil gerendert");
+});
+
+/* --- Achsen-Untergrenze -----------------------------------------------------
+ * Gemessen 2026-10-17 live im ausgelieferten Overlay eines 24-h-Fensters mit einem Vorfall je
+ * Intervall: peak 1, Gitterlinien nur "0" und "1", jede Saeule exakt auf Plot-Hoehe. Die Achse
+ * hatte genau ein Intervall - auf dieser Skala ist nichts zu vergleichen, und das Profil war ein
+ * Kamm identischer Monolithen. AXIS_MIN_PEAK gibt der Skala vier Intervalle, ohne eine Zahl zu
+ * erfinden: die wahren Zahlen stehen weiterhin in Gitterlinie, Wertemarke, Readout und aria-label.
+ */
+test('Achse: kleine Maxima bekommen eine Skala, die vergleichen kann', () => {
+  assert.equal(AXIS_MIN_PEAK, 4, 'AXIS_MIN_PEAK ist ' + AXIS_MIN_PEAK);
+  for (const max of [0, 1, 2, 3]) {
+    const { peak, step, ticks } = axisScale(max);
+    assert.ok(peak >= AXIS_MIN_PEAK, 'max ' + max + ': peak ' + peak + ' unter der Untergrenze');
+    assert.ok(peak >= max, 'max ' + max + ': peak ' + peak + ' unter dem groessten Intervall');
+    assert.equal(ticks[0], 0, 'max ' + max + ': keine Null-Linie');
+    assert.equal(ticks[ticks.length - 1], peak, 'max ' + max + ': die Spitze fehlt');
+    assert.ok(ticks.length - 1 >= 4, 'max ' + max + ': nur ' + (ticks.length - 1)
+      + ' Gitterintervalle - die Skala kann nichts vergleichen');
+    assert.ok(ticks.length - 1 <= 5, 'max ' + max + ': ' + (ticks.length - 1) + ' Intervalle ueber der Grenze');
+    assert.equal(peak % step, 0, 'peak ' + peak + ' ist kein Vielfaches von step ' + step);
+    const top = axisUnit(Math.max(1, max), peak);
+    assert.ok(top < peak, 'max ' + max + ': hoechstes Intervall ' + top.toFixed(4) + ' von '
+      + peak + ' - die Saeule fuellt die Achse');
+    for (const plotH of PLOT_HS) {
+      const body = bodyAt(Math.max(1, max), peak, plotH);
+      assert.ok(body < plotH, 'max ' + max + ' bei Plot ' + plotH + ' px: Saeule '
+        + body.toFixed(2) + ' px auf voller Hoehe');
+      assert.ok(capAt(peak, plotH) <= body * CAP_RATIO + 1e-9, 'max ' + max + ' bei Plot '
+        + plotH + ' px: Kappe ueber einem Drittel des Korpers');
+    }
+  }
+  /* Ab einem groessten Intervall von 5 ist peak wieder genau die naechste Achsenspitze der
+     Daten: die Untergrenze darf eine volle Achse nicht strecken. */
+  for (const max of [5, 6, 11, 15, 25, 129, 1250, 4502, 40000]) {
+    const { peak, step } = axisScale(max);
+    assert.ok(peak >= max && peak < max + step, 'max ' + max + ': peak ' + peak + ' / step '
+      + step + ' ist nicht die naechste Spitze der Daten');
+  }
+});
+
+test('Betroffenheits-Zeile: gleiche und andere Abweichung werden getrennt benannt', () => {
+  assert.match(src, /const affectedRow = \(r\) => \{/, 'die Betroffenheits-Zeile fehlt');
+  assert.match(src, /const allM = \[\], allT = \[\], allN = \[\]/,
+    'die benannten Knoten werden nicht in indexgleichen Spuren gefuehrt');
+  assert.match(src, /if \(types\[i\] === r\.type\)/, 'die Teilung nach demselben Vorfallstyp fehlt');
+  assert.match(src, /group\("vt\.peersLineSame", sameM, sameT, sameN\)/,
+    'Knoten mit demselben Vorfall werden nicht beim Namen genannt');
+  assert.match(src, /group\("vt\.peersLineOther", restM, restT, restN\)/,
+    'Knoten mit anderem Vorfall werden nicht beim Namen genannt');
+  assert.match(src, /peerChips\(masters, truths, names\)/,
+    'Name und Gegenurteil verlassen die indexgleiche Spur zum Master-Key');
+  assert.match(src, /: peerChips\(allM, allT, allN\);/,
+    'ohne Typ je Knoten wird eine Gruppierung erfunden, die die Daten nicht hergeben');
 });

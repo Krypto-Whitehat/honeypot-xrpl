@@ -91,8 +91,15 @@ export function tagLabel(h, tag) {
 }
 
 // Achsenmaß: peak ist ein Vielfaches von step, und es entstehen höchstens 5 Gitterintervalle.
+// Achsen-Untergrenze: eine Achse mit weniger als vier Intervallen kann keinen Vergleich zeigen.
+// Bei peak 1 steht jede Saeule auf voller Plot-Hoehe, es gibt genau eine Gitterlinie ueber der
+// Null, und das Profil wird ein Kamm identischer Monolithen - der nachgewiesene schraege
+// Eindruck. peak ist dann die Spitze der SKALA, nicht die groesste gemessene Zahl; die wahren
+// Zahlen stehen weiterhin in Gitterlinie, Wertemarke, Readout und aria-label. Ab einem
+// groessten Intervall von 5 ist peak wieder genau die Spitze der Daten.
+export const AXIS_MIN_PEAK = 4;
 export function axisScale(max) {
-  const m = Math.max(1, max);
+  const m = Math.max(AXIS_MIN_PEAK, Number(max) || 0);
   for (const s of [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000]) {
     const peak = Math.ceil(m / s) * s;
     if (peak / s <= 5) return { peak, step: s, ticks: axisTicks(peak) };
@@ -1048,9 +1055,37 @@ function attributionBlock(a) {
     const affectedRow = (r) => {
       if (!Number.isFinite(r.affectedCount)) return "";
       const others = Array.isArray(r.affectedMasters) ? r.affectedMasters : [];
-      const body = others.length
-        ? peerChips(others, r.affectedTruth, r.affectedNames)
-        : '<span class="vt-peer vt-peer-none">' + h.esc(h.t("vt.cq.affectedSolo")) + "</span>";
+      const types = Array.isArray(r.affectedTypes) ? r.affectedTypes : [];
+      const truthIn = Array.isArray(r.affectedTruth) ? r.affectedTruth : [];
+      const nameIn = Array.isArray(r.affectedNames) ? r.affectedNames : [];
+      // Name, Gegenurteil und Vorfallstyp haengen an demselben Master-Key, nicht an einer
+      // Position: die Darstellung schneidet die Knoten in zwei Gruppen, und ein Schnitt ueber
+      // Positionen gaebe einem Knoten den Namen und das Urteil eines anderen.
+      const allM = [], allT = [], allN = [];
+      const sameM = [], sameT = [], sameN = [];
+      const restM = [], restT = [], restN = [];
+      // Ohne Typ je Knoten ist "19 Knoten betroffen" eine Zahl ueber unbekannten Vorfaellen.
+      // Erst die Teilung zeigt, wie viele auf diesem Ledger dasselbe hatten - die Spur auf
+      // gemeinsame Infrastruktur, denselben Anbieter oder denselben Fehler.
+      for (let i = 0; i < others.length; i++) {
+        const master = others[i];
+        const truth = truthIn[i] ?? null;
+        const name = nameIn[i] ?? null;
+        allM.push(master); allT.push(truth); allN.push(name);
+        if (types[i] === r.type) { sameM.push(master); sameT.push(truth); sameN.push(name); }
+        else { restM.push(master); restT.push(truth); restN.push(name); }
+      }
+      const group = (labelKey, masters, truths, names) => '<span class="vt-peer-group"><small>'
+        + h.esc(h.t(labelKey, { n: num(masters.length) })) + "</small> "
+        + peerChips(masters, truths, names) + "</span>";
+      const body = !allM.length
+        ? '<span class="vt-peer vt-peer-none">' + h.esc(h.t("vt.cq.affectedSolo")) + "</span>"
+        : sameM.length && restM.length
+          ? group("vt.peersLineSame", sameM, sameT, sameN)
+            + group("vt.peersLineOther", restM, restT, restN)
+          : sameM.length
+            ? group("vt.peersLineSame", sameM, sameT, sameN)
+            : peerChips(allM, allT, allN);
       return '<tr class="vt-cq-affected"><td colspan="7">'
         + '<span class="vt-cq-affected-label">'
         + h.esc(h.t("vt.cq.affected", { n: num(r.affectedCount), others: num(others.length) }))
